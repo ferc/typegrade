@@ -1,6 +1,6 @@
 {
   "name": "tsguard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript type-safety and precision analyzer for the AI agent era",
   "type": "module",
   "bin": {
@@ -10,22 +10,30 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "lint": "oxlint -c .oxlintrc.json --tsconfig tsconfig.json --vitest-plugin src/ test/",
+    "lint:fix": "oxlint -c .oxlintrc.json --tsconfig tsconfig.json --vitest-plugin --fix src/ test/",
+    "format": "oxfmt --write src/ test/",
+    "format:check": "oxfmt --check src/ test/"
   },
   "dependencies": {
-    "commander": "^13.0.0",
-    "ts-morph": "^25.0.0",
-    "picocolors": "^1.1.0"
+    "commander": "^14.0.3",
+    "picocolors": "^1.1.1",
+    "ts-morph": "^27.0.2"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "tsup": "^8.0.0",
-    "vitest": "^3.0.0"
+    "oxfmt": "^0.36.0",
+    "oxlint": "^1.51.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=18"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

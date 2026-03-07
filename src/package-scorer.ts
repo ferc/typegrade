@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -6,55 +6,47 @@ import { analyzeProject } from "./analyzer.js";
 import type { AnalysisResult } from "./types.js";
 
 export function scorePackage(nameOrPath: string): AnalysisResult {
-  // Local path — analyze directly
-  if (
-    nameOrPath.startsWith(".") ||
-    nameOrPath.startsWith("/") ||
-    existsSync(nameOrPath)
-  ) {
-    return analyzeProject(resolve(nameOrPath));
+  // Local path — analyze directly, including .d.ts files
+  if (nameOrPath.startsWith(".") || nameOrPath.startsWith("/") || existsSync(nameOrPath)) {
+    return analyzeProject(resolve(nameOrPath), {
+      mode: "package",
+      sourceFilesOptions: { includeDts: true, includeNodeModules: true },
+    });
   }
 
-  // npm package — install to temp dir
+  // Npm package — install to temp dir
   const tmpDir = join(tmpdir(), `tsguard-${Date.now()}`);
 
   try {
     mkdirSync(tmpDir, { recursive: true });
 
-    // Write minimal package.json
     writeFileSync(
       join(tmpDir, "package.json"),
       JSON.stringify({
-        name: "tsguard-tmp",
-        version: "0.0.0",
         dependencies: {
           [nameOrPath]: "latest",
         },
+        name: "tsguard-tmp",
+        version: "0.0.0",
       }),
     );
 
-    // Install
     execSync("npm install --ignore-scripts --no-audit --no-fund", {
       cwd: tmpDir,
       stdio: "pipe",
-      timeout: 60000,
+      timeout: 60_000,
     });
 
-    // Determine which directories contain type declarations
     const includePaths: string[] = [
       `node_modules/${nameOrPath}/**/*.d.ts`,
       `node_modules/${nameOrPath}/**/*.d.mts`,
       `node_modules/${nameOrPath}/**/*.d.cts`,
     ];
 
-    // Check if @types package is needed
     const pkgDir = join(tmpDir, "node_modules", nameOrPath);
     if (existsSync(pkgDir)) {
-      const pkgJson = JSON.parse(
-        readFileSync(join(pkgDir, "package.json"), "utf-8"),
-      );
+      const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
       if (!pkgJson.types && !pkgJson.typings) {
-        // Try installing @types package
         const typesName = nameOrPath.startsWith("@")
           ? `@types/${nameOrPath.slice(1).replace("/", "__")}`
           : `@types/${nameOrPath}`;
@@ -63,9 +55,8 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
           execSync(`npm install ${typesName} --ignore-scripts --no-audit --no-fund`, {
             cwd: tmpDir,
             stdio: "pipe",
-            timeout: 30000,
+            timeout: 30_000,
           });
-          // Include @types declarations
           includePaths.push(`node_modules/${typesName}/**/*.d.ts`);
         } catch {
           // No @types package available
@@ -73,28 +64,29 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
       }
     }
 
-    // Write strict tsconfig.json (after install so we know which paths to include)
     writeFileSync(
       join(tmpDir, "tsconfig.json"),
       JSON.stringify({
         compilerOptions: {
-          strict: true,
-          target: "ES2022",
           module: "ESNext",
           moduleResolution: "bundler",
           skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
         },
         include: includePaths,
       }),
     );
 
-    return analyzeProject(tmpDir, undefined, { includeDts: true, includeNodeModules: true });
+    return analyzeProject(tmpDir, {
+      mode: "package",
+      sourceFilesOptions: { includeDts: true, includeNodeModules: true },
+    });
   } finally {
-    // Cleanup
     try {
-      rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(tmpDir, { force: true, recursive: true });
     } catch {
-      // ignore cleanup errors
+      // Ignore cleanup errors
     }
   }
 }

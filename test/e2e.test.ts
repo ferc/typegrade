@@ -1,69 +1,182 @@
-import { describe, it, expect } from "vitest";
+
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdirSync, rmSync } from "node:fs";
 import { analyzeProject } from "../src/analyzer.js";
 
 const fixturesDir = resolve(import.meta.dirname, "fixtures");
 
+function getComposite(result: ReturnType<typeof analyzeProject>, key: string) {
+  return result.composites.find((c) => c.key === key);
+}
+
+function getDimension(result: ReturnType<typeof analyzeProject>, key: string) {
+  return result.dimensions.find((d) => d.key === key);
+}
+
 describe("e2e: analyzeProject", () => {
-  it("scores high-precision fixture >= 85 (A)", () => {
+  it("scores high-precision fixture with high consumer API", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
-    expect(result.overallScore).toBeGreaterThanOrEqual(70);
-    expect(["A+", "A", "B"]).toContain(result.grade);
+    const ca = getComposite(result, "consumerApi");
+    expect(ca).toBeDefined();
+    expect(ca!.score).toBeGreaterThanOrEqual(60);
     expect(result.filesAnalyzed).toBeGreaterThan(0);
-    expect(result.dimensions).toHaveLength(6);
-    expect(result.aiReadiness).not.toBe("POOR");
+    expect(result.mode).toBe("source");
   });
 
-  it("scores low-precision fixture < 40 (D or F)", () => {
+  it("high-precision fixture has no api-safety errors", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const safety = getDimension(result, "apiSafety");
+    expect(safety).toBeDefined();
+    const errors = safety!.issues.filter((i) => i.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("scores low-precision fixture with low consumer API", () => {
     const result = analyzeProject(resolve(fixturesDir, "low-precision"));
-    expect(result.overallScore).toBeLessThan(50);
-    expect(["D", "F"]).toContain(result.grade);
+    const ca = getComposite(result, "consumerApi");
+    expect(ca!.score).toBeLessThan(50);
   });
 
-  it("scores medium-precision fixture in C-B range", () => {
+  it("scores medium-precision fixture in mid range", () => {
     const result = analyzeProject(resolve(fixturesDir, "medium-precision"));
-    expect(result.overallScore).toBeGreaterThanOrEqual(40);
-    expect(result.overallScore).toBeLessThanOrEqual(80);
+    const ca = getComposite(result, "consumerApi");
+    expect(ca!.score).toBeGreaterThanOrEqual(40);
+    expect(ca!.score).toBeLessThanOrEqual(85);
   });
 
-  it("scores tanstack-style fixture >= 55 (C+)", () => {
+  it("scores tanstack-style fixture with decent expressiveness", () => {
     const result = analyzeProject(resolve(fixturesDir, "tanstack-style"));
-    expect(result.overallScore).toBeGreaterThanOrEqual(50);
+    const expr = getDimension(result, "apiExpressiveness");
+    expect(expr).toBeDefined();
+    expect(expr!.score).toBeGreaterThanOrEqual(20);
   });
 
-  it("unsound fixture has low unsoundness score", () => {
+  it("unsound fixture has low soundness score", () => {
     const result = analyzeProject(resolve(fixturesDir, "unsound"));
-    const unsoundDim = result.dimensions.find((d) => d.name === "Unsoundness");
-    expect(unsoundDim).toBeDefined();
-    expect(unsoundDim!.score).toBeLessThan(80);
+    const soundness = getDimension(result, "implementationSoundness");
+    expect(soundness).toBeDefined();
+    expect(soundness!.score).toBeLessThan(30);
+  });
+
+  it("unsound fixture does not double-count nested assertions", () => {
+    const result = analyzeProject(resolve(fixturesDir, "unsound"));
+    const soundness = getDimension(result, "implementationSoundness")!;
+    const doubleIssues = soundness.issues.filter((i) => i.message.includes("double"));
+    expect(doubleIssues).toHaveLength(2);
+    const innerUnknownWarnings = soundness.issues.filter(
+      (i) => i.severity === "warning" && i.message.includes("as unknown"),
+    );
+    expect(innerUnknownWarnings).toHaveLength(0);
+  });
+
+  it("returns 0/N/A when no source files found", () => {
+    const emptyDir = resolve(tmpdir(), `tsguard-empty-${Date.now()}`);
+    mkdirSync(emptyDir, { recursive: true });
+    try {
+      const result = analyzeProject(emptyDir);
+      expect(result.filesAnalyzed).toBe(0);
+      const ar = getComposite(result, "agentReadiness");
+      expect(ar!.score).toBe(0);
+      expect(ar!.grade).toBe("N/A");
+      expect(result.dimensions).toHaveLength(0);
+    } finally {
+      rmSync(emptyDir, { force: true, recursive: true });
+    }
   });
 
   it("returns valid JSON structure", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
-    // Verify all required fields exist
+    expect(result).toHaveProperty("mode");
+    expect(result).toHaveProperty("scoreProfile");
     expect(result).toHaveProperty("projectName");
     expect(result).toHaveProperty("filesAnalyzed");
     expect(result).toHaveProperty("timeMs");
-    expect(result).toHaveProperty("overallScore");
-    expect(result).toHaveProperty("grade");
+    expect(result).toHaveProperty("composites");
     expect(result).toHaveProperty("dimensions");
     expect(result).toHaveProperty("topIssues");
-    expect(result).toHaveProperty("aiReadiness");
-    expect(typeof result.overallScore).toBe("number");
-    expect(result.overallScore).toBeGreaterThanOrEqual(0);
-    expect(result.overallScore).toBeLessThanOrEqual(100);
+    expect(result).toHaveProperty("caveats");
+    expect(result.composites.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("all dimensions have name, score, weight", () => {
+  it("all enabled dimensions have key, label, score", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
     for (const dim of result.dimensions) {
-      expect(dim).toHaveProperty("name");
-      expect(dim).toHaveProperty("score");
-      expect(dim).toHaveProperty("weight");
-      expect(dim.score).toBeGreaterThanOrEqual(0);
-      expect(dim.score).toBeLessThanOrEqual(100);
-      expect(dim.weight).toBeGreaterThan(0);
-      expect(dim.weight).toBeLessThanOrEqual(1);
+      expect(dim).toHaveProperty("key");
+      expect(dim).toHaveProperty("label");
+      if (dim.enabled) {
+        expect(dim.score).toBeGreaterThanOrEqual(0);
+        expect(dim.score).toBeLessThanOrEqual(100);
+      }
     }
+  });
+
+  it("source mode has 8 dimensions", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    expect(result.dimensions).toHaveLength(8);
+    expect(result.mode).toBe("source");
+  });
+
+  it("compound-any fixture has low api-safety", () => {
+    const result = analyzeProject(resolve(fixturesDir, "compound-any"));
+    const safety = getDimension(result, "apiSafety");
+    expect(safety).toBeDefined();
+    expect(safety!.score).toBeLessThan(50);
+    expect(safety!.issues.filter((i) => i.severity === "error").length).toBeGreaterThan(0);
+  });
+
+  it("computed-generics fixture scores high on expressiveness", () => {
+    const result = analyzeProject(resolve(fixturesDir, "computed-generics"));
+    const expr = getDimension(result, "apiExpressiveness");
+    expect(expr).toBeDefined();
+    expect(expr!.score).toBeGreaterThanOrEqual(30);
+  });
+
+  it("correlated-generics fixture has generic correlation", () => {
+    const result = analyzeProject(resolve(fixturesDir, "correlated-generics"));
+    const expr = getDimension(result, "apiExpressiveness");
+    expect(expr).toBeDefined();
+    expect(expr!.score).toBeGreaterThanOrEqual(20);
+  });
+
+  it("no-boundaries fixture disables boundary discipline", () => {
+    const result = analyzeProject(resolve(fixturesDir, "no-boundaries"));
+    const boundary = getDimension(result, "boundaryDiscipline");
+    expect(boundary).toBeDefined();
+    expect(boundary!.enabled).toBeFalsy();
+    expect(boundary!.score).toBeNull();
+  });
+
+  it("declaration-good fixture scores high in package mode", () => {
+    const result = analyzeProject(resolve(fixturesDir, "declaration-good"), {
+      mode: "package",
+      sourceFilesOptions: { includeDts: true },
+    });
+    expect(result.mode).toBe("package");
+    const ca = getComposite(result, "consumerApi");
+    expect(ca!.score).toBeGreaterThanOrEqual(50);
+    // Implementation dimensions should be disabled
+    const impl = getDimension(result, "implementationSoundness");
+    expect(impl!.enabled).toBeFalsy();
+  });
+
+  it("declaration-loose fixture scores low in package mode", () => {
+    const result = analyzeProject(resolve(fixturesDir, "declaration-loose"), {
+      mode: "package",
+      sourceFilesOptions: { includeDts: true },
+    });
+    expect(result.mode).toBe("package");
+    const ca = getComposite(result, "consumerApi");
+    expect(ca!.score).toBeLessThan(50);
+    const safety = getDimension(result, "apiSafety");
+    expect(safety!.score).toBeLessThan(50);
+  });
+
+  it("high-precision beats low-precision on consumer API", () => {
+    const high = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const low = analyzeProject(resolve(fixturesDir, "low-precision"));
+    const highCa = getComposite(high, "consumerApi")!;
+    const lowCa = getComposite(low, "consumerApi")!;
+    expect(highCa.score!).toBeGreaterThan(lowCa.score!);
   });
 });

@@ -1,6 +1,6 @@
 import { Project } from "ts-morph";
 import { existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { join, resolve } from "node:path";
 
 export function loadProject(projectPath: string): Project {
   const absolutePath = resolve(projectPath);
@@ -8,8 +8,8 @@ export function loadProject(projectPath: string): Project {
 
   if (existsSync(tsconfigPath)) {
     return new Project({
-      tsConfigFilePath: tsconfigPath,
       skipAddingFilesFromTsConfig: false,
+      tsConfigFilePath: tsconfigPath,
     });
   }
 
@@ -39,9 +39,9 @@ export function getSourceFiles(project: Project, options?: GetSourceFilesOptions
 
   return project.getSourceFiles().filter((sf) => {
     const path = sf.getFilePath();
-    if (!includeNodeModules && path.includes("node_modules")) return false;
-    if (!includeDts && /\.d\.[mc]?ts$/.test(path)) return false;
-    if (path.endsWith(".test.ts") || path.endsWith(".spec.ts")) return false;
+    if (!includeNodeModules && path.includes("node_modules")) {return false;}
+    if (!includeDts && /\.d\.[mc]?ts$/.test(path)) {return false;}
+    if (path.endsWith(".test.ts") || path.endsWith(".spec.ts")) {return false;}
     return true;
   });
 }

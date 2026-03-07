@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+
 import { Project } from "ts-morph";
-import { analyzeStrictConfig } from "../src/analyzers/strict-config.js";
+import { analyzeConfigDiscipline } from "../src/analyzers/config-discipline.js";
 
 function createProjectWithOptions(options: Record<string, unknown>) {
   return new Project({
@@ -9,39 +9,39 @@ function createProjectWithOptions(options: Record<string, unknown>) {
   });
 }
 
-describe("analyzeStrictConfig", () => {
+describe(analyzeConfigDiscipline, () => {
   it("scores high for strict: true + extra flags", () => {
     const project = createProjectWithOptions({
-      strict: true,
-      noUncheckedIndexedAccess: true,
       exactOptionalPropertyTypes: true,
+      isolatedModules: true,
+      noFallthroughCasesInSwitch: true,
       noImplicitOverride: true,
       noImplicitReturns: true,
-      noFallthroughCasesInSwitch: true,
-      isolatedModules: true,
+      noUncheckedIndexedAccess: true,
+      strict: true,
       verbatimModuleSyntax: true,
     });
-    const result = analyzeStrictConfig(project);
+    const result = analyzeConfigDiscipline(project.getSourceFiles(), project);
     expect(result.score).toBeGreaterThanOrEqual(80);
   });
 
   it("scores low for empty config", () => {
     const project = createProjectWithOptions({});
-    const result = analyzeStrictConfig(project);
+    const result = analyzeConfigDiscipline(project.getSourceFiles(), project);
     expect(result.score).toBeLessThan(20);
   });
 
   it("scores medium for strict: true only", () => {
     const project = createProjectWithOptions({ strict: true });
-    const result = analyzeStrictConfig(project);
+    const result = analyzeConfigDiscipline(project.getSourceFiles(), project);
     expect(result.score).toBeGreaterThanOrEqual(10);
     expect(result.score).toBeLessThanOrEqual(60);
   });
 
-  it("returns dimension name and weight", () => {
+  it("returns correct dimension key and label", () => {
     const project = createProjectWithOptions({ strict: true });
-    const result = analyzeStrictConfig(project);
-    expect(result.name).toBe("Strict Config");
-    expect(result.weight).toBe(0.15);
+    const result = analyzeConfigDiscipline(project.getSourceFiles(), project);
+    expect(result.key).toBe("configDiscipline");
+    expect(result.label).toBe("Config Discipline");
   });
 });

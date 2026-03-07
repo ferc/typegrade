@@ -10,7 +10,7 @@ export enum Role {
 }
 
 export function getUser(id: number): User {
-  return { name: "", age: 0 };
+  return { age: 0, name: "" };
 }
 
 export function setRole(role: Role): void {}

@@ -1,32 +1,88 @@
-import type { DimensionResult } from "./types.js";
+import type { AnalysisMode, CompositeKey, CompositeScore, DimensionResult, Grade } from "./types.js";
+import { AGENT_READINESS_WEIGHTS } from "./constants.js";
 
-export function computeOverallScore(dimensions: DimensionResult[]): number {
-  let totalWeight = 0;
-  let weightedSum = 0;
-
-  for (const dim of dimensions) {
-    weightedSum += dim.score * dim.weight;
-    totalWeight += dim.weight;
-  }
-
-  if (totalWeight === 0) return 0;
-  return Math.round(weightedSum / totalWeight);
-}
-
-export function computeGrade(score: number): string {
-  if (score >= 95) return "A+";
-  if (score >= 85) return "A";
-  if (score >= 70) return "B";
-  if (score >= 55) return "C";
-  if (score >= 40) return "D";
+export function computeGrade(score: number | null): Grade {
+  if (score === null) {return "N/A";}
+  if (score >= 95) {return "A+";}
+  if (score >= 85) {return "A";}
+  if (score >= 70) {return "B";}
+  if (score >= 55) {return "C";}
+  if (score >= 40) {return "D";}
   return "F";
 }
 
-export function computeAiReadiness(
-  score: number,
-): "HIGH" | "MODERATE" | "LOW" | "POOR" {
-  if (score >= 80) return "HIGH";
-  if (score >= 60) return "MODERATE";
-  if (score >= 40) return "LOW";
-  return "POOR";
+export function computeComposites(
+  dimensions: DimensionResult[],
+  mode: AnalysisMode,
+): CompositeScore[] {
+  const consumerApi = computeComposite("consumerApi", dimensions, mode);
+  const implementationQuality = computeComposite("implementationQuality", dimensions, mode);
+  const agentReadiness = computeAgentReadiness(consumerApi, implementationQuality, mode);
+
+  return [agentReadiness, consumerApi, implementationQuality];
+}
+
+function computeComposite(
+  key: CompositeKey,
+  dimensions: DimensionResult[],
+  mode: AnalysisMode,
+): CompositeScore {
+  const contributing = dimensions.filter(
+    (d) => d.enabled && d.score !== null && d.weights[key] !== undefined && d.weights[key]! > 0,
+  );
+
+  if (contributing.length === 0) {
+    const isSourceOnly = key === "implementationQuality" && mode === "package";
+    return {
+      grade: isSourceOnly ? "N/A" : "F",
+      key,
+      rationale: isSourceOnly
+        ? ["Not applicable for published declarations"]
+        : ["No contributing dimensions"],
+      score: isSourceOnly ? null : 0,
+    };
+  }
+
+  let totalWeight = 0;
+  let weightedSum = 0;
+  const rationale: string[] = [];
+
+  for (const dim of contributing) {
+    const w = dim.weights[key]!;
+    totalWeight += w;
+    weightedSum += dim.score! * w;
+    rationale.push(`${dim.label}: ${Math.round(dim.score!)} (w=${w})`);
+  }
+
+  const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+  return { grade: computeGrade(score), key, rationale, score };
+}
+
+function computeAgentReadiness(
+  consumerApi: CompositeScore,
+  implementationQuality: CompositeScore,
+  mode: AnalysisMode,
+): CompositeScore {
+  const rationale: string[] = [];
+
+  if (mode === "package") {
+    const {score} = consumerApi;
+    rationale.push(`Package mode: 100% Consumer API (${score ?? "n/a"})`);
+    return { grade: computeGrade(score), key: "agentReadiness", rationale, score };
+  }
+
+  if (consumerApi.score === null) {
+    return { grade: "N/A", key: "agentReadiness", rationale: ["No data"], score: null };
+  }
+
+  const implScore = implementationQuality.score ?? 0;
+  const sourceWeights = AGENT_READINESS_WEIGHTS.source;
+  const score = Math.round(
+    sourceWeights.consumerApi * consumerApi.score + sourceWeights.implementationQuality * implScore,
+  );
+  rationale.push(
+    `${sourceWeights.consumerApi * 100}% Consumer API (${consumerApi.score}) + ${sourceWeights.implementationQuality * 100}% Implementation (${implScore})`,
+  );
+
+  return { grade: computeGrade(score), key: "agentReadiness", rationale, score };
 }

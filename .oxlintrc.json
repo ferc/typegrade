@@ -1,0 +1,51 @@
+{
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error"
+  },
+  "rules": {
+    "no-magic-numbers": "off",
+    "id-length": "off",
+    "func-style": "off",
+    "no-ternary": "off",
+    "no-continue": "off",
+    "no-negated-condition": "off",
+    "no-inline-comments": "off",
+    "no-template-curly-in-string": "off",
+    "sort-imports": "off",
+    "sort-keys": "off",
+    "init-declarations": "off",
+    "max-lines-per-function": "off",
+    "max-params": "off",
+    "max-lines": "off",
+    "max-statements": "off",
+    "max-depth": "off",
+    "default-case": "off",
+    "prefer-template": "off",
+    "unicorn/no-null": "off",
+    "unicorn/no-array-for-each": "off",
+    "unicorn/no-array-reduce": "off",
+    "unicorn/switch-case-braces": "off",
+    "unicorn/prefer-spread": "off",
+    "unicorn/prefer-string-replace-all": "off",
+    "unicorn/no-immediate-mutation": "off",
+    "jest/max-expects": "off",
+    "jest/prefer-strict-equal": "off",
+    "jest/no-hooks": "off",
+    "jest/prefer-expect-assertions": "off",
+    "jest/require-hook": "off",
+    "jest/no-conditional-in-test": "off",
+    "jest/no-conditional-expect": "off",
+    "jest/valid-title": "off",
+    "typescript/consistent-type-definitions": "off",
+    "typescript/no-inferrable-types": "off"
+  },
+  "ignorePatterns": [
+    "dist/",
+    "node_modules/",
+    "test/fixtures/"
+  ]
+}

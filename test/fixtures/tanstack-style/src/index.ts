@@ -1,16 +1,12 @@
-export interface RouteConfig<
-  TPath extends string,
-  TParams extends Record<string, string>,
-> {
+export interface RouteConfig<TPath extends string, TParams extends Record<string, string>> {
   path: TPath;
   parse: (raw: string) => TParams;
 }
 
-export function createRoute<
-  TPath extends string,
-  TParams extends Record<string, string>,
->(config: RouteConfig<TPath, TParams>): { path: TPath; params: TParams } {
-  return { path: config.path, params: {} as TParams };
+export function createRoute<TPath extends string, TParams extends Record<string, string>>(
+  config: RouteConfig<TPath, TParams>,
+): { path: TPath; params: TParams } {
+  return { params: {} as TParams, path: config.path };
 }
 
 export type EventName = `on${Capitalize<string>}`;
@@ -25,14 +21,14 @@ export function createEmitter<
 >(): TypedEventEmitter<TEvents> {
   const handlers = new Map<string, Function[]>();
   return {
+    emit(event, data) {
+      const key = event as string;
+      for (const h of handlers.get(key) ?? []) h(data);
+    },
     on(event, handler) {
       const key = event as string;
       if (!handlers.has(key)) handlers.set(key, []);
       handlers.get(key)!.push(handler);
-    },
-    emit(event, data) {
-      const key = event as string;
-      for (const h of handlers.get(key) ?? []) h(data);
     },
   };
 }

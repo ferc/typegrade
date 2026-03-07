@@ -5,7 +5,7 @@ interface User {
 const x = JSON.parse("{}") as User;
 const y = x as unknown as number;
 const z = x!;
-// @ts-ignore
+// @ts-expect-error
 const broken = (undefined as any).foo;
 // @ts-expect-error — intentional
 const deliberate: number = "string" as any;
