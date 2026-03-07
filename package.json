@@ -1,0 +1,31 @@
+{
+  "name": "tsguard",
+  "version": "0.1.0",
+  "description": "TypeScript type-safety and precision analyzer for the AI agent era",
+  "type": "module",
+  "bin": {
+    "tsguard": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "ts-morph": "^25.0.0",
+    "picocolors": "^1.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsup": "^8.0.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}
