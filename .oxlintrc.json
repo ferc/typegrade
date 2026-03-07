@@ -8,44 +8,18 @@
   },
   "rules": {
     "no-magic-numbers": "off",
-    "id-length": "error",
     "func-style": "off",
     "no-ternary": "off",
     "no-continue": "off",
-    "no-negated-condition": "error",
-    "no-inline-comments": "error",
     "no-template-curly-in-string": "off",
-    "sort-imports": "error",
-    "sort-keys": "error",
-    "init-declarations": "error",
     "max-lines-per-function": "off",
-    "max-params": "error",
     "max-lines": "off",
     "max-statements": "off",
-    "max-depth": "error",
-    "default-case": "error",
-    "prefer-template": "error",
     "unicorn/no-null": "off",
-    "unicorn/no-array-for-each": "error",
-    "unicorn/no-array-reduce": "error",
-    "unicorn/switch-case-braces": "error",
-    "unicorn/prefer-spread": "error",
-    "unicorn/prefer-string-replace-all": "error",
-    "unicorn/no-immediate-mutation": "error",
     "jest/max-expects": "off",
-    "jest/prefer-strict-equal": "error",
-    "jest/no-hooks": "error",
-    "jest/prefer-expect-assertions": "error",
     "jest/require-hook": "off",
     "jest/no-conditional-in-test": "off",
-    "jest/no-conditional-expect": "error",
-    "jest/valid-title": "off",
-    "typescript/consistent-type-definitions": "error",
-    "typescript/no-inferrable-types": "error"
+    "jest/valid-title": "off"
   },
-  "ignorePatterns": [
-    "dist/",
-    "node_modules/",
-    "test/fixtures/"
-  ]
+  "ignorePatterns": ["dist/", "node_modules/", "test/fixtures/"]
 }
