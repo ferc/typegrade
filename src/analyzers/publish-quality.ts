@@ -1,10 +1,10 @@
-import { type Project, type SourceFile } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
-import { DIMENSION_CONFIGS } from "../constants.js";
-import { existsSync, readFileSync } from "node:fs";
+import { type Project, type SourceFile } from "ts-morph";
 import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { DIMENSION_CONFIGS } from "../constants.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "publishQuality")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "publishQuality")!;
 
 export function analyzePublishQuality(
   sourceFiles: SourceFile[],
@@ -42,7 +42,7 @@ export function analyzePublishQuality(
         });
       }
 
-      const allParamsTyped = fn.getParameters().every((p) => p.getTypeNode());
+      const allParamsTyped = fn.getParameters().every((param) => param.getTypeNode());
       if (allParamsTyped) {fnsWithFullyTypedParams++;}
 
       if (fn.getJsDocs().length > 0) {exportedWithJSDoc++;}
@@ -97,7 +97,7 @@ export function analyzePublishQuality(
   }
 
   // +15 for types field in package.json
-  const tsconfigPath = project.getCompilerOptions().configFilePath;
+  const tsconfigPath = project.getCompilerOptions()['configFilePath'];
   if (typeof tsconfigPath === "string") {
     const pkgPath = join(dirname(tsconfigPath), "package.json");
     if (existsSync(pkgPath)) {
@@ -136,12 +136,12 @@ export function analyzePublishQuality(
     key: CONFIG.key,
     label: CONFIG.label,
     metrics: {
-      totalExportedFns,
+      exportedWithJSDoc,
       fnsWithExplicitReturn,
       fnsWithFullyTypedParams,
-      exportedWithJSDoc,
-      totalExportedDecls,
       overloadCount,
+      totalExportedDecls,
+      totalExportedFns,
     },
     negatives,
     positives,

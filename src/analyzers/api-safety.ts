@@ -1,9 +1,9 @@
-import type { SourceFile } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
-import { analyzePrecision } from "../utils/type-utils.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { SourceFile } from "ts-morph";
+import { analyzePrecision } from "../utils/type-utils.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "apiSafety")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSafety")!;
 
 export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
   const issues: Issue[] = [];
@@ -137,7 +137,7 @@ export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
       issues: [],
       key: CONFIG.key,
       label: CONFIG.label,
-      metrics: { totalPositions: 0, anyPositions: 0, unknownPositions: 0 },
+      metrics: { anyPositions: 0, totalPositions: 0, unknownPositions: 0 },
       negatives: [],
       positives: ["No exported positions to check"],
       score: 100,
@@ -159,7 +159,7 @@ export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
     issues,
     key: CONFIG.key,
     label: CONFIG.label,
-    metrics: { totalPositions, anyPositions, unknownPositions, anyDensity, unknownDensity },
+    metrics: { anyDensity, anyPositions, totalPositions, unknownDensity, unknownPositions },
     negatives,
     positives,
     score,

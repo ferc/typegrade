@@ -1,9 +1,9 @@
-import type { SourceFile } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
-import { analyzePrecision } from "../utils/type-utils.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { SourceFile } from "ts-morph";
+import { analyzePrecision } from "../utils/type-utils.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "apiSpecificity")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSpecificity")!;
 
 interface WeightedSample {
   score: number;
@@ -125,9 +125,9 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
   // Weighted average
   let totalWeight = 0;
   let weightedSum = 0;
-  for (const s of samples) {
-    weightedSum += s.score * s.weight;
-    totalWeight += s.weight;
+  for (const sample of samples) {
+    weightedSum += sample.score * sample.weight;
+    totalWeight += sample.weight;
   }
   const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
 

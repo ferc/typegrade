@@ -1,8 +1,29 @@
-import { type SourceFile, Node } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
+import { Node, type ParameterDeclaration, type SourceFile, type TypeParameterDeclaration } from "ts-morph";
 import { DIMENSION_CONFIGS } from "../constants.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "apiExpressiveness")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiExpressiveness")!;
+
+function countGenericCorrelation(
+  typeParams: TypeParameterDeclaration[],
+  params: ParameterDeclaration[],
+  returnTypeNode: { getText(): string } | undefined,
+): number {
+  if (typeParams.length === 0 || !returnTypeNode) {return 0;}
+  let count = 0;
+  const paramNames = new Set(typeParams.map((tp) => tp.getName()));
+  const returnText = returnTypeNode.getText();
+  for (const name of paramNames) {
+    const usedInParams = params.some((param) => {
+      const typeNode = param.getTypeNode();
+      return typeNode && typeNode.getText().includes(name);
+    });
+    if (usedInParams && returnText.includes(name)) {
+      count++;
+    }
+  }
+  return count;
+}
 
 interface FeatureCounts {
   constrainedGenerics: number;
@@ -52,23 +73,11 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
       }
 
       // Generic correlation: same type param in params and return
-      if (typeParams.length > 0) {
-        const paramNames = new Set(typeParams.map((tp) => tp.getName()));
-        const returnTypeNode = fn.getReturnTypeNode();
-        if (returnTypeNode) {
-          const returnText = returnTypeNode.getText();
-          for (const name of paramNames) {
-            // Check if the type param name appears in parameter types AND return type
-            const usedInParams = fn.getParameters().some((p) => {
-              const typeNode = p.getTypeNode();
-              return typeNode && typeNode.getText().includes(name);
-            });
-            if (usedInParams && returnText.includes(name)) {
-              counts.genericCorrelation++;
-            }
-          }
-        }
-      }
+      counts.genericCorrelation += countGenericCorrelation(
+        typeParams,
+        fn.getParameters(),
+        fn.getReturnTypeNode(),
+      );
 
       // Overloads
       const overloads = fn.getOverloads();
@@ -89,23 +98,11 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
 
       // Check methods for generic correlation
       for (const method of iface.getMethods()) {
-        const methodTypeParams = method.getTypeParameters();
-        if (methodTypeParams.length > 0) {
-          const paramNames = new Set(methodTypeParams.map((tp) => tp.getName()));
-          const returnTypeNode = method.getReturnTypeNode();
-          if (returnTypeNode) {
-            const returnText = returnTypeNode.getText();
-            for (const name of paramNames) {
-              const usedInParams = method.getParameters().some((p) => {
-                const typeNode = p.getTypeNode();
-                return typeNode && typeNode.getText().includes(name);
-              });
-              if (usedInParams && returnText.includes(name)) {
-                counts.genericCorrelation++;
-              }
-            }
-          }
-        }
+        counts.genericCorrelation += countGenericCorrelation(
+          method.getTypeParameters(),
+          method.getParameters(),
+          method.getReturnTypeNode(),
+        );
       }
     }
 
@@ -195,7 +192,7 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
     issues,
     key: CONFIG.key,
     label: CONFIG.label,
-    metrics: { ...counts, featureScore, density },
+    metrics: { ...counts, density, featureScore },
     negatives,
     positives,
     score,
@@ -214,7 +211,7 @@ function walkTypeNode(node: Node, counts: FeatureCounts): void {
     // Discriminated union: union of type literals with a shared property
     if (Node.isUnionTypeNode(child)) {
       const memberNodes = child.getTypeNodes();
-      if (memberNodes.length >= 2 && memberNodes.every((m) => Node.isTypeLiteral(m))) {
+      if (memberNodes.length >= 2 && memberNodes.every((member) => Node.isTypeLiteral(member))) {
         counts.discriminatedUnions++;
       }
     }

@@ -28,7 +28,7 @@ function computeComposite(
   mode: AnalysisMode,
 ): CompositeScore {
   const contributing = dimensions.filter(
-    (d) => d.enabled && d.score !== null && d.weights[key] !== undefined && d.weights[key]! > 0,
+    (dim) => dim.enabled && dim.score !== null && dim.weights[key] !== undefined && dim.weights[key]! > 0,
   );
 
   if (contributing.length === 0) {
@@ -48,10 +48,10 @@ function computeComposite(
   const rationale: string[] = [];
 
   for (const dim of contributing) {
-    const w = dim.weights[key]!;
-    totalWeight += w;
-    weightedSum += dim.score! * w;
-    rationale.push(`${dim.label}: ${Math.round(dim.score!)} (w=${w})`);
+    const weight = dim.weights[key]!;
+    totalWeight += weight;
+    weightedSum += dim.score! * weight;
+    rationale.push(`${dim.label}: ${Math.round(dim.score!)} (w=${weight})`);
   }
 
   const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;

@@ -1,8 +1,8 @@
 
-import { Project } from "ts-morph";
 import { analyzePrecision, isDiscriminatedUnion } from "../src/utils/type-utils.js";
+import { Project } from "ts-morph";
 
-function getTypeFromCode(code: string, typeName: string = "T") {
+function getTypeFromCode(code: string, typeName = "T") {
   const project = new Project({
     compilerOptions: { module: 99, strict: true, target: 2 },
     useInMemoryFileSystem: true,
@@ -13,7 +13,7 @@ function getTypeFromCode(code: string, typeName: string = "T") {
   return alias.getType();
 }
 
-function getParamType(code: string, fnName: string, paramIndex: number = 0) {
+function getParamType(code: string, fnName: string, paramIndex = 0) {
   const project = new Project({
     compilerOptions: { module: 99, strict: true, target: 2 },
     useInMemoryFileSystem: true,

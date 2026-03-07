@@ -1,12 +1,12 @@
-import { Command } from "commander";
-import pc from "picocolors";
-import { analyzeProject } from "./analyzer.js";
-import { scorePackage } from "./package-scorer.js";
 import { renderDimensionTable, renderJson, renderReport } from "./utils/format.js";
 import type { AnalysisResult } from "./types.js";
+import { Command } from "commander";
+import { analyzeProject } from "./analyzer.js";
+import pc from "picocolors";
+import { scorePackage } from "./package-scorer.js";
 
 function getAgentReadinessScore(result: AnalysisResult): number {
-  const ar = result.composites.find((c) => c.key === "agentReadiness");
+  const ar = result.composites.find((comp) => comp.key === "agentReadiness");
   return ar?.score ?? 0;
 }
 

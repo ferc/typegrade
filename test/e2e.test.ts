@@ -1,17 +1,17 @@
 
-import { resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { mkdirSync, rmSync } from "node:fs";
 import { analyzeProject } from "../src/analyzer.js";
+import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 const fixturesDir = resolve(import.meta.dirname, "fixtures");
 
 function getComposite(result: ReturnType<typeof analyzeProject>, key: string) {
-  return result.composites.find((c) => c.key === key);
+  return result.composites.find((composite) => composite.key === key);
 }
 
 function getDimension(result: ReturnType<typeof analyzeProject>, key: string) {
-  return result.dimensions.find((d) => d.key === key);
+  return result.dimensions.find((dim) => dim.key === key);
 }
 
 describe("e2e: analyzeProject", () => {
@@ -28,7 +28,7 @@ describe("e2e: analyzeProject", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
     const safety = getDimension(result, "apiSafety");
     expect(safety).toBeDefined();
-    const errors = safety!.issues.filter((i) => i.severity === "error");
+    const errors = safety!.issues.filter((issue) => issue.severity === "error");
     expect(errors).toHaveLength(0);
   });
 
@@ -62,10 +62,10 @@ describe("e2e: analyzeProject", () => {
   it("unsound fixture does not double-count nested assertions", () => {
     const result = analyzeProject(resolve(fixturesDir, "unsound"));
     const soundness = getDimension(result, "implementationSoundness")!;
-    const doubleIssues = soundness.issues.filter((i) => i.message.includes("double"));
+    const doubleIssues = soundness.issues.filter((issue) => issue.message.includes("double"));
     expect(doubleIssues).toHaveLength(2);
     const innerUnknownWarnings = soundness.issues.filter(
-      (i) => i.severity === "warning" && i.message.includes("as unknown"),
+      (issue) => issue.severity === "warning" && issue.message.includes("as unknown"),
     );
     expect(innerUnknownWarnings).toHaveLength(0);
   });
@@ -104,10 +104,11 @@ describe("e2e: analyzeProject", () => {
     for (const dim of result.dimensions) {
       expect(dim).toHaveProperty("key");
       expect(dim).toHaveProperty("label");
-      if (dim.enabled) {
-        expect(dim.score).toBeGreaterThanOrEqual(0);
-        expect(dim.score).toBeLessThanOrEqual(100);
-      }
+    }
+    const enabledDims = result.dimensions.filter((dim) => dim.enabled);
+    for (const dim of enabledDims) {
+      expect(dim.score).toBeGreaterThanOrEqual(0);
+      expect(dim.score).toBeLessThanOrEqual(100);
     }
   });
 
@@ -122,7 +123,7 @@ describe("e2e: analyzeProject", () => {
     const safety = getDimension(result, "apiSafety");
     expect(safety).toBeDefined();
     expect(safety!.score).toBeLessThan(50);
-    expect(safety!.issues.filter((i) => i.severity === "error").length).toBeGreaterThan(0);
+    expect(safety!.issues.filter((issue) => issue.severity === "error").length).toBeGreaterThan(0);
   });
 
   it("computed-generics fixture scores high on expressiveness", () => {

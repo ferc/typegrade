@@ -1,8 +1,8 @@
-import type { Project, SourceFile } from "ts-morph";
 import { DIMENSION_CONFIGS, STRICT_FLAGS } from "../constants.js";
 import type { DimensionResult, Issue } from "../types.js";
+import type { Project, SourceFile } from "ts-morph";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "configDiscipline")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "configDiscipline")!;
 
 const STRICT_UMBRELLA_FLAGS = new Set([
   "noImplicitAny",
@@ -71,7 +71,7 @@ export function analyzeConfigDiscipline(
     issues,
     key: CONFIG.key,
     label: CONFIG.label,
-    metrics: { isStrictMode, tsIgnoreCount, tsExpectErrorCount },
+    metrics: { isStrictMode, tsExpectErrorCount, tsIgnoreCount },
     negatives,
     positives,
     score,

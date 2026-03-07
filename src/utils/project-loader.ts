@@ -1,6 +1,6 @@
-import { Project } from "ts-morph";
-import { existsSync } from "node:fs";
+import { ModuleKind, ModuleResolutionKind, Project, ScriptTarget } from "ts-morph";
 import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 
 export function loadProject(projectPath: string): Project {
   const absolutePath = resolve(projectPath);
@@ -16,12 +16,12 @@ export function loadProject(projectPath: string): Project {
   // No tsconfig — create a project with strict defaults
   const project = new Project({
     compilerOptions: {
-      strict: true,
-      target: 2 /* ES2015 */,
-      module: 99 /* ESNext */,
-      moduleResolution: 100 /* Bundler */,
       esModuleInterop: true,
+      module: ModuleKind.ESNext,
+      moduleResolution: ModuleResolutionKind.Bundler,
       skipLibCheck: true,
+      strict: true,
+      target: ScriptTarget.ES2015,
     },
   });
 

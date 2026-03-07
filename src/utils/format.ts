@@ -1,5 +1,5 @@
-import pc from "picocolors";
 import type { AnalysisResult, DimensionResult } from "../types.js";
+import pc from "picocolors";
 
 const BAR_WIDTH = 20;
 
@@ -9,16 +9,15 @@ function renderBar(score: number): string {
   const filledStr = "\u2588".repeat(filled);
   const emptyStr = "\u2591".repeat(empty);
 
-  let color: (s: string) => string;
+  let color: (str: string) => string = pc.red;
   if (score >= 80) {color = pc.green;}
   else if (score >= 60) {color = pc.yellow;}
   else if (score >= 40) {color = pc.magenta;}
-  else {color = pc.red;}
 
   return color(filledStr) + pc.dim(emptyStr);
 }
 
-function gradeColor(grade: string): (s: string) => string {
+function gradeColor(grade: string): (str: string) => string {
   if (grade.startsWith("A")) {return pc.green;}
   if (grade === "B") {return pc.yellow;}
   if (grade === "C") {return pc.magenta;}
@@ -49,11 +48,11 @@ function compositeLabel(key: string): string {
 }
 
 export function renderReport(result: AnalysisResult): string {
-  const lines: string[] = [];
-
-  lines.push("");
-  lines.push(pc.bold("  tsguard v0.2.0"));
-  lines.push("");
+  const lines: string[] = [
+    "",
+    pc.bold("  tsguard v0.2.0"),
+    "",
+  ];
 
   const modeLabel = result.mode === "package" ? "package analysis" : "source analysis";
   lines.push(`  Project: ${pc.bold(result.projectName)} (${modeLabel})`);
@@ -65,10 +64,10 @@ export function renderReport(result: AnalysisResult): string {
   lines.push(`  \u2554${"═".repeat(boxWidth)}\u2557`);
   for (const comp of result.composites) {
     const label = compositeLabel(comp.key);
-    const scoreStr = comp.score !== null ? `${comp.score}/100` : "n/a";
-    const gradeStr = comp.grade !== "N/A" ? ` (${comp.grade})` : "";
+    const scoreStr = comp.score === null ? "n/a" : `${comp.score}/100`;
+    const gradeStr = comp.grade === "N/A" ? "" : ` (${comp.grade})`;
     const gc = gradeColor(comp.grade);
-    const line = `${label}:`.padEnd(22) + `${scoreStr}${gradeStr}`;
+    const line = `${`${label}:`.padEnd(22)}${scoreStr}${gradeStr}`;
     lines.push(`  \u2551  ${gc(line.padEnd(boxWidth - 2))}\u2551`);
   }
   lines.push(`  \u255A${"═".repeat(boxWidth)}\u255D`);
@@ -82,9 +81,9 @@ export function renderReport(result: AnalysisResult): string {
     "publishQuality",
     "declarationFidelity",
   ]);
-  const consumerView = result.dimensions.filter((d) => consumerKeys.has(d.key));
-  const implView = result.dimensions.filter((d) =>
-    ["implementationSoundness", "boundaryDiscipline", "configDiscipline"].includes(d.key),
+  const consumerView = result.dimensions.filter((dim) => consumerKeys.has(dim.key));
+  const implView = result.dimensions.filter((dim) =>
+    ["implementationSoundness", "boundaryDiscipline", "configDiscipline"].includes(dim.key),
   );
 
   if (consumerView.length > 0) {
@@ -95,7 +94,7 @@ export function renderReport(result: AnalysisResult): string {
     lines.push("");
   }
 
-  if (implView.some((d) => d.enabled)) {
+  if (implView.some((dim) => dim.enabled)) {
     lines.push(pc.bold("  Implementation Dimensions:"));
     for (const dim of implView) {
       renderDimLine(lines, dim);
@@ -141,7 +140,7 @@ export function renderDimensionTable(dimensions: DimensionResult[]): string {
   for (const dim of dimensions) {
     if (!dim.enabled) {continue;}
     lines.push(
-      `\n  ${pc.bold(dim.label)} (${dim.score !== null ? Math.round(dim.score) : "n/a"}/100)`,
+      `\n  ${pc.bold(dim.label)} (${dim.score === null ? "n/a" : Math.round(dim.score)}/100)`,
     );
     for (const positive of dim.positives) {
       lines.push(`    ${pc.green("+")} ${positive}`);

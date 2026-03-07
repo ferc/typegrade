@@ -15,7 +15,7 @@ describe(analyzeImplementationSoundness, () => {
   it("detects as assertions", () => {
     const project = createProjectWithCode("const x = {} as { name: string };");
     const result = analyzeImplementationSoundness(project.getSourceFiles());
-    const warnings = result.issues.filter((i) => i.severity === "warning");
+    const warnings = result.issues.filter((issue) => issue.severity === "warning");
     expect(warnings.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -23,7 +23,7 @@ describe(analyzeImplementationSoundness, () => {
     const project = createProjectWithCode("const x = {} as any;");
     const result = analyzeImplementationSoundness(project.getSourceFiles());
     const errors = result.issues.filter(
-      (i) => i.severity === "error" && i.message.includes("as any"),
+      (issue) => issue.severity === "error" && issue.message.includes("as any"),
     );
     expect(errors.length).toBeGreaterThanOrEqual(1);
   });
@@ -32,7 +32,7 @@ describe(analyzeImplementationSoundness, () => {
     const project = createProjectWithCode("const x = {} as unknown as number;");
     const result = analyzeImplementationSoundness(project.getSourceFiles());
     const errors = result.issues.filter(
-      (i) => i.severity === "error" && i.message.includes("double"),
+      (issue) => issue.severity === "error" && issue.message.includes("double"),
     );
     expect(errors.length).toBeGreaterThanOrEqual(1);
   });
@@ -40,14 +40,14 @@ describe(analyzeImplementationSoundness, () => {
   it("detects non-null assertion", () => {
     const project = createProjectWithCode("const x: string | null = null;\nconst y = x!;");
     const result = analyzeImplementationSoundness(project.getSourceFiles());
-    const warnings = result.issues.filter((i) => i.message.includes("non-null"));
+    const warnings = result.issues.filter((issue) => issue.message.includes("non-null"));
     expect(warnings.length).toBeGreaterThanOrEqual(1);
   });
 
   it("detects @ts-ignore", () => {
     const project = createProjectWithCode("// @ts-ignore\nconst x: number = 'string' as any;");
     const result = analyzeImplementationSoundness(project.getSourceFiles());
-    const ignores = result.issues.filter((i) => i.message.includes("@ts-ignore"));
+    const ignores = result.issues.filter((issue) => issue.message.includes("@ts-ignore"));
     expect(ignores.length).toBeGreaterThanOrEqual(1);
     expect(ignores[0].severity).toBe("error");
   });
@@ -57,7 +57,7 @@ describe(analyzeImplementationSoundness, () => {
       "// @ts-expect-error\nconst x: number = 'string' as any;",
     );
     const result = analyzeImplementationSoundness(project.getSourceFiles());
-    const expectErrors = result.issues.filter((i) => i.message.includes("@ts-expect-error"));
+    const expectErrors = result.issues.filter((issue) => issue.message.includes("@ts-expect-error"));
     expect(expectErrors.length).toBeGreaterThanOrEqual(1);
     expect(expectErrors[0].severity).toBe("info");
   });

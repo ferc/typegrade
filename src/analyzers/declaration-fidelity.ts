@@ -1,9 +1,9 @@
-import type { SourceFile } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
-import { analyzePrecision } from "../utils/type-utils.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { SourceFile } from "ts-morph";
+import { analyzePrecision } from "../utils/type-utils.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "declarationFidelity")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "declarationFidelity")!;
 
 export function analyzeDeclarationFidelity(
   sourceFiles: SourceFile[],
@@ -96,10 +96,10 @@ export function analyzeDeclarationFidelity(
     key: CONFIG.key,
     label: CONFIG.label,
     metrics: {
-      sourceExportCount: sourceExports.size,
+      anyLeakage,
       declExportCount: declExports.size,
       lostExports,
-      anyLeakage,
+      sourceExportCount: sourceExports.size,
     },
     negatives,
     positives,

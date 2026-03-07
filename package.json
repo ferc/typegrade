@@ -22,6 +22,7 @@
     "ts-morph": "^27.0.2"
   },
   "devDependencies": {
+    "@types/node": "^25.3.5",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "tsup": "^8.5.1",

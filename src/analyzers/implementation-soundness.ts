@@ -1,8 +1,8 @@
-import { type SourceFile, Node, TypeFlags } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
+import { Node, type SourceFile, TypeFlags } from "ts-morph";
 import { DIMENSION_CONFIGS } from "../constants.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "implementationSoundness")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "implementationSoundness")!;
 
 interface FileAnalysisResult {
   errorCount: number;
@@ -83,15 +83,16 @@ function analyzeSourceFile(sf: SourceFile): FileAnalysisResult {
 
   const fullText = sf.getFullText();
   const lines = fullText.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    if (line === undefined) {continue;}
     if (line.includes("@ts-ignore")) {
       errorCount++;
       issues.push({
         column: line.indexOf("@ts-ignore") + 1,
         dimension: CONFIG.label,
         file: filePath,
-        line: i + 1,
+        line: lineIdx + 1,
         message: "@ts-ignore (prefer @ts-expect-error)",
         severity: "error",
       });
@@ -102,14 +103,14 @@ function analyzeSourceFile(sf: SourceFile): FileAnalysisResult {
         column: line.indexOf("@ts-expect-error") + 1,
         dimension: CONFIG.label,
         file: filePath,
-        line: i + 1,
+        line: lineIdx + 1,
         message: "@ts-expect-error (acceptable)",
         severity: "info",
       });
     }
   }
 
-  return { errorCount, warningCount, infoCount, issues };
+  return { errorCount, infoCount, issues, warningCount };
 }
 
 export function analyzeImplementationSoundness(sourceFiles: SourceFile[]): DimensionResult {
@@ -150,7 +151,7 @@ export function analyzeImplementationSoundness(sourceFiles: SourceFile[]): Dimen
     issues,
     key: CONFIG.key,
     label: CONFIG.label,
-    metrics: { errorCount, warningCount, infoCount, rawPenalty, maxPenalty },
+    metrics: { errorCount, infoCount, maxPenalty, rawPenalty, warningCount },
     negatives,
     positives,
     score,

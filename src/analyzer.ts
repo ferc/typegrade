@@ -1,16 +1,16 @@
-import { basename, resolve } from "node:path";
-import { Project } from "ts-morph";
 import type { AnalysisMode, AnalysisResult, DimensionResult, Issue } from "./types.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
-import { computeComposites } from "./scorer.js";
-import { analyzeApiSpecificity } from "./analyzers/api-specificity.js";
-import { analyzeApiSafety } from "./analyzers/api-safety.js";
+import { basename, resolve } from "node:path";
+import { Project } from "ts-morph";
 import { analyzeApiExpressiveness } from "./analyzers/api-expressiveness.js";
-import { analyzePublishQuality } from "./analyzers/publish-quality.js";
-import { analyzeDeclarationFidelity } from "./analyzers/declaration-fidelity.js";
-import { analyzeImplementationSoundness } from "./analyzers/implementation-soundness.js";
+import { analyzeApiSafety } from "./analyzers/api-safety.js";
+import { analyzeApiSpecificity } from "./analyzers/api-specificity.js";
 import { analyzeBoundaryDiscipline } from "./analyzers/boundary-discipline.js";
 import { analyzeConfigDiscipline } from "./analyzers/config-discipline.js";
+import { analyzeDeclarationFidelity } from "./analyzers/declaration-fidelity.js";
+import { analyzeImplementationSoundness } from "./analyzers/implementation-soundness.js";
+import { analyzePublishQuality } from "./analyzers/publish-quality.js";
+import { computeComposites } from "./scorer.js";
 
 export interface AnalyzeOptions {
   sourceFilesOptions?: GetSourceFilesOptions;
@@ -35,9 +35,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     return {
       caveats: [],
       composites: [
-        { key: "agentReadiness", score: 0, grade: "N/A", rationale: ["No files found"] },
-        { key: "consumerApi", score: 0, grade: "N/A", rationale: ["No files found"] },
-        { key: "implementationQuality", score: null, grade: "N/A", rationale: ["No files found"] },
+        { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: 0 },
+        { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: 0 },
+        { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
       ],
       dimensions: [],
       filesAnalyzed: 0,
@@ -47,12 +47,12 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       timeMs,
       topIssues: [
         {
+          column: 0,
+          dimension: "General",
           file: absolutePath,
           line: 0,
-          column: 0,
           message: "No source files found to analyze",
           severity: "error",
-          dimension: "General",
         },
       ],
     };
@@ -87,12 +87,12 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
 
   // Run consumer-facing dimensions (1-4) against consumer view
-  const dimensions: DimensionResult[] = [];
-
-  dimensions.push(analyzeApiSpecificity(consumerFiles));
-  dimensions.push(analyzeApiSafety(consumerFiles));
-  dimensions.push(analyzeApiExpressiveness(consumerFiles));
-  dimensions.push(analyzePublishQuality(consumerFiles, project));
+  const dimensions: DimensionResult[] = [
+    analyzeApiSpecificity(consumerFiles),
+    analyzeApiSafety(consumerFiles),
+    analyzeApiExpressiveness(consumerFiles),
+    analyzePublishQuality(consumerFiles, project),
+  ];
 
   // Source-only dimensions (5-8)
   if (mode === "source") {
@@ -113,7 +113,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         enabled: false,
         issues: [],
         key,
-        label: key.replace(/([A-Z])/g, " $1").trim(),
+        label: key.replaceAll(/([A-Z])/g, " $1").trim(),
         metrics: {},
         negatives: [],
         positives: [],
@@ -126,10 +126,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const composites = computeComposites(dimensions, mode);
 
   // Collect top issues
-  const allIssues: Issue[] = dimensions.flatMap((d) => d.issues);
+  const allIssues: Issue[] = dimensions.flatMap((dim) => dim.issues);
   const severityOrder: Record<string, number> = { error: 0, info: 2, warning: 1 };
   const topIssues = allIssues
-    .toSorted((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
+    .toSorted((lhs, rhs) => (severityOrder[lhs.severity] ?? 0) - (severityOrder[rhs.severity] ?? 0))
     .slice(0, 10);
 
   const timeMs = Math.round(performance.now() - startTime);

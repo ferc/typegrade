@@ -1,4 +1,4 @@
-import { type Type, type Symbol as MorphSymbol, TypeFlags, Node } from "ts-morph";
+import { type Symbol as MorphSymbol, Node, type Type, TypeFlags } from "ts-morph";
 import type { PrecisionFeatures } from "../types.js";
 
 const MAX_DEPTH = 6;
@@ -6,7 +6,7 @@ const MAX_PROPERTIES = 20;
 
 export function analyzePrecision(
   type: Type,
-  depth: number = 0,
+  depth = 0,
   visited = new Map<number, PrecisionFeatures>(),
 ): PrecisionFeatures {
   if (depth > MAX_DEPTH) {
@@ -177,13 +177,13 @@ function computePrecision(
     return analyzeTuple(type, depth, visited);
   }
   if (type.isArray()) {
-    return analyzeContainer(type, "Array", depth, visited);
+    return analyzeContainer(type, depth, visited);
   }
 
   // Check for known container types: Promise, Set, Map, ReadonlyArray
   const symbolName = type.getSymbol()?.getName();
   if (symbolName === "Promise" || symbolName === "Set" || symbolName === "ReadonlyArray") {
-    return analyzeContainer(type, symbolName, depth, visited);
+    return analyzeContainer(type, depth, visited);
   }
   if (symbolName === "Map") {
     return analyzeMap(type, depth, visited);
@@ -222,7 +222,7 @@ function analyzeUnion(
   const members = type.getUnionTypes();
 
   // Boolean is internally `true | false` — treat as wide primitive
-  if (members.length === 2 && members.every((m) => m.isBooleanLiteral())) {
+  if (members.length === 2 && members.every((member) => member.isBooleanLiteral())) {
     return {
       containsAny: false,
       containsUnknown: false,
@@ -232,16 +232,16 @@ function analyzeUnion(
     };
   }
 
-  const childResults = members.map((m) => analyzePrecision(m, depth + 1, visited));
-  const avgScore = childResults.reduce((sum, c) => sum + c.score, 0) / childResults.length;
+  const childResults = members.map((member) => analyzePrecision(member, depth + 1, visited));
+  const avgScore = childResults.reduce((sum, cr) => sum + cr.score, 0) / childResults.length;
   let score = Math.round(avgScore);
   const features: string[] = [];
   const reasons: string[] = [];
-  const containsAny = childResults.some((c) => c.containsAny);
-  const containsUnknown = childResults.some((c) => c.containsUnknown);
+  const containsAny = childResults.some((cr) => cr.containsAny);
+  const containsUnknown = childResults.some((cr) => cr.containsUnknown);
 
   // All literal members bonus
-  if (members.every((m) => m.isStringLiteral() || m.isNumberLiteral() || m.isBooleanLiteral())) {
+  if (members.every((member) => member.isStringLiteral() || member.isNumberLiteral() || member.isBooleanLiteral())) {
     score += 10;
     features.push("literal-union");
     reasons.push("+10 all literal members");
@@ -261,13 +261,13 @@ function analyzeUnion(
   }
 
   // Mix of broad primitives + broad objects
-  const hasBroadPrimitive = members.some((m) => {
-    const f = m.getFlags();
-    return Boolean(f & (TypeFlags.String | TypeFlags.Number | TypeFlags.Boolean | TypeFlags.BigInt));
+  const hasBroadPrimitive = members.some((member) => {
+    const flags = member.getFlags();
+    return Boolean(flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.Boolean | TypeFlags.BigInt));
   });
-  const hasBroadObject = members.some((m) => {
-    if (!m.isObject()) {return false;}
-    const props = m.getProperties();
+  const hasBroadObject = members.some((member) => {
+    if (!member.isObject()) {return false;}
+    const props = member.getProperties();
     return props.length === 0;
   });
   if (hasBroadPrimitive && hasBroadObject) {
@@ -285,20 +285,20 @@ function analyzeIntersection(
   visited: Map<number, PrecisionFeatures>,
 ): PrecisionFeatures {
   const members = type.getIntersectionTypes();
-  const childResults = members.map((m) => analyzePrecision(m, depth + 1, visited));
-  const avgScore = childResults.reduce((sum, c) => sum + c.score, 0) / childResults.length;
+  const childResults = members.map((member) => analyzePrecision(member, depth + 1, visited));
+  const avgScore = childResults.reduce((sum, cr) => sum + cr.score, 0) / childResults.length;
   let score = Math.round(avgScore);
   const features: string[] = [];
   const reasons: string[] = [];
-  const containsAny = childResults.some((c) => c.containsAny);
-  const containsUnknown = childResults.some((c) => c.containsUnknown);
+  const containsAny = childResults.some((cr) => cr.containsAny);
+  const containsUnknown = childResults.some((cr) => cr.containsUnknown);
 
   // Branded type detection: primitive + object with __brand
-  const hasPrimitive = members.some((m) => m.getFlags() & (TypeFlags.String | TypeFlags.Number));
+  const hasPrimitive = members.some((member) => member.getFlags() & (TypeFlags.String | TypeFlags.Number));
   const hasBrand = members.some(
-    (m) =>
-      m.isObject() &&
-      m.getProperties().some((p) => p.getName().startsWith("__") || p.getName() === "_brand"),
+    (member) =>
+      member.isObject() &&
+      member.getProperties().some((prop) => prop.getName().startsWith("__") || prop.getName() === "_brand"),
   );
   if (hasPrimitive && hasBrand) {
     score += 25;
@@ -312,12 +312,12 @@ function analyzeIntersection(
 
 function analyzeContainer(
   type: Type,
-  name: string,
   depth: number,
   visited: Map<number, PrecisionFeatures>,
 ): PrecisionFeatures {
-  const typeArgs = type.getTypeArguments();
-  if (typeArgs.length === 0) {
+  const name = type.isArray() ? "Array" : (type.getSymbol()?.getName() ?? "Container");
+  const [firstArg] = type.getTypeArguments();
+  if (!firstArg) {
     return {
       containsAny: false,
       containsUnknown: false,
@@ -327,7 +327,7 @@ function analyzeContainer(
     };
   }
 
-  const child = analyzePrecision(typeArgs[0], depth + 1, visited);
+  const child = analyzePrecision(firstArg, depth + 1, visited);
   // Container formula: 0.35 * 45 + 0.65 * child
   const score = clamp(Math.round(0.35 * 45 + 0.65 * child.score));
   return {
@@ -344,8 +344,8 @@ function analyzeMap(
   depth: number,
   visited: Map<number, PrecisionFeatures>,
 ): PrecisionFeatures {
-  const typeArgs = type.getTypeArguments();
-  if (typeArgs.length < 2) {
+  const [mapKeyArg, mapValueArg] = type.getTypeArguments();
+  if (!mapKeyArg || !mapValueArg) {
     return {
       containsAny: false,
       containsUnknown: false,
@@ -355,8 +355,8 @@ function analyzeMap(
     };
   }
 
-  const key = analyzePrecision(typeArgs[0], depth + 1, visited);
-  const value = analyzePrecision(typeArgs[1], depth + 1, visited);
+  const key = analyzePrecision(mapKeyArg, depth + 1, visited);
+  const value = analyzePrecision(mapValueArg, depth + 1, visited);
   // Map formula: 15 + 0.25 * key + 0.60 * value
   const score = clamp(Math.round(15 + 0.25 * key.score + 0.6 * value.score));
   return {
@@ -373,8 +373,8 @@ function analyzeRecord(
   depth: number,
   visited: Map<number, PrecisionFeatures>,
 ): PrecisionFeatures {
-  const typeArgs = type.getAliasTypeArguments();
-  if (typeArgs.length < 2) {
+  const [recKeyArg, recValueArg] = type.getAliasTypeArguments();
+  if (!recKeyArg || !recValueArg) {
     return {
       containsAny: false,
       containsUnknown: false,
@@ -384,12 +384,12 @@ function analyzeRecord(
     };
   }
 
-  const key = analyzePrecision(typeArgs[0], depth + 1, visited);
-  const value = analyzePrecision(typeArgs[1], depth + 1, visited);
+  const key = analyzePrecision(recKeyArg, depth + 1, visited);
+  const value = analyzePrecision(recValueArg, depth + 1, visited);
   // Record formula: 10 + 0.35 * key + 0.55 * value, then -15 if key is plain string/number
   let score = Math.round(10 + 0.35 * key.score + 0.55 * value.score);
 
-  const keyFlags = typeArgs[0].getFlags();
+  const keyFlags = recKeyArg.getFlags();
   if (keyFlags & (TypeFlags.String | TypeFlags.Number)) {
     score -= 15;
   }
@@ -420,8 +420,8 @@ function analyzeTuple(
     };
   }
 
-  const childResults = elements.map((e) => analyzePrecision(e, depth + 1, visited));
-  const avgScore = childResults.reduce((sum, c) => sum + c.score, 0) / childResults.length;
+  const childResults = elements.map((el) => analyzePrecision(el, depth + 1, visited));
+  const avgScore = childResults.reduce((sum, cr) => sum + cr.score, 0) / childResults.length;
 
   let score = Math.round(20 + avgScore);
   // Fixed-length bonus
@@ -433,10 +433,10 @@ function analyzeTuple(
   }
 
   score = clamp(score);
-  const features = ["tuple", ...childResults.flatMap((c) => c.features)];
+  const features = ["tuple", ...childResults.flatMap((cr) => cr.features)];
   return {
-    containsAny: childResults.some((c) => c.containsAny),
-    containsUnknown: childResults.some((c) => c.containsUnknown),
+    containsAny: childResults.some((cr) => cr.containsAny),
+    containsUnknown: childResults.some((cr) => cr.containsUnknown),
     features,
     reasons: [`tuple of ${elements.length} elements`],
     score,
@@ -513,14 +513,14 @@ function analyzeObject(
     for (const prop of properties) {
       const propType = getPropertyType(prop);
       if (propType) {
-        const r = analyzePrecision(propType, depth + 1, visited);
-        propResults.push(r);
+        const result = analyzePrecision(propType, depth + 1, visited);
+        propResults.push(result);
       }
     }
     if (propResults.length > 0) {
-      propertyAvg = propResults.reduce((sum, r) => sum + r.score, 0) / propResults.length;
-      containsAny = propResults.some((r) => r.containsAny);
-      containsUnknown = propResults.some((r) => r.containsUnknown);
+      propertyAvg = propResults.reduce((sum, pr) => sum + pr.score, 0) / propResults.length;
+      containsAny = propResults.some((pr) => pr.containsAny);
+      containsUnknown = propResults.some((pr) => pr.containsUnknown);
     }
   }
 
@@ -547,11 +547,11 @@ function analyzeObject(
 
   // All members primitive with no computed-type syntax
   if (properties.length > 0 && !syntaxResult.hasAdvancedSyntax) {
-    const allPrimitive = properties.every((p) => {
-      const t = getPropertyType(p);
-      if (!t) {return false;}
-      const f = t.getFlags();
-      return Boolean(f &
+    const allPrimitive = properties.every((prop) => {
+      const propType = getPropertyType(prop);
+      if (!propType) {return false;}
+      const propFlags = propType.getFlags();
+      return Boolean(propFlags &
         (TypeFlags.String |
           TypeFlags.Number |
           TypeFlags.Boolean |
@@ -585,7 +585,7 @@ function detectAdvancedSyntaxInDecl(decl: Node): string[] {
 
 function detectAdvancedSyntax(declarations: Node[]): { hasAdvancedSyntax: boolean; features: string[] } {
   const features = declarations.flatMap((decl) => detectAdvancedSyntaxInDecl(decl));
-  return { hasAdvancedSyntax: features.length > 0, features };
+  return { features, hasAdvancedSyntax: features.length > 0 };
 }
 
 function getTypeDeclarations(type: Type): Node[] {
@@ -627,9 +627,11 @@ function getPropertyType(prop: MorphSymbol): Type | undefined {
 
 export function isDiscriminatedUnion(members: Type[]): boolean {
   if (members.length < 2) {return false;}
-  if (!members.every((m) => m.isObject())) {return false;}
+  if (!members.every((member) => member.isObject())) {return false;}
 
-  const firstProps = members[0].getProperties().map((p) => p.getName());
+  const [firstMember] = members;
+  if (!firstMember) {return false;}
+  const firstProps = firstMember.getProperties().map((prop) => prop.getName());
 
   for (const propName of firstProps) {
     const allHaveLiteral = members.every((member) => {

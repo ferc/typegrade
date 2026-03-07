@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { AnalysisResult } from "./types.js";
+import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { analyzeProject } from "./analyzer.js";
-import type { AnalysisResult } from "./types.js";
 
 export function scorePackage(nameOrPath: string): AnalysisResult {
   // Local path — analyze directly, including .d.ts files

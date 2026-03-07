@@ -1,10 +1,26 @@
-import { type Project, type SourceFile, SyntaxKind, Node } from "ts-morph";
 import { DIMENSION_CONFIGS, VALIDATION_LIBRARIES } from "../constants.js";
 import type { DimensionResult, Issue } from "../types.js";
-import { existsSync, readFileSync } from "node:fs";
+import { Node, type Project, type SourceFile, SyntaxKind } from "ts-morph";
 import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 
-const CONFIG = DIMENSION_CONFIGS.find((c) => c.key === "boundaryDiscipline")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "boundaryDiscipline")!;
+
+function detectValidationLib(projectDir: string | undefined): string | null {
+  if (!projectDir) {return null;}
+  const pkgPath = join(projectDir, "package.json");
+  if (!existsSync(pkgPath)) {return null;}
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    for (const lib of VALIDATION_LIBRARIES) {
+      if (allDeps[lib]) {return lib;}
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return null;
+}
 
 interface BoundaryFileResult {
   typeGuardCount: number;
@@ -67,7 +83,7 @@ function analyzeSourceFileBoundaries(sf: SourceFile): BoundaryFileResult {
     }
   });
 
-  return { typeGuardCount, assertFunctionCount, satisfiesCount, jsonParseCount, hasBoundaryMarkers, issues };
+  return { assertFunctionCount, hasBoundaryMarkers, issues, jsonParseCount, satisfiesCount, typeGuardCount };
 }
 
 export function analyzeBoundaryDiscipline(
@@ -81,30 +97,15 @@ export function analyzeBoundaryDiscipline(
   let score = 0;
 
   // Check package.json for validation libraries
-  const tsconfigPath = project.getCompilerOptions().configFilePath;
-  let projectDir: string | undefined;
-  if (typeof tsconfigPath === "string") {
-    projectDir = dirname(tsconfigPath);
-  }
+  const tsconfigPath = project.getCompilerOptions()['configFilePath'];
+  const projectDir: string | undefined = typeof tsconfigPath === "string"
+    ? dirname(tsconfigPath)
+    : undefined;
 
-  let hasValidationLib = false;
-  if (projectDir) {
-    const pkgPath = join(projectDir, "package.json");
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-        const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-        for (const lib of VALIDATION_LIBRARIES) {
-          if (allDeps[lib]) {
-            hasValidationLib = true;
-            positives.push(`Validation library found: ${lib}`);
-            break;
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }
+  const validationLib = detectValidationLib(projectDir);
+  const hasValidationLib = validationLib !== null;
+  if (validationLib) {
+    positives.push(`Validation library found: ${validationLib}`);
   }
 
   if (hasValidationLib) {score += 30;}
@@ -169,11 +170,11 @@ export function analyzeBoundaryDiscipline(
     key: CONFIG.key,
     label: CONFIG.label,
     metrics: {
-      typeGuardCount,
       assertFunctionCount,
-      satisfiesCount,
-      jsonParseCount,
       hasValidationLib,
+      jsonParseCount,
+      satisfiesCount,
+      typeGuardCount,
     },
     negatives,
     positives,
