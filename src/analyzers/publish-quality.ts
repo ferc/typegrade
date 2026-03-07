@@ -71,6 +71,37 @@ export function analyzePublishQuality(
         exportedWithJSDoc += varStmt.getDeclarations().length;
       }
     }
+
+    // Exported classes
+    for (const cls of sf.getClasses()) {
+      if (!cls.isExported()) {continue;}
+      totalExportedDecls++;
+      if (cls.getJsDocs().length > 0) {exportedWithJSDoc++;}
+
+      for (const method of cls.getMethods()) {
+        if (!method.getScope || method.getScope() === "private") {continue;}
+        totalExportedFns++;
+
+        if (method.getReturnTypeNode()) {
+          fnsWithExplicitReturn++;
+        }
+
+        const allParamsTyped = method.getParameters().every((param) => param.getTypeNode());
+        if (allParamsTyped) {fnsWithFullyTypedParams++;}
+
+        if (method.getJsDocs().length > 0) {exportedWithJSDoc++;}
+
+        const overloads = method.getOverloads();
+        if (overloads.length > 0) {overloadCount += overloads.length;}
+      }
+    }
+
+    // Exported enums
+    for (const en of sf.getEnums()) {
+      if (!en.isExported()) {continue;}
+      totalExportedDecls++;
+      if (en.getJsDocs().length > 0) {exportedWithJSDoc++;}
+    }
   }
 
   let score = 0;

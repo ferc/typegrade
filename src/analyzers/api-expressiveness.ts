@@ -106,6 +106,36 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
       }
     }
 
+    // Exported classes
+    for (const cls of sf.getClasses()) {
+      if (!cls.isExported()) {continue;}
+      counts.totalDeclarations++;
+
+      const typeParams = cls.getTypeParameters();
+      for (const tp of typeParams) {
+        if (tp.getConstraint()) {counts.constrainedGenerics++;}
+      }
+
+      // Check methods for generic correlation and overloads
+      for (const method of cls.getMethods()) {
+        if (!method.getScope || method.getScope() === "private") {continue;}
+        counts.genericCorrelation += countGenericCorrelation(
+          method.getTypeParameters(),
+          method.getParameters(),
+          method.getReturnTypeNode(),
+        );
+
+        const overloads = method.getOverloads();
+        if (overloads.length > 0) {counts.overloads += overloads.length;}
+      }
+    }
+
+    // Exported enums
+    for (const en of sf.getEnums()) {
+      if (!en.isExported()) {continue;}
+      counts.totalDeclarations++;
+    }
+
     // Exported type aliases
     for (const alias of sf.getTypeAliases()) {
       if (!alias.isExported()) {continue;}
@@ -137,6 +167,25 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
     for (const iface of sf.getInterfaces()) {
       if (!iface.isExported()) {continue;}
       for (const prop of iface.getProperties()) {
+        const typeNode = prop.getTypeNode();
+        if (typeNode) {walkTypeNode(typeNode, counts);}
+      }
+    }
+
+    // Walk class members for advanced type nodes
+    for (const cls of sf.getClasses()) {
+      if (!cls.isExported()) {continue;}
+      for (const method of cls.getMethods()) {
+        if (!method.getScope || method.getScope() === "private") {continue;}
+        for (const param of method.getParameters()) {
+          const typeNode = param.getTypeNode();
+          if (typeNode) {walkTypeNode(typeNode, counts);}
+        }
+        const returnTypeNode = method.getReturnTypeNode();
+        if (returnTypeNode) {walkTypeNode(returnTypeNode, counts);}
+      }
+      for (const prop of cls.getProperties()) {
+        if (prop.getScope() === "private") {continue;}
         const typeNode = prop.getTypeNode();
         if (typeNode) {walkTypeNode(typeNode, counts);}
       }

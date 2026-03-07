@@ -29,7 +29,11 @@ function parsePackageSpec(spec: string): { name: string; version: string } {
   return { name: spec, version: "latest" };
 }
 
-export function scorePackage(nameOrPath: string): AnalysisResult {
+export interface ScorePackageOptions {
+  typesVersion?: string;
+}
+
+export function scorePackage(nameOrPath: string, options?: ScorePackageOptions): AnalysisResult {
   // Local path — analyze directly, including .d.ts files
   if (nameOrPath.startsWith(".") || nameOrPath.startsWith("/") || existsSync(nameOrPath)) {
     return analyzeProject(resolve(nameOrPath), {
@@ -74,8 +78,12 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
           ? `@types/${packageName.slice(1).replace("/", "__")}`
           : `@types/${packageName}`;
 
+        const typesSpec = options?.typesVersion
+          ? `${typesPackageName}@${options.typesVersion}`
+          : typesPackageName;
+
         try {
-          execSync(`npm install ${typesPackageName} --ignore-scripts --no-audit --no-fund`, {
+          execSync(`npm install ${typesSpec} --ignore-scripts --no-audit --no-fund`, {
             cwd: tmpDir,
             stdio: "pipe",
             timeout: 30_000,

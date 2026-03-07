@@ -108,6 +108,86 @@ export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
       }
     }
 
+    // Exported classes
+    for (const cls of sf.getClasses()) {
+      if (!cls.isExported()) {continue;}
+
+      // Constructor params
+      for (const ctor of cls.getConstructors()) {
+        for (const param of ctor.getParameters()) {
+          totalPositions++;
+          const result = analyzePrecision(param.getType());
+          if (result.containsAny) {
+            anyPositions++;
+          } else if (result.containsUnknown) {
+            unknownPositions++;
+          }
+        }
+      }
+
+      // Methods
+      for (const method of cls.getMethods()) {
+        if (!method.getScope || method.getScope() === "private") {continue;}
+
+        for (const param of method.getParameters()) {
+          totalPositions++;
+          const result = analyzePrecision(param.getType());
+          if (result.containsAny) {
+            anyPositions++;
+          } else if (result.containsUnknown) {
+            unknownPositions++;
+          }
+        }
+
+        // Return type
+        totalPositions++;
+        const returnResult = analyzePrecision(method.getReturnType());
+        if (returnResult.containsAny) {
+          anyPositions++;
+        } else if (returnResult.containsUnknown) {
+          unknownPositions++;
+        }
+      }
+
+      // Properties
+      for (const prop of cls.getProperties()) {
+        if (prop.getScope() === "private") {continue;}
+        totalPositions++;
+        const result = analyzePrecision(prop.getType());
+        if (result.containsAny) {
+          anyPositions++;
+        } else if (result.containsUnknown) {
+          unknownPositions++;
+        }
+      }
+
+      // Getters
+      for (const getter of cls.getGetAccessors()) {
+        if (getter.getScope() === "private") {continue;}
+        totalPositions++;
+        const result = analyzePrecision(getter.getReturnType());
+        if (result.containsAny) {
+          anyPositions++;
+        } else if (result.containsUnknown) {
+          unknownPositions++;
+        }
+      }
+
+      // Setters
+      for (const setter of cls.getSetAccessors()) {
+        if (setter.getScope() === "private") {continue;}
+        for (const param of setter.getParameters()) {
+          totalPositions++;
+          const result = analyzePrecision(param.getType());
+          if (result.containsAny) {
+            anyPositions++;
+          } else if (result.containsUnknown) {
+            unknownPositions++;
+          }
+        }
+      }
+    }
+
     // Exported variables
     for (const varStmt of sf.getVariableStatements()) {
       if (!varStmt.isExported()) {continue;}

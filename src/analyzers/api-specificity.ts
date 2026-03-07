@@ -88,6 +88,77 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
       samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
     }
 
+    // Exported classes
+    for (const cls of sf.getClasses()) {
+      if (!cls.isExported()) {continue;}
+
+      // Constructor params (weight 1.0)
+      for (const ctor of cls.getConstructors()) {
+        let samplesFromDecl = 0;
+        for (const param of ctor.getParameters()) {
+          if (samplesFromDecl >= 12) {break;}
+          const type = param.getType();
+          const result = analyzePrecision(type);
+          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
+          samplesFromDecl++;
+        }
+      }
+
+      // Methods
+      for (const method of cls.getMethods()) {
+        if (!method.getScope || method.getScope() === "private") {continue;}
+        let samplesFromDecl = 0;
+
+        // Method params (weight 1.0)
+        for (const param of method.getParameters()) {
+          if (samplesFromDecl >= 12) {break;}
+          const type = param.getType();
+          const result = analyzePrecision(type);
+          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
+          samplesFromDecl++;
+        }
+
+        // Method return type (weight 1.25)
+        if (samplesFromDecl < 12) {
+          const returnType = method.getReturnType();
+          const result = analyzePrecision(returnType);
+          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1.25 });
+        }
+      }
+
+      // Properties (weight 0.75)
+      for (const prop of cls.getProperties()) {
+        if (prop.getScope() === "private") {continue;}
+        const type = prop.getType();
+        const result = analyzePrecision(type);
+        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
+      }
+
+      // Getters (return type weight 1.0)
+      for (const getter of cls.getGetAccessors()) {
+        if (getter.getScope() === "private") {continue;}
+        const returnType = getter.getReturnType();
+        const result = analyzePrecision(returnType);
+        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
+      }
+
+      // Setters (param weight 1.0)
+      for (const setter of cls.getSetAccessors()) {
+        if (setter.getScope() === "private") {continue;}
+        for (const param of setter.getParameters()) {
+          const type = param.getType();
+          const result = analyzePrecision(type);
+          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
+        }
+      }
+    }
+
+    // Exported enums (weight 0.75, score 85 — inherently specific)
+    for (const en of sf.getEnums()) {
+      if (!en.isExported()) {continue;}
+      samples.push({ containsAny: false, features: [], score: 85, weight: 0.75 });
+    }
+
     // Exported variables (weight 1.0)
     for (const varStmt of sf.getVariableStatements()) {
       if (!varStmt.isExported()) {continue;}

@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
 import type { AnalysisResult } from "../src/types.js";
@@ -7,6 +7,11 @@ import { PAIRWISE_ASSERTIONS } from "./assertions.js";
 
 const manifestPath = join(import.meta.dirname, "manifest.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+interface ManifestEntry {
+  spec: string;
+  typesVersion?: string;
+}
 
 interface BenchmarkEntry {
   name: string;
@@ -16,6 +21,13 @@ interface BenchmarkEntry {
   agentReadiness: number | null;
 }
 
+function parseManifestEntry(entry: string | { spec: string; typesVersion?: string }): ManifestEntry {
+  if (typeof entry === "string") {
+    return { spec: entry };
+  }
+  return entry;
+}
+
 function getCompositeScore(result: AnalysisResult, key: string): number | null {
   return result.composites.find((c) => c.key === key)?.score ?? null;
 }
@@ -23,12 +35,13 @@ function getCompositeScore(result: AnalysisResult, key: string): number | null {
 async function main() {
   const entries: BenchmarkEntry[] = [];
 
-  for (const [tier, packages] of Object.entries(manifest.packages) as [string, string[]][]) {
+  for (const [tier, packages] of Object.entries(manifest.packages) as [string, (string | { spec: string; typesVersion?: string })[]][]) {
     for (const pkg of packages) {
-      const name = pkg.replace(/@[\d.]+$/, "");
-      console.log(`Scoring ${pkg}...`);
+      const { spec, typesVersion } = parseManifestEntry(pkg);
+      const name = spec.replace(/@[\d.]+$/, "");
+      console.log(`Scoring ${spec}...`);
       try {
-        const result = scorePackage(pkg);
+        const result = scorePackage(spec, typesVersion ? { typesVersion } : undefined);
         entries.push({
           agentReadiness: getCompositeScore(result, "agentReadiness"),
           consumerApi: getCompositeScore(result, "consumerApi"),
@@ -63,12 +76,15 @@ async function main() {
   let passed = 0;
   let failed = 0;
 
+  const assertionResults: { assertion: string; result: "pass" | "fail" | "skip"; higherScore?: number | null; lowerScore?: number | null }[] = [];
+
   for (const assertion of PAIRWISE_ASSERTIONS) {
     const higher = entries.find((e) => e.name === assertion.higher);
     const lower = entries.find((e) => e.name === assertion.lower);
 
     if (!higher || !lower) {
       console.log(`SKIP: ${assertion.higher} > ${assertion.lower} (missing data)`);
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, result: "skip" });
       continue;
     }
 
@@ -78,13 +94,37 @@ async function main() {
     if (higherScore !== null && lowerScore !== null && higherScore > lowerScore) {
       console.log(`PASS: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
       passed++;
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, higherScore, lowerScore, result: "pass" });
     } else {
       console.log(`FAIL: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
       failed++;
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, higherScore, lowerScore, result: "fail" });
     }
   }
 
   console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} assertions`);
+
+  // Persist results to JSON
+  const resultsDir = join(import.meta.dirname, "results");
+  if (!existsSync(resultsDir)) {
+    mkdirSync(resultsDir, { recursive: true });
+  }
+
+  const snapshot = {
+    timestamp: new Date().toISOString(),
+    entries: entries.map((e) => ({
+      name: e.name,
+      tier: e.tier,
+      consumerApi: e.consumerApi,
+      agentReadiness: e.agentReadiness,
+    })),
+    assertions: assertionResults,
+    summary: { passed, failed, total: passed + failed },
+  };
+
+  const filename = new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+  writeFileSync(join(resultsDir, filename), JSON.stringify(snapshot, null, 2));
+  console.log(`\nResults saved to benchmarks/results/${filename}`);
 
   if (failed > 0) {
     process.exit(1);

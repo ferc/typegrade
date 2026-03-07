@@ -30,7 +30,7 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "publishQuality",
     label: "Publish Quality",
     sourceOnly: false,
-    weights: { consumerApi: 0.1, implementationQuality: 0.1 },
+    weights: { consumerApi: 0.1 },
   },
   {
     key: "declarationFidelity",
