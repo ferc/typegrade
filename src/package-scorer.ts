@@ -5,6 +5,30 @@ import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 
+function parsePackageSpec(spec: string): { name: string; version: string } {
+  // Handle scoped packages: @scope/pkg@1.0.0
+  if (spec.startsWith("@")) {
+    const slashIdx = spec.indexOf("/");
+    if (slashIdx > 0) {
+      const afterSlash = spec.slice(slashIdx + 1);
+      const atIdx = afterSlash.indexOf("@");
+      if (atIdx > 0) {
+        return {
+          name: spec.slice(0, slashIdx + 1 + atIdx),
+          version: afterSlash.slice(atIdx + 1),
+        };
+      }
+    }
+    return { name: spec, version: "latest" };
+  }
+  // Unscoped: pkg@1.0.0
+  const atIdx = spec.indexOf("@");
+  if (atIdx > 0) {
+    return { name: spec.slice(0, atIdx), version: spec.slice(atIdx + 1) };
+  }
+  return { name: spec, version: "latest" };
+}
+
 export function scorePackage(nameOrPath: string): AnalysisResult {
   // Local path — analyze directly, including .d.ts files
   if (nameOrPath.startsWith(".") || nameOrPath.startsWith("/") || existsSync(nameOrPath)) {
@@ -13,6 +37,9 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
   }
+
+  // Parse name@version spec
+  const { name: packageName, version: packageVersion } = parsePackageSpec(nameOrPath);
 
   // Npm package — install to temp dir
   const tmpDir = join(tmpdir(), `tsguard-${Date.now()}`);
@@ -24,7 +51,7 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
       join(tmpDir, "package.json"),
       JSON.stringify({
         dependencies: {
-          [nameOrPath]: "latest",
+          [packageName]: packageVersion,
         },
         name: "tsguard-tmp",
         version: "0.0.0",
@@ -37,15 +64,15 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
       timeout: 60_000,
     });
 
-    const pkgDir = join(tmpDir, "node_modules", nameOrPath);
+    const pkgDir = join(tmpDir, "node_modules", packageName);
     let typesPackageName: string | undefined;
 
     if (existsSync(pkgDir)) {
       const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
       if (!pkgJson.types && !pkgJson.typings && !pkgJson.exports) {
-        typesPackageName = nameOrPath.startsWith("@")
-          ? `@types/${nameOrPath.slice(1).replace("/", "__")}`
-          : `@types/${nameOrPath}`;
+        typesPackageName = packageName.startsWith("@")
+          ? `@types/${packageName.slice(1).replace("/", "__")}`
+          : `@types/${packageName}`;
 
         try {
           execSync(`npm install ${typesPackageName} --ignore-scripts --no-audit --no-fund`, {
@@ -63,7 +90,7 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
     const effectivePkgDir = typesPackageName
       ? join(tmpDir, "node_modules", typesPackageName)
       : pkgDir;
-    const effectivePkgName = typesPackageName ?? nameOrPath;
+    const effectivePkgName = typesPackageName ?? packageName;
 
     // Resolve declaration entrypoints from package.json
     const entrypoints = resolveDeclarationEntrypoints(effectivePkgDir);
@@ -95,7 +122,7 @@ export function scorePackage(nameOrPath: string): AnalysisResult {
     const targetPkgJsonPath = join(effectivePkgDir, "package.json");
     const packageContext: PackageAnalysisContext = {
       packageJsonPath: targetPkgJsonPath,
-      packageName: nameOrPath,
+      packageName,
       packageRoot: effectivePkgDir,
       typesEntrypoint: entrypoints[0] ?? null,
     };
