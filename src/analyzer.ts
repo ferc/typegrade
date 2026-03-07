@@ -1,4 +1,4 @@
-import type { AnalysisMode, AnalysisResult, DimensionResult, Issue } from "./types.js";
+import type { AnalysisMode, AnalysisResult, DimensionResult, Issue, PackageAnalysisContext } from "./types.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
 import { Project } from "ts-morph";
@@ -15,6 +15,7 @@ import { computeComposites } from "./scorer.js";
 export interface AnalyzeOptions {
   sourceFilesOptions?: GetSourceFilesOptions;
   mode?: AnalysisMode;
+  packageContext?: PackageAnalysisContext;
 }
 
 export function analyzeProject(projectPath: string, options?: AnalyzeOptions): AnalysisResult {
@@ -91,7 +92,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     analyzeApiSpecificity(consumerFiles),
     analyzeApiSafety(consumerFiles),
     analyzeApiExpressiveness(consumerFiles),
-    analyzePublishQuality(consumerFiles, project),
+    analyzePublishQuality(consumerFiles, project, options?.packageContext),
   ];
 
   // Source-only dimensions (5-8)

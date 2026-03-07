@@ -1,4 +1,4 @@
-import type { DimensionResult, Issue } from "../types.js";
+import type { DimensionResult, Issue, PackageAnalysisContext } from "../types.js";
 import { type Project, type SourceFile } from "ts-morph";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
@@ -9,6 +9,7 @@ const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "publishQuality")!;
 export function analyzePublishQuality(
   sourceFiles: SourceFile[],
   project: Project,
+  packageContext?: PackageAnalysisContext,
 ): DimensionResult {
   const issues: Issue[] = [];
   const positives: string[] = [];
@@ -74,43 +75,61 @@ export function analyzePublishQuality(
 
   let score = 0;
 
-  // 40% from explicit return types
+  // 45% from explicit return types
   if (totalExportedFns > 0) {
     const returnRatio = fnsWithExplicitReturn / totalExportedFns;
-    score += Math.round(returnRatio * 40);
+    score += Math.round(returnRatio * 45);
     positives.push(
       `${fnsWithExplicitReturn}/${totalExportedFns} exported functions have explicit return types`,
     );
   } else {
-    score += 40;
+    score += 45;
   }
 
-  // 20% from fully typed params
+  // 25% from fully typed params
   if (totalExportedFns > 0) {
     const paramRatio = fnsWithFullyTypedParams / totalExportedFns;
-    score += Math.round(paramRatio * 20);
+    score += Math.round(paramRatio * 25);
     positives.push(
       `${fnsWithFullyTypedParams}/${totalExportedFns} exported functions have all params typed`,
     );
   } else {
-    score += 20;
+    score += 25;
   }
 
   // +15 for types field in package.json
-  const tsconfigPath = project.getCompilerOptions()['configFilePath'];
-  if (typeof tsconfigPath === "string") {
-    const pkgPath = join(dirname(tsconfigPath), "package.json");
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-        if (pkg.types || pkg.typings) {
-          score += 15;
-          positives.push("package.json has types/typings field");
-        } else {
-          negatives.push("package.json missing types/typings field");
+  // Use packageContext when available (fixes package mode reading temp wrapper's package.json)
+  let pkgJsonResolved = false;
+  if (packageContext) {
+    try {
+      const pkg = JSON.parse(readFileSync(packageContext.packageJsonPath, "utf8"));
+      pkgJsonResolved = true;
+      if (pkg.types || pkg.typings) {
+        score += 15;
+        positives.push("package.json has types/typings field");
+      } else {
+        negatives.push("package.json missing types/typings field");
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  if (!pkgJsonResolved) {
+    const tsconfigPath = project.getCompilerOptions()['configFilePath'];
+    if (typeof tsconfigPath === "string") {
+      const pkgPath = join(dirname(tsconfigPath), "package.json");
+      if (existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+          if (pkg.types || pkg.typings) {
+            score += 15;
+            positives.push("package.json has types/typings field");
+          } else {
+            negatives.push("package.json missing types/typings field");
+          }
+        } catch {
+          // Ignore
         }
-      } catch {
-        // Ignore
       }
     }
   }
@@ -120,12 +139,6 @@ export function analyzePublishQuality(
     const jsDocRatio = exportedWithJSDoc / totalExportedDecls;
     score += Math.round(jsDocRatio * 15);
     positives.push(`${exportedWithJSDoc}/${totalExportedDecls} exported declarations have JSDoc`);
-  }
-
-  // +10 for overloads
-  if (overloadCount > 0) {
-    score += Math.min(10, overloadCount * 3);
-    positives.push(`${overloadCount} function overload(s)`);
   }
 
   score = Math.min(100, score);

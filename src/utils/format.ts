@@ -124,14 +124,20 @@ export function renderReport(result: AnalysisResult): string {
   return lines.join("\n");
 }
 
+function isDiagnosticOnly(dim: DimensionResult): boolean {
+  return dim.enabled && Object.keys(dim.weights).length === 0;
+}
+
 function renderDimLine(lines: string[], dim: DimensionResult): void {
+  const diagnostic = isDiagnosticOnly(dim);
+  const suffix = diagnostic ? pc.dim(" (diagnostic)") : "";
   const name = dim.label.padEnd(22);
   if (!dim.enabled || dim.score === null) {
     lines.push(`  ${name}${pc.dim("n/a")}`);
   } else {
     const bar = renderBar(dim.score);
     const pct = `${Math.round(dim.score)}%`.padStart(4);
-    lines.push(`  ${name}${bar}  ${pct}`);
+    lines.push(`  ${name}${bar}  ${pct}${suffix}`);
   }
 }
 

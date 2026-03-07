@@ -1,0 +1,7 @@
+{
+  "packages": {
+    "elite": ["zod@3.24.2", "valibot@1.0.0", "ts-pattern@5.6.2"],
+    "solid": ["date-fns@4.1.0", "remeda@2.21.2", "neverthrow@8.2.0"],
+    "loose": ["express@5.1.0", "lodash@4.17.21", "axios@1.8.4"]
+  }
+}

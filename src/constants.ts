@@ -12,7 +12,7 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "apiSpecificity",
     label: "API Specificity",
     sourceOnly: false,
-    weights: { consumerApi: 0.3 },
+    weights: { consumerApi: 0.55 },
   },
   {
     key: "apiSafety",
@@ -24,13 +24,13 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "apiExpressiveness",
     label: "API Expressiveness",
     sourceOnly: false,
-    weights: { consumerApi: 0.2 },
+    weights: {},
   },
   {
     key: "publishQuality",
     label: "Publish Quality",
     sourceOnly: false,
-    weights: { consumerApi: 0.15, implementationQuality: 0.1 },
+    weights: { consumerApi: 0.1, implementationQuality: 0.1 },
   },
   {
     key: "declarationFidelity",

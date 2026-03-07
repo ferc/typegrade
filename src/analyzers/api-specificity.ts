@@ -8,6 +8,8 @@ const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSpecificity")!;
 interface WeightedSample {
   score: number;
   weight: number;
+  features: string[];
+  containsAny: boolean;
 }
 
 export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResult {
@@ -30,7 +32,7 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
         if (samplesFromDecl >= 12) {break;}
         const type = param.getType();
         const result = analyzePrecision(type);
-        samples.push({ score: result.score, weight: 1 });
+        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
         samplesFromDecl++;
 
         if (result.score <= 20) {
@@ -49,7 +51,7 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
       if (samplesFromDecl < 12) {
         const returnType = fn.getReturnType();
         const result = analyzePrecision(returnType);
-        samples.push({ score: result.score, weight: 1.25 });
+        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1.25 });
         samplesFromDecl++;
 
         if (result.score <= 20) {
@@ -73,7 +75,7 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
         if (samplesFromDecl >= 12) {break;}
         const type = prop.getType();
         const result = analyzePrecision(type);
-        samples.push({ score: result.score, weight: 0.75 });
+        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
         samplesFromDecl++;
       }
     }
@@ -83,7 +85,7 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
       if (!alias.isExported()) {continue;}
       const type = alias.getType();
       const result = analyzePrecision(type);
-      samples.push({ score: result.score, weight: 0.75 });
+      samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
     }
 
     // Exported variables (weight 1.0)
@@ -92,7 +94,7 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
       for (const decl of varStmt.getDeclarations()) {
         const type = decl.getType();
         const result = analyzePrecision(type);
-        samples.push({ score: result.score, weight: 1 });
+        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
 
         if (result.score <= 20) {
           issues.push({
@@ -129,7 +131,27 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
     weightedSum += sample.score * sample.weight;
     totalWeight += sample.weight;
   }
-  const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+  let score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+
+  // Feature-vector adjustments on top of weighted average
+  const allFeatures = samples.flatMap((s) => s.features);
+  const featureCounts = countFeatures(allFeatures);
+
+  if (featureCounts['constrained-generic'] > 0) {score += 5;}
+  if (featureCounts['branded'] > 0) {score += 8;}
+  if (featureCounts['discriminated-union'] > 0) {score += 6;}
+  if (featureCounts['mapped-type'] > 0) {score += 5;}
+  if (featureCounts['conditional-type'] > 0) {score += 4;}
+  if (featureCounts['template-literal'] > 0) {score += 5;}
+
+  // Penalty: any leakage in containers
+  const anyContainers = samples.filter((s) => s.containsAny).length;
+  if (anyContainers > 0) {score -= Math.min(anyContainers * 4, 20);}
+
+  // Penalty: record-like dominating
+  if ((featureCounts['record-like'] ?? 0) > samples.length * 0.3) {score -= 8;}
+
+  score = Math.max(0, Math.min(100, score));
 
   positives.push(`${samples.length} exported type positions analyzed`);
   if (score >= 70) {positives.push("High type specificity across exports");}
@@ -146,4 +168,12 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
     score,
     weights: CONFIG.weights,
   };
+}
+
+function countFeatures(features: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const f of features) {
+    counts[f] = (counts[f] ?? 0) + 1;
+  }
+  return counts;
 }

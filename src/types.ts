@@ -51,3 +51,10 @@ export interface PrecisionFeatures {
   features: string[];
   reasons: string[];
 }
+
+export interface PackageAnalysisContext {
+  packageName: string;
+  packageRoot: string;
+  packageJsonPath: string;
+  typesEntrypoint: string | null;
+}

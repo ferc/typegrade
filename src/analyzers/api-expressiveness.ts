@@ -157,33 +157,47 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
     };
   }
 
-  // Score from feature density
-  const featureWeights: Record<string, { count: number; weight: number }> = {
-    conditionalTypes: { count: counts.conditionalTypes, weight: 10 },
-    constrainedGenerics: { count: counts.constrainedGenerics, weight: 8 },
-    discriminatedUnions: { count: counts.discriminatedUnions, weight: 8 },
-    genericCorrelation: { count: counts.genericCorrelation, weight: 12 },
-    indexedAccess: { count: counts.indexedAccess, weight: 6 },
-    inferTypes: { count: counts.inferTypes, weight: 8 },
-    mappedTypes: { count: counts.mappedTypes, weight: 10 },
-    overloads: { count: counts.overloads, weight: 6 },
-    templateLiterals: { count: counts.templateLiterals, weight: 8 },
-    tuples: { count: counts.tuples, weight: 5 },
-  };
+  // Presence-based scoring: each category contributes if present, independent of library size
+  let score = 0;
 
-  let featureScore = 0;
-  for (const [name, { count, weight }] of Object.entries(featureWeights)) {
-    if (count > 0) {
-      // Diminishing returns: first occurrence full weight, subsequent half
-      featureScore += weight + Math.min(count - 1, 3) * (weight * 0.3);
-      positives.push(`${count} ${formatFeatureName(name)}`);
-    }
+  if (counts.genericCorrelation > 0) {
+    score += 18;
+    positives.push(`${counts.genericCorrelation} correlated generic(s)`);
+  }
+  if (counts.constrainedGenerics > 0) {
+    score += 15;
+    positives.push(`${counts.constrainedGenerics} constrained generic(s)`);
+  }
+  if (counts.mappedTypes > 0) {
+    score += 12;
+    positives.push(`${counts.mappedTypes} mapped type(s)`);
+  }
+  if (counts.conditionalTypes > 0) {
+    score += 12;
+    positives.push(`${counts.conditionalTypes} conditional type(s)`);
+  }
+  if (counts.inferTypes > 0) {
+    score += 10;
+    positives.push(`${counts.inferTypes} infer type(s)`);
+  }
+  if (counts.templateLiterals > 0) {
+    score += 10;
+    positives.push(`${counts.templateLiterals} template literal(s)`);
+  }
+  if (counts.discriminatedUnions > 0) {
+    score += 10;
+    positives.push(`${counts.discriminatedUnions} discriminated union(s)`);
+  }
+  if (counts.indexedAccess > 0) {
+    score += 8;
+    positives.push(`${counts.indexedAccess} indexed access type(s)`);
+  }
+  if (counts.tuples > 0) {
+    score += 5;
+    positives.push(`${counts.tuples} tuple type(s)`);
   }
 
-  // Normalize to 0-100 based on declaration count
-  // A fully expressive API would have ~80 feature points per 10 declarations
-  const density = featureScore / Math.max(counts.totalDeclarations, 1);
-  const score = Math.min(100, Math.round(density * 12.5));
+  score = Math.min(100, score);
 
   if (score < 30) {negatives.push("Limited use of advanced type-system features");}
 
@@ -192,7 +206,7 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
     issues,
     key: CONFIG.key,
     label: CONFIG.label,
-    metrics: { ...counts, density, featureScore },
+    metrics: counts as unknown as Record<string, number>,
     negatives,
     positives,
     score,
@@ -218,9 +232,3 @@ function walkTypeNode(node: Node, counts: FeatureCounts): void {
   });
 }
 
-function formatFeatureName(name: string): string {
-  return name
-    .replaceAll(/([A-Z])/g, " $1")
-    .toLowerCase()
-    .trim();
-}
