@@ -1,3 +1,9 @@
+## [0.7.3](https://github.com/ferc/typegrade/compare/v0.7.2...v0.7.3) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** remove registry-url to stop overriding OIDC npm auth ([eddaf91](https://github.com/ferc/typegrade/commit/eddaf91466ef7b2651f077afb033720b664908cf))
+
 ## [0.7.2](https://github.com/ferc/typegrade/compare/v0.7.1...v0.7.2) (2026-03-08)
 
 ### Bug Fixes
