@@ -1,10 +1,10 @@
 import type { DeclarationGraph, GraphStats, ResolvedEntrypoint } from "./types.js";
+import { type WalkOptions, walkDeclarationGraph } from "./walker.js";
+import { basename, dirname, join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
 import type { Project } from "ts-morph";
 import { deduplicateGraph } from "./dedup.js";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { resolveEntrypoints } from "./resolve.js";
-import { walkDeclarationGraph } from "./walker.js";
 
 export type {
   DeclarationGraph,
@@ -13,7 +13,7 @@ export type {
   GraphStats,
   ResolvedEntrypoint,
 } from "./types.js";
-export type { WalkResult } from "./walker.js";
+export type { WalkInput, WalkOptions, WalkResult } from "./walker.js";
 export { resolveEntrypoints } from "./resolve.js";
 
 /** Well-known locations for declaration index files, tried in order */
@@ -37,7 +37,16 @@ const LAST_RESORT_PATHS = [
  * 4. Deduplicates equivalent modules
  * 5. Returns the final file list + stats
  */
-export function buildDeclarationGraph(pkgDir: string, project: Project): DeclarationGraph {
+export interface BuildGraphOptions {
+  /** Follow sibling @types/* packages for more complete coverage */
+  followSiblingTypes?: boolean;
+}
+
+export function buildDeclarationGraph(
+  pkgDir: string,
+  project: Project,
+  options?: BuildGraphOptions,
+): DeclarationGraph {
   let entrypoints = resolveEntrypoints(pkgDir);
   let fallbackReason: string | undefined = undefined;
 
@@ -47,6 +56,21 @@ export function buildDeclarationGraph(pkgDir: string, project: Project): Declara
     if (lastResort) {
       entrypoints = [lastResort.entrypoint];
       fallbackReason = lastResort.reason;
+    }
+  }
+
+  // Detect and include sibling @types/* packages for better coverage
+  const walkOptions: WalkOptions = {};
+  if (options?.followSiblingTypes) {
+    const siblingDirs = findSiblingTypePackages(pkgDir);
+    if (siblingDirs.length > 0) {
+      walkOptions.additionalPkgDirs = siblingDirs;
+      walkOptions.followSiblingTypes = true;
+      // Also resolve entrypoints from sibling @types packages
+      for (const sibDir of siblingDirs) {
+        const sibEntrypoints = resolveEntrypoints(sibDir);
+        entrypoints.push(...sibEntrypoints);
+      }
     }
   }
 
@@ -70,19 +94,31 @@ export function buildDeclarationGraph(pkgDir: string, project: Project): Declara
   }
 
   // Walk the import graph from entrypoints
-  const walkResult = walkDeclarationGraph(entrypoints, project, pkgDir);
+  const walkResult = walkDeclarationGraph({
+    entrypoints,
+    options: walkOptions,
+    pkgDir,
+    project,
+  });
   const { nodes, crossPackageTypeRefs } = walkResult;
 
   // Deduplicate
-  const { groups, filesToRemove } = deduplicateGraph(nodes, entrypoints, project);
+  const { groups, filesToRemove } = deduplicateGraph(
+    nodes,
+    entrypoints,
+    project,
+  );
 
   // Final file list: all reachable minus deduped
-  const filesToAnalyze = [...nodes.keys()].filter((fp) => !filesToRemove.has(fp));
+  const filesToAnalyze = [...nodes.keys()].filter(
+    (fp) => !filesToRemove.has(fp),
+  );
 
   // Compute stats
   const dedupByStrategy: Record<string, number> = {};
   for (const grp of groups) {
-    dedupByStrategy[grp.reason] = (dedupByStrategy[grp.reason] ?? 0) + grp.duplicates.length;
+    dedupByStrategy[grp.reason] =
+      (dedupByStrategy[grp.reason] ?? 0) + grp.duplicates.length;
   }
 
   const stats: GraphStats = {
@@ -103,6 +139,57 @@ export function buildDeclarationGraph(pkgDir: string, project: Project): Declara
     nodes,
     stats,
   };
+}
+
+/**
+ * Find sibling @types/* packages in the same node_modules directory.
+ * This allows the walker to follow type references across package boundaries
+ * when a package re-exports or references types from its @types sibling.
+ */
+function findSiblingTypePackages(pkgDir: string): string[] {
+  const siblingDirs: string[] = [];
+
+  try {
+    // Determine the node_modules root
+    const parentDir = dirname(pkgDir);
+    const parentName = basename(parentDir);
+
+    // For scoped packages (node_modules/@scope/pkg), go up two levels
+    const nodeModulesRoot =
+      parentName === "node_modules" ? parentDir : dirname(parentDir);
+    if (basename(nodeModulesRoot) !== "node_modules") {
+      return [];
+    }
+
+    // Check for @types directory
+    const typesDir = join(nodeModulesRoot, "@types");
+    if (!existsSync(typesDir)) {
+      return [];
+    }
+
+    // Read package.json to get the package name
+    const pkgJsonPath = join(pkgDir, "package.json");
+    if (!existsSync(pkgJsonPath)) {
+      return [];
+    }
+
+    // Look for type packages that commonly provide types for this package's dependencies
+    const entries = readdirSync(typesDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const typePkgDir = join(typesDir, entry.name);
+      const typePkgJson = join(typePkgDir, "package.json");
+      if (existsSync(typePkgJson)) {
+        siblingDirs.push(typePkgDir);
+      }
+    }
+  } catch {
+    // Ignore filesystem errors
+  }
+
+  return siblingDirs;
 }
 
 /**

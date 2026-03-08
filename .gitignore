@@ -6,3 +6,4 @@ dist/
 .claude/plans/
 benchmarks/results/
 benchmarks-output/
+benchmarks-output/eval-raw/

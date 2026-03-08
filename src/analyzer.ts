@@ -67,6 +67,9 @@ function makeDefaultGraphStats(): GraphStats {
 /**
  * Detect undersampling — packages where we have too little data
  * to produce a reliable score.
+ *
+ * Also tracks cross-package type refs as a coverage-quality signal
+ * and splits undersampling reasons by types source category.
  */
 function computeCoverageDiagnostics(opts: {
   graphStats: GraphStats;
@@ -78,8 +81,14 @@ function computeCoverageDiagnostics(opts: {
   const reasons: string[] = [];
 
   if (graphStats.totalReachable < MIN_REACHABLE_FILES && !graphStats.usedFallbackGlob) {
+    let sourceLabel = "";
+    if (typesSource === "@types") {
+      sourceLabel = " (@types package)";
+    } else if (typesSource === "mixed") {
+      sourceLabel = " (mixed source)";
+    }
     reasons.push(
-      `Only ${graphStats.totalReachable} reachable file(s) from entrypoints (minimum: ${MIN_REACHABLE_FILES})`,
+      `Only ${graphStats.totalReachable} reachable file(s) from entrypoints (minimum: ${MIN_REACHABLE_FILES})${sourceLabel}`,
     );
   }
   if (surfacePositions < MIN_MEASURED_POSITIONS) {
@@ -104,12 +113,24 @@ function computeCoverageDiagnostics(opts: {
     );
   }
 
+  // High cross-package type refs with few reachable files may indicate missing @types traversal
+  const xrefs = graphStats.crossPackageTypeRefs ?? 0;
+  if (xrefs > 5 && graphStats.totalReachable < 5 && typesSource === "@types") {
+    reasons.push(
+      `${xrefs} cross-package type references with only ${graphStats.totalReachable} reachable files — @types package may have incomplete traversal`,
+    );
+  }
+
+  const undersampled = reasons.length > 0;
+
   return {
+    coveragePenaltyApplied: undersampled,
+    crossPackageTypeRefs: xrefs,
     measuredDeclarations: surfaceDeclarations,
     measuredPositions: surfacePositions,
     reachableFiles: graphStats.totalReachable,
     typesSource,
-    undersampled: reasons.length > 0,
+    undersampled,
     undersampledReasons: reasons,
   };
 }

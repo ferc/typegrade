@@ -699,6 +699,12 @@ function main() {
     let bestConcordance = 0;
     let candidatesEvaluated = 0;
 
+    // Build entry map for weight optimization
+    const optimEntryMap = new Map<string, ResultEntry>();
+    for (const entry of snapshot.entries) {
+      optimEntryMap.set(entry.name, entry);
+    }
+
     // Compute current concordance baseline
     const currentConcordance = concordance["composite"]?.rate ?? 0;
     bestConcordance = currentConcordance;
@@ -726,8 +732,8 @@ function main() {
           let evalTotal = 0;
           for (const assertion of PAIRWISE_ASSERTIONS) {
             if (assertion.composite !== "consumerApi") continue;
-            const higherEntry = entryMap.get(assertion.higher);
-            const lowerEntry = entryMap.get(assertion.lower);
+            const higherEntry = optimEntryMap.get(assertion.higher);
+            const lowerEntry = optimEntryMap.get(assertion.lower);
             if (!higherEntry || !lowerEntry) continue;
 
             const higherScore = recomputeConsumerApi(higherEntry, candidate);

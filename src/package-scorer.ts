@@ -212,7 +212,9 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
 
     // Build declaration graph: resolve entrypoints → walk imports → deduplicate
     const graphProject = loadProject(tmpDir);
-    const graph = buildDeclarationGraph(effectivePkgDir, graphProject);
+    const graph = buildDeclarationGraph(effectivePkgDir, graphProject, {
+      followSiblingTypes: true,
+    });
 
     // Resolve first entrypoint for context
     const entrypoints = resolveEntrypoints(effectivePkgDir);

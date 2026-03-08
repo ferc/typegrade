@@ -264,42 +264,61 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
 
   // ── Category 3: Generic-structure rules ─────────────────────────────────
+  // Weak signals — weights intentionally low to prevent over-prediction
+  // Of schema/utility domains from generic-heavy libraries (ORM, stream, result).
 
-  // 3a: Schema — >60% type aliases (score 0.3)
-  if (totalDecls > 0 && typeAliases / totalDecls > 0.6) {
+  // 3a: Schema — >70% type aliases AND >10 total type aliases (tightened threshold)
+  if (totalDecls > 5 && typeAliases / totalDecls > 0.7 && typeAliases > 10) {
+    const weight =
+      0.2 *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "schema"
+        ? competingDomainPenalty
+        : 1);
     emit({
       category: "generic-structure",
       direction: "positive",
       domain: "schema",
-      reason: `${typeAliases}/${totalDecls} declarations are type aliases (>60%)`,
+      reason: `${typeAliases}/${totalDecls} declarations are type aliases (>70%)`,
       ruleId: "type-alias-density",
-      weight: 0.3,
+      weight,
     });
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases`);
   }
 
-  // 3b: Schema — >5 generic type aliases (score 0.2)
-  if (genericTypeAliases > 5) {
+  // 3b: Schema — >10 generic type aliases (tightened from >5)
+  if (genericTypeAliases > 10) {
+    const weight =
+      0.15 *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "schema"
+        ? competingDomainPenalty
+        : 1);
     emit({
       category: "generic-structure",
       direction: "positive",
       domain: "schema",
-      reason: `${genericTypeAliases} generic type aliases detected (>5)`,
+      reason: `${genericTypeAliases} generic type aliases detected (>10)`,
       ruleId: "generic-type-alias-count",
-      weight: 0.2,
+      weight,
     });
     signals.push(`${genericTypeAliases} generic type aliases detected`);
   }
 
-  // 3c: Utility — >30% multi-generic functions (score 0.2)
-  if (totalFunctions > 0 && multiGenericFunctions / totalFunctions > 0.3) {
+  // 3c: Utility — >40% multi-generic functions (tightened from >30%)
+  if (totalFunctions > 5 && multiGenericFunctions / totalFunctions > 0.4) {
+    const weight =
+      0.15 *
+      (packageNameMatchedDomain &&
+      packageNameMatchedDomain !== "schema" &&
+      packageNameMatchedDomain !== "utility"
+        ? competingDomainPenalty
+        : 1);
     emit({
       category: "generic-structure",
       direction: "positive",
       domain: "schema",
       reason: `${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type params`,
       ruleId: "multi-generic-fn-density",
-      weight: 0.2,
+      weight,
     });
     emit({
       category: "generic-structure",
@@ -307,7 +326,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       domain: "utility",
       reason: `${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type params`,
       ruleId: "multi-generic-fn-density",
-      weight: 0.2,
+      weight,
     });
     signals.push(
       `${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type parameters`,
@@ -510,6 +529,20 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
+  // ── Category 5b+: Additional contradiction penalties ────────────────────
+
+  // If multiple competing domains have similar scores, penalize the weaker ones
+  const domainScoreEntries = Object.entries(scores).filter(([, sc]) => sc > 0.1);
+  if (domainScoreEntries.length >= 3 && !packageNameMatchedDomain) {
+    // Many competing domains is itself a signal of low specificity — reduce all slightly
+    for (const [domain] of domainScoreEntries) {
+      if (domain !== "general") {
+        scores[domain] = (scores[domain] ?? 0) * 0.85;
+      }
+    }
+    signals.push(`${domainScoreEntries.length} competing domains detected — confidence reduced`);
+  }
+
   // ── Determine winning domain ────────────────────────────────────────────
 
   let bestDomain: DomainType = "general";
@@ -539,18 +572,48 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
 
   const ambiguityGap = bestScore - secondBestScore;
 
-  // Abstain when no package-name match and ambiguity gap is too narrow
-  // This prevents low-confidence guesses from triggering wrong domain adjustments
-  if (!packageNameMatchedDomain && bestDomain !== "general" && ambiguityGap < 0.2) {
-    signals.push(
-      `Abstaining from ${bestDomain}: ambiguity gap ${ambiguityGap.toFixed(2)} < 0.2 without package-name match`,
+  // Abstain to general in these cases:
+  // 1. No package-name match and ambiguity gap is too narrow
+  // 2. Winner has only generic-structure evidence (no declaration-role or scenario-trigger)
+  // 3. Winner has only a single weak rule
+  if (bestDomain !== "general") {
+    const bestRulesForAbstention = rulesByDomain[bestDomain] ?? [];
+    const hasStrongEvidence = bestRulesForAbstention.some(
+      (rule) =>
+        rule.category === "package-name" ||
+        rule.category === "declaration-role" ||
+        rule.category === "scenario-trigger",
     );
-    bestDomain = "general";
-    bestScore = 0;
+    const onlyGenericStructure = bestRulesForAbstention.every(
+      (rule) => rule.category === "generic-structure" || rule.category === "negative",
+    );
+
+    if (!packageNameMatchedDomain && ambiguityGap < 0.2) {
+      signals.push(
+        `Abstaining from ${bestDomain}: ambiguity gap ${ambiguityGap.toFixed(2)} < 0.2 without package-name match`,
+      );
+      bestDomain = "general";
+      bestScore = 0;
+    } else if (onlyGenericStructure && !packageNameMatchedDomain) {
+      // Only generic-structure rules matched — too weak to commit
+      signals.push(
+        `Abstaining from ${bestDomain}: only generic-structure evidence (no declaration-role or scenario-trigger)`,
+      );
+      bestDomain = "general";
+      bestScore = 0;
+    } else if (!hasStrongEvidence && !packageNameMatchedDomain && bestScore < 0.5) {
+      // Weak evidence without package-name — abstain
+      signals.push(
+        `Abstaining from ${bestDomain}: no strong evidence (score ${bestScore.toFixed(2)}) without package-name match`,
+      );
+      bestDomain = "general";
+      bestScore = 0;
+    }
   }
 
-  // Fallback: utility if mostly type aliases and nothing else won
-  if (bestDomain === "general" && totalDecls > 0 && typeAliases / totalDecls > 0.5) {
+  // Fallback: utility only if overwhelmingly type aliases AND no other domain won
+  // Tightened from 50% to 70% to reduce false positives
+  if (bestDomain === "general" && totalDecls > 5 && typeAliases / totalDecls > 0.7) {
     bestDomain = "utility";
     bestScore = 0.4;
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases (utility fallback)`);

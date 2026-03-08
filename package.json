@@ -18,11 +18,17 @@
     "benchmark": "tsx benchmarks/run.ts",
     "benchmark:train": "tsx benchmarks/run.ts",
     "benchmark:holdout": "tsx benchmarks/run.ts --holdout",
+    "benchmark:eval": "tsx benchmarks/run.ts --eval",
+    "benchmark:pool": "tsx benchmarks/run.ts --eval --count",
     "benchmark:random": "tsx benchmarks/run.ts --pool-sample",
     "benchmark:all": "tsx benchmarks/run.ts && tsx benchmarks/run.ts --holdout",
     "benchmark:calibrate": "tsx benchmarks/calibrate.ts",
+    "benchmark:judge": "tsx benchmarks/judge.ts",
+    "benchmark:optimize": "tsx benchmarks/optimize.ts",
     "benchmark:gate": "tsx benchmarks/gate.ts",
-    "benchmark:report": "tsx benchmarks/calibrate.ts"
+    "benchmark:report": "tsx benchmarks/calibrate.ts",
+    "gate:train": "tsx benchmarks/gate.ts",
+    "gate:eval": "tsx benchmarks/gate.ts --eval"
   },
   "dependencies": {
     "commander": "^14.0.3",

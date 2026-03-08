@@ -6,10 +6,29 @@ import { existsSync } from "node:fs";
 /** Declaration file extensions to try when resolving reference path directives */
 const DTS_EXTENSIONS = [".d.ts", ".d.mts", ".d.cts"] as const;
 
+export interface WalkOptions {
+  /**
+   * If true, follow cross-package type references into sibling @types/* packages.
+   * This allows more complete coverage for packages that re-export from @types.
+   */
+  followSiblingTypes?: boolean;
+  /**
+   * Additional package directories that should be considered "in-scope" for traversal.
+   * Used to include @types/* sibling packages in the analysis.
+   */
+  additionalPkgDirs?: string[];
+}
+
 export interface WalkResult {
   nodes: Map<string, GraphNode>;
   /** Number of import/reference edges that pointed outside the package directory */
   crossPackageTypeRefs: number;
+}
+
+interface WalkContext {
+  project: Project;
+  normalizedPkgDir: string;
+  inScopeDirs: string[];
 }
 
 /**
@@ -18,18 +37,33 @@ export interface WalkResult {
  * - import/export statements (including `import type`)
  * - `/// <reference path="...">` directives (resolved with .d.ts/.d.mts/.d.cts fallback)
  * - `/// <reference types="...">` directives
- * Only includes files within the package directory.
- * Cross-package references are counted but not followed.
+ * Only includes files within the package directory (and any additional dirs).
+ * Cross-package references are counted but not followed (unless followSiblingTypes is set).
  */
-export function walkDeclarationGraph(
-  entrypoints: ResolvedEntrypoint[],
-  project: Project,
-  pkgDir: string,
-): WalkResult {
+export interface WalkInput {
+  entrypoints: ResolvedEntrypoint[];
+  project: Project;
+  pkgDir: string;
+  options?: WalkOptions;
+}
+
+export function walkDeclarationGraph(input: WalkInput): WalkResult {
+  const { entrypoints, project, pkgDir, options } = input;
   const nodes = new Map<string, GraphNode>();
 
   // Normalize pkgDir for path prefix matching
   const normalizedPkgDir = pkgDir.endsWith("/") ? pkgDir : `${pkgDir}/`;
+
+  // Build list of all in-scope directories for path matching
+  const inScopeDirs = [normalizedPkgDir];
+  if (options?.additionalPkgDirs) {
+    for (const dir of options.additionalPkgDirs) {
+      const normalized = dir.endsWith("/") ? dir : `${dir}/`;
+      inScopeDirs.push(normalized);
+    }
+  }
+
+  const ctx: WalkContext = { inScopeDirs, normalizedPkgDir, project };
 
   // Initialize BFS queue with entrypoints
   const queue: { filePath: string; depth: number; subpath: string }[] = [];
@@ -41,7 +75,7 @@ export function walkDeclarationGraph(
     }
 
     const absPath = sf.getFilePath();
-    if (!absPath.startsWith(normalizedPkgDir)) {
+    if (!inScopeDirs.some((dir) => absPath.startsWith(dir))) {
       continue;
     }
 
@@ -74,10 +108,10 @@ export function walkDeclarationGraph(
     }
 
     // Collect all referenced files: imports/exports + reference directives
-    const refs = collectAllReferences(sf, project, normalizedPkgDir);
+    const refs = collectAllReferences(sf, ctx);
     crossPackageTypeRefs += refs.crossPackageCount;
 
-    for (const refPath of refs.inPackage) {
+    for (const refPath of refs.inScope) {
       if (nodes.has(refPath)) {
         const existing = nodes.get(refPath)!;
         if (!existing.reachableFrom.includes(subpath)) {
@@ -102,17 +136,13 @@ export function walkDeclarationGraph(
 }
 
 interface CollectedRefs {
-  inPackage: string[];
+  inScope: string[];
   crossPackageCount: number;
 }
 
-function collectAllReferences(
-  sf: SourceFile,
-  project: Project,
-  normalizedPkgDir: string,
-): CollectedRefs {
+function collectAllReferences(sf: SourceFile, ctx: WalkContext): CollectedRefs {
   const seen = new Set<string>();
-  const inPackage: string[] = [];
+  const inScope: string[] = [];
   let crossPackageCount = 0;
 
   function addRef(absPath: string): void {
@@ -120,8 +150,8 @@ function collectAllReferences(
       return;
     }
     seen.add(absPath);
-    if (absPath.startsWith(normalizedPkgDir)) {
-      inPackage.push(absPath);
+    if (ctx.inScopeDirs.some((dir) => absPath.startsWith(dir))) {
+      inScope.push(absPath);
     } else {
       crossPackageCount++;
     }
@@ -139,7 +169,7 @@ function collectAllReferences(
   // GetPathReferenceDirectives() is the correct API (getReferencedSourceFiles does NOT follow these)
   for (const ref of sf.getPathReferenceDirectives()) {
     const rawPath = ref.getFileName();
-    const resolved = resolveReferencePath(fileDir, rawPath, project);
+    const resolved = resolveReferencePath(fileDir, rawPath, ctx.project);
     if (resolved) {
       addRef(resolved);
     }
@@ -149,13 +179,13 @@ function collectAllReferences(
   for (const ref of sf.getTypeReferenceDirectives()) {
     const typesName = ref.getFileName();
     // Try to find the referenced types file within the same package
-    const resolved = resolveReferenceTypes(typesName, normalizedPkgDir, project);
+    const resolved = resolveReferenceTypes(typesName, ctx.normalizedPkgDir, ctx.project);
     if (resolved) {
       addRef(resolved);
     }
   }
 
-  return { crossPackageCount, inPackage };
+  return { crossPackageCount, inScope };
 }
 
 /**

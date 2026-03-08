@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "split": "eval-fixed",
+  "packages": {
+    "eval-elite": [
+      { "spec": "fastify@5.3.0", "proxyFamily": "router", "sizeBand": "large", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "true-myth@7.4.0", "proxyFamily": "result", "sizeBand": "small", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "zustand@5.0.3", "proxyFamily": "state", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "esm" }
+    ],
+    "eval-solid": [
+      { "spec": "yup@1.6.1", "proxyFamily": "validation", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "purify-ts@2.1.0", "proxyFamily": "result", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "dayjs@1.11.13", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "cjs" },
+      { "spec": "got@14.4.6", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "immer@10.1.1", "proxyFamily": "state", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "pino@9.6.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "cjs" },
+      { "spec": "p-queue@8.1.0", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled", "moduleKind": "esm" }
+    ],
+    "eval-loose": [
+      { "spec": "koa@2.16.0", "proxyFamily": "router", "sizeBand": "medium", "typesSourceHint": "@types", "moduleKind": "cjs" },
+      { "spec": "ramda@0.30.1", "proxyFamily": "utility", "sizeBand": "large", "typesSourceHint": "@types", "moduleKind": "cjs" },
+      { "spec": "winston@3.17.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "cjs" },
+      { "spec": "underscore@1.13.7", "proxyFamily": "utility", "sizeBand": "large", "typesSourceHint": "@types", "moduleKind": "cjs" }
+    ],
+    "eval-stretch": [
+      { "spec": "ajv@8.17.1", "proxyFamily": "validation", "sizeBand": "large", "typesSourceHint": "bundled", "moduleKind": "cjs" },
+      { "spec": "typeorm@0.3.20", "proxyFamily": "orm", "sizeBand": "large", "typesSourceHint": "bundled", "moduleKind": "cjs" },
+      { "spec": "jotai@2.12.2", "proxyFamily": "state", "sizeBand": "medium", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "msw@2.7.3", "proxyFamily": "testing", "sizeBand": "large", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "nanoid@5.1.5", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled", "moduleKind": "esm" },
+      { "spec": "ky@1.7.5", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled", "moduleKind": "esm" }
+    ]
+  }
+}

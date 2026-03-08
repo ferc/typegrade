@@ -199,6 +199,10 @@ export interface CoverageDiagnostics {
   undersampled: boolean;
   /** If undersampled, reason(s) why */
   undersampledReasons: string[];
+  /** Cross-package type reference count (import edges outside package) */
+  crossPackageTypeRefs?: number;
+  /** Whether a coverage penalty was applied to scores */
+  coveragePenaltyApplied?: boolean;
 }
 
 export interface PackageAnalysisContext {
