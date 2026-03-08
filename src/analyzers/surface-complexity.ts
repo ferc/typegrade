@@ -13,6 +13,59 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
 
   let score = 100;
 
+  // --- Simplicity penalty ---
+  // Trivially simple surfaces should NOT get inflated complexity scores.
+  // If the surface has very few declarations and no advanced features,
+  // Start at 70 instead of 100.
+  const totalDecls = surface.declarations.length;
+  let hasAdvancedFeatures = false;
+  let simplicityPenalty = 0;
+
+  for (const decl of surface.declarations) {
+    if (decl.typeParameters.length > 0) {
+      hasAdvancedFeatures = true;
+      break;
+    }
+    if (decl.kind === "function" && (decl.overloadCount ?? 0) > 0) {
+      hasAdvancedFeatures = true;
+      break;
+    }
+    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
+      for (const method of decl.methods) {
+        if (method.typeParameters.length > 0 || method.overloadCount > 0) {
+          hasAdvancedFeatures = true;
+          break;
+        }
+      }
+      if (hasAdvancedFeatures) {
+        break;
+      }
+    }
+    // Check positions for complex types (generics, unions, intersections)
+    for (const pos of decl.positions) {
+      if (pos.type.isUnion() || pos.type.isIntersection()) {
+        hasAdvancedFeatures = true;
+        break;
+      }
+      const typeText = pos.type.getText();
+      if (typeText.includes("<") || countNesting(typeText) > 1) {
+        hasAdvancedFeatures = true;
+        break;
+      }
+    }
+    if (hasAdvancedFeatures) {
+      break;
+    }
+  }
+
+  if (totalDecls < 5 && !hasAdvancedFeatures) {
+    simplicityPenalty = 30;
+    score -= simplicityPenalty;
+    negatives.push(
+      `Trivially simple surface (${totalDecls} declaration(s), no generics/overloads/complex types, -${simplicityPenalty})`,
+    );
+  }
+
   // --- Non-conventional generic parameter naming penalty ---
   let totalTypeParams = 0;
   let nonConventional = 0;
@@ -181,6 +234,100 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     negatives.push(`${ambiguousCallSurfaces} functions with ambiguous call surfaces (-${penalty})`);
   }
 
+  // --- Conditional entrypoint sprawl ---
+  // Detect functions that accept discriminated option bags — multiple config object types
+  // That change behavior. This creates complexity for consumers who must reason about
+  // Which configuration shape to use.
+  let conditionalEntrypoints = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function") {
+      continue;
+    }
+    for (const pos of decl.positions) {
+      if (pos.role !== "param") {
+        continue;
+      }
+      const paramType = pos.type;
+      // A discriminated option bag shows up as a union of object types at a param position
+      if (paramType.isUnion()) {
+        const members = paramType.getUnionTypes();
+        // Filter out primitive/null/undefined members — only count object-like union members
+        const objectMembers = members.filter(
+          (mt) =>
+            !mt.isNull() &&
+            !mt.isUndefined() &&
+            !mt.isBoolean() &&
+            !mt.isBooleanLiteral() &&
+            !mt.isString() &&
+            !mt.isStringLiteral() &&
+            !mt.isNumber() &&
+            !mt.isNumberLiteral() &&
+            mt.getProperties().length > 0,
+        );
+        if (objectMembers.length >= 2) {
+          conditionalEntrypoints++;
+        }
+      }
+    }
+  }
+  if (conditionalEntrypoints > 0) {
+    const penalty = Math.min(10, conditionalEntrypoints * 3);
+    score -= penalty;
+    negatives.push(
+      `${conditionalEntrypoints} function(s) with discriminated option bags (-${penalty})`,
+    );
+  }
+
+  // --- Confusable exports penalty ---
+  // Multiple exported functions with the same return type but different names
+  // Make consumers wonder "which one should I use?"
+  let confusableExports = 0;
+  const returnTypeToFnNames = new Map<string, string[]>();
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function") {
+      continue;
+    }
+    for (const pos of decl.positions) {
+      if (pos.role !== "return") {
+        continue;
+      }
+      const retText = pos.type.getText();
+      // Skip trivial return types that are expected to be shared
+      if (
+        retText === "void" ||
+        retText === "boolean" ||
+        retText === "string" ||
+        retText === "number" ||
+        retText === "any" ||
+        retText === "unknown" ||
+        retText === "undefined" ||
+        retText === "never"
+      ) {
+        continue;
+      }
+      const existing = returnTypeToFnNames.get(retText);
+      if (existing) {
+        if (!existing.includes(decl.name)) {
+          existing.push(decl.name);
+        }
+      } else {
+        returnTypeToFnNames.set(retText, [decl.name]);
+      }
+    }
+  }
+  for (const names of returnTypeToFnNames.values()) {
+    if (names.length >= 3) {
+      confusableExports += names.length;
+    }
+  }
+  if (confusableExports > 0) {
+    const penalty = Math.min(10, Math.round(confusableExports / 2));
+    score -= penalty;
+    negatives.push(
+      `${confusableExports} exports share return types with 3+ other differently-named functions (-${penalty})`,
+    );
+  }
+
   // --- Duplicate public concepts penalty ---
   const declNames = surface.declarations.map((decl) => decl.name.toLowerCase());
   let duplicateConcepts = 0;
@@ -212,10 +359,13 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     metrics: {
       ambiguousCallSurfaces,
       avgChainDepth: Math.round(avgChainDepth * 100) / 100,
+      conditionalEntrypoints,
+      confusableExports,
       deeplyNestedCount,
       duplicateConcepts,
       nonConventionalTypeParams: nonConventional,
       overloadCount,
+      simplicityPenalty,
       totalDeclarations,
       totalTypeParams,
       wideUnionCount,

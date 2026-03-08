@@ -111,9 +111,9 @@ describe("e2e: analyzeProject", () => {
     }
   });
 
-  it("source mode has 11 dimensions", () => {
+  it("source mode has 12 dimensions", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
-    expect(result.dimensions).toHaveLength(11);
+    expect(result.dimensions).toHaveLength(12);
     expect(result.mode).toBe("source");
   });
 

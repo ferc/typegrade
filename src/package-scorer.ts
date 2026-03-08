@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 function makeFallbackGraphStats(): GraphStats {
   return {
     dedupByStrategy: {},
+    fallbackReason: "no-package-type-entries",
     filesDeduped: 0,
     totalAfterDedup: 0,
     totalEntrypoints: 0,
@@ -50,12 +51,6 @@ function scoreLocalPackage(
   const graphProject = loadProject(localPath);
   const graph = buildDeclarationGraph(localPath, graphProject);
 
-  let fileFilter: Set<string> | undefined = undefined;
-
-  if (graph.filesToAnalyze.length > 0) {
-    fileFilter = new Set(graph.filesToAnalyze);
-  }
-
   const entrypoints = resolveEntrypoints(localPath);
   const packageContext: PackageAnalysisContext = {
     graphStats: graph.stats,
@@ -67,13 +62,17 @@ function scoreLocalPackage(
       : null,
   };
 
-  return analyzeProject(localPath, {
+  const opts: Parameters<typeof analyzeProject>[1] = {
     domain: domain as any,
-    fileFilter,
     mode: "package",
     packageContext,
     sourceFilesOptions: { includeDts: true, includeNodeModules: true },
-  });
+  };
+  if (graph.filesToAnalyze.length > 0) {
+    opts!.fileFilter = new Set(graph.filesToAnalyze);
+  }
+
+  return analyzeProject(localPath, opts);
 }
 
 function parsePackageSpec(spec: string): { name: string; version: string } {
@@ -211,13 +210,6 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     const graphProject = loadProject(tmpDir);
     const graph = buildDeclarationGraph(effectivePkgDir, graphProject);
 
-    // Determine files to analyze
-    let fileFilter: Set<string> | undefined = undefined;
-
-    if (graph.filesToAnalyze.length > 0) {
-      fileFilter = new Set(graph.filesToAnalyze);
-    }
-
     // Resolve first entrypoint for context
     const entrypoints = resolveEntrypoints(effectivePkgDir);
 
@@ -233,13 +225,17 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
         : null,
     };
 
-    return analyzeProject(tmpDir, {
+    const opts: Parameters<typeof analyzeProject>[1] = {
       domain: options?.domain as any,
-      fileFilter,
       mode: "package",
       packageContext,
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
-    });
+    };
+    if (graph.filesToAnalyze.length > 0) {
+      opts!.fileFilter = new Set(graph.filesToAnalyze);
+    }
+
+    return analyzeProject(tmpDir, opts);
   } finally {
     try {
       rmSync(tmpDir, { force: true, recursive: true });

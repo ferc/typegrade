@@ -52,4 +52,6 @@ export interface GraphStats {
   dedupByStrategy: Record<string, number>;
   /** Whether resolution fell back to glob (no entrypoints found) */
   usedFallbackGlob: boolean;
+  /** If a fallback was used, explains which strategy found the entrypoints */
+  fallbackReason?: string;
 }

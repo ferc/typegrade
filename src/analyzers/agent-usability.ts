@@ -5,17 +5,113 @@ import type { SurfaceDeclaration } from "../surface/types.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "agentUsability")!;
 
+/** Prefixes that signal well-named happy-path helper functions */
+const HAPPY_PATH_PREFIXES = ["create", "make", "define", "build", "setup", "init", "configure"];
+
+/** Levenshtein edit distance (bounded to max for performance) */
+function editDistance(lhs: string, rhs: string, max = 3): number {
+  const la = lhs.length;
+  const lb = rhs.length;
+  if (Math.abs(la - lb) > max) {
+    return max + 1;
+  }
+
+  const prev = Array.from({ length: lb + 1 }, (_unused, idx) => idx);
+  for (let ri = 1; ri <= la; ri++) {
+    let prevDiag = prev[0]!;
+    prev[0] = ri;
+    for (let ci = 1; ci <= lb; ci++) {
+      const temp = prev[ci]!;
+      prev[ci] =
+        lhs[ri - 1] === rhs[ci - 1] ? prevDiag : 1 + Math.min(prevDiag, prev[ci - 1]!, prev[ci]!);
+      prevDiag = temp;
+    }
+  }
+  return prev[lb]!;
+}
+
+/** Extract a simplified param-type signature for a function declaration */
+function paramSignature(decl: SurfaceDeclaration): string {
+  return (decl.paramTypeNodes ?? [])
+    .map((pt) => {
+      const text = pt.typeNode?.getText() ?? "any";
+      // Normalize generics away so we compare structural shape
+      return text.replaceAll(/<[^>]+>/g, "<_>");
+    })
+    .join(",");
+}
+
+/** Build a generic-shape string like "2:C,C" (param count + constraint pattern) */
+function genericShape(typeParams: { name: string; hasConstraint: boolean }[]): string {
+  if (typeParams.length === 0) {
+    return "";
+  }
+  const constraints = typeParams.map((tp) => (tp.hasConstraint ? "C" : "U")).join(",");
+  return `${typeParams.length}:${constraints}`;
+}
+
+/** Count how many unique uppercase identifiers appear in a type text (rough alias ref count) */
+function countAliasReferences(bodyText: string): number {
+  const matches = bodyText.match(/\b[A-Z][a-zA-Z0-9]+\b/g);
+  if (!matches) {
+    return 0;
+  }
+  // Exclude well-known built-in type names
+  const BUILTINS = new Set([
+    "Array",
+    "Promise",
+    "Record",
+    "Partial",
+    "Required",
+    "Readonly",
+    "Pick",
+    "Omit",
+    "Extract",
+    "Exclude",
+    "ReturnType",
+    "Parameters",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "Awaited",
+    "NonNullable",
+    "ConstructorParameters",
+    "InstanceType",
+    "ThisParameterType",
+    "OmitThisParameter",
+    "String",
+    "Number",
+    "Boolean",
+    "Object",
+    "Function",
+    "Symbol",
+    "BigInt",
+    "Date",
+    "RegExp",
+    "Error",
+    "TypeError",
+    "RangeError",
+    "SyntaxError",
+  ]);
+  const unique = new Set(matches.filter((match) => !BUILTINS.has(match)));
+  return unique.size;
+}
+
 /**
- * Consumer-guidance analyzer: measures how well the API guides
- * AI agents and human consumers toward correct usage.
+ * Consumer-guidance analyzer (downstream guidance model): measures how well
+ * the API guides AI agents and human consumers toward correct usage.
  *
  * Signals:
- * - Inference stability
- * - Ambiguity of overload resolution
+ * - Inference stability (constrained generics, predictable return types)
+ * - Ambiguity of overload resolution (overlapping parameter types)
  * - Parameter-to-result predictability
  * - Discoverability of the correct export/symbol
- * - Discriminant-rich workflows
- * - Readability of emitted helper types
+ * - Wrong-path count (similar names, shared signatures, method shadows)
+ * - Equally plausible confusable APIs (similar generic shapes)
+ * - Discriminant-rich error/result workflows
+ * - Readability of type aliases after instantiation
+ * - Happy-path helper presence (create*, make*, define*, build*)
  * - Number of plausible wrong paths
  */
 export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
@@ -121,8 +217,11 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   }
 
   // --- Overload ambiguity detection (inference stability) ---
+  // Improved: instead of just counting >6 overloads, detect truly ambiguous
+  // Overloads whose parameter types overlap (agents cannot distinguish them).
   let clearOverloads = 0;
   let ambiguousOverloads = 0;
+  let overlappingOverloads = 0;
   let _totalOverloadedFunctions = 0;
 
   for (const decl of surface.declarations) {
@@ -133,6 +232,20 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
         clearOverloads++;
       } else if (overloads > 6) {
         ambiguousOverloads++;
+      }
+      // Check for overlapping parameter types across overloads:
+      // If multiple overloads share the same param count, look at first-param type text
+      // To see if they could be confused.
+      if (overloads > 1 && decl.paramTypeNodes) {
+        const firstParamText = decl.paramTypeNodes[0]?.typeNode?.getText() ?? "";
+        // Wide first-param types like string | number make overloads ambiguous
+        if (
+          firstParamText.includes("|") ||
+          firstParamText === "any" ||
+          firstParamText === "unknown"
+        ) {
+          overlappingOverloads++;
+        }
       }
     }
     if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
@@ -148,16 +261,34 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       } else if (method.overloadCount > 6) {
         ambiguousOverloads++;
       }
+      // Check overlapping param types on methods too
+      if (method.paramTypeNodes.length > 0) {
+        const firstParamText = method.paramTypeNodes[0]?.typeNode?.getText() ?? "";
+        if (
+          firstParamText.includes("|") ||
+          firstParamText === "any" ||
+          firstParamText === "unknown"
+        ) {
+          overlappingOverloads++;
+        }
+      }
     }
   }
 
-  if (clearOverloads > 0 && ambiguousOverloads === 0) {
+  if (clearOverloads > 0 && ambiguousOverloads === 0 && overlappingOverloads === 0) {
     score += 5;
     positives.push(`${clearOverloads} function(s) with clear overload patterns (+5)`);
   } else if (ambiguousOverloads > 0) {
     const penalty = Math.min(10, ambiguousOverloads * 3);
     score -= penalty;
     negatives.push(`${ambiguousOverloads} function(s) with excessive overloads (>6, -${penalty})`);
+  }
+  if (overlappingOverloads > 0) {
+    const penalty = Math.min(6, overlappingOverloads * 2);
+    score -= penalty;
+    negatives.push(
+      `${overlappingOverloads} overloaded function(s) with overlapping parameter types (-${penalty})`,
+    );
   }
 
   // --- Readable generic parameter naming ---
@@ -212,9 +343,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       }
       functionsWithGenerics++;
       const typeParamNames = method.typeParameters.map((tp) => tp.name);
-      const paramTexts = method.paramTypeNodes
-        .map((pt) => pt.typeNode?.getText() ?? "")
-        .join(" ");
+      const paramTexts = method.paramTypeNodes.map((pt) => pt.typeNode?.getText() ?? "").join(" ");
       const returnText = method.returnTypeNode?.getText() ?? "";
 
       const hasCorrelation = typeParamNames.some(
@@ -364,11 +493,13 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   // --- Wrong-path count: how many plausible wrong ways can an agent call the API ---
   let wrongPathCount = 0;
 
-  // Functions with same name but different param counts (ambiguous overloads)
+  // (a) Functions with same name but different param counts (ambiguous overloads)
   const fnNameCounts = new Map<string, number>();
+  const fnNames: string[] = [];
   for (const decl of surface.declarations) {
     if (decl.kind === "function") {
       fnNameCounts.set(decl.name, (fnNameCounts.get(decl.name) ?? 0) + 1);
+      fnNames.push(decl.name);
     }
   }
   for (const count of fnNameCounts.values()) {
@@ -377,7 +508,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
-  // Optional params without clear documentation increase wrong paths
+  // (b) Optional params without clear documentation increase wrong paths
   for (const decl of surface.declarations) {
     if (decl.kind === "function") {
       const optionalParams = decl.positions.filter(
@@ -388,6 +519,65 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       }
     }
   }
+
+  // (c) Functions with similar names (edit distance <= 2) — easily confused
+  let similarNamePairs = 0;
+  const uniqueFnNames = [...new Set(fnNames)];
+  for (let idx = 0; idx < uniqueFnNames.length; idx++) {
+    for (let jdx = idx + 1; jdx < uniqueFnNames.length; jdx++) {
+      if (editDistance(uniqueFnNames[idx]!, uniqueFnNames[jdx]!, 2) <= 2) {
+        similarNamePairs++;
+      }
+    }
+  }
+  wrongPathCount += similarNamePairs;
+
+  // (d) Methods on classes/interfaces that shadow top-level export names
+  let methodShadowCount = 0;
+  const topLevelNames = new Set(
+    surface.declarations
+      .filter((decl) => decl.kind === "function" || decl.kind === "variable")
+      .map((decl) => decl.name),
+  );
+  for (const decl of surface.declarations) {
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    for (const method of decl.methods) {
+      if (topLevelNames.has(method.name)) {
+        methodShadowCount++;
+      }
+    }
+  }
+  wrongPathCount += methodShadowCount;
+
+  // (e) Functions with identical param-type signatures but different names
+  // (agent could pick the wrong one)
+  let sameSignaturePairs = 0;
+  const fnSignatures = new Map<string, string[]>();
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function") {
+      continue;
+    }
+    const sig = paramSignature(decl);
+    // Skip zero-param functions
+    if (sig.length === 0) {
+      continue;
+    }
+    const existing = fnSignatures.get(sig);
+    if (existing) {
+      existing.push(decl.name);
+    } else {
+      fnSignatures.set(sig, [decl.name]);
+    }
+  }
+  for (const names of fnSignatures.values()) {
+    if (names.length > 1) {
+      // Each extra function with the same sig is one wrong path
+      sameSignaturePairs += names.length - 1;
+    }
+  }
+  wrongPathCount += sameSignaturePairs;
 
   if (wrongPathCount > 5) {
     const penalty = Math.min(8, Math.round(wrongPathCount / 2));
@@ -401,12 +591,27 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   // --- Inference stability: constrained generics vs unconstrained ---
   let constrainedGenerics = 0;
   let unconstrainedGenerics = 0;
+  let constrainedReturnGenerics = 0;
+  let totalReturnGenerics = 0;
   for (const decl of surface.declarations) {
     for (const tp of decl.typeParameters) {
-      if (tp.constraint) {
+      if (tp.hasConstraint) {
         constrainedGenerics++;
       } else {
         unconstrainedGenerics++;
+      }
+    }
+    // Check if generic return types use constrained generics (predictable inference)
+    if (decl.kind === "function" && decl.typeParameters.length > 0 && decl.returnTypeNode) {
+      const returnText = decl.returnTypeNode.getText();
+      for (const tp of decl.typeParameters) {
+        if (!returnText.includes(tp.name)) {
+          continue;
+        }
+        totalReturnGenerics++;
+        if (tp.hasConstraint) {
+          constrainedReturnGenerics++;
+        }
       }
     }
   }
@@ -424,6 +629,174 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
+  // Bonus for constrained return generics (predictable inference after consumer usage)
+  if (totalReturnGenerics >= 3) {
+    const constrainedReturnRatio = constrainedReturnGenerics / totalReturnGenerics;
+    if (constrainedReturnRatio > 0.6) {
+      score += 3;
+      positives.push(
+        `${Math.round(constrainedReturnRatio * 100)}% of return-position generics are constrained (predictable inference, +3)`,
+      );
+    }
+  }
+
+  // --- Equally plausible but incorrect APIs: similar generic signatures ---
+  let confusableApiCount = 0;
+  const genericShapes = new Map<string, string[]>();
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function" || decl.typeParameters.length === 0) {
+      continue;
+    }
+    const shape = genericShape(decl.typeParameters);
+    if (!shape) {
+      continue;
+    }
+    const existing = genericShapes.get(shape);
+    if (existing) {
+      existing.push(decl.name);
+    } else {
+      genericShapes.set(shape, [decl.name]);
+    }
+  }
+  for (const names of genericShapes.values()) {
+    if (names.length > 1) {
+      confusableApiCount += names.length - 1;
+    }
+  }
+
+  if (confusableApiCount > 3) {
+    const penalty = Math.min(6, confusableApiCount);
+    score -= penalty;
+    negatives.push(
+      `${confusableApiCount} export(s) with confusable generic signatures (-${penalty})`,
+    );
+  }
+
+  // --- Readability of aliases after instantiation ---
+  // Type aliases whose bodies reference >3 other type aliases produce
+  // Hard-to-read instantiated results for agents.
+  let deepAliasCount = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "type-alias" || !decl.bodyTypeNode) {
+      continue;
+    }
+    const bodyText = decl.bodyTypeNode.getText();
+    const aliasRefs = countAliasReferences(bodyText);
+    if (aliasRefs > 3) {
+      deepAliasCount++;
+    }
+  }
+
+  if (deepAliasCount > 0) {
+    const penalty = Math.min(5, deepAliasCount);
+    score -= penalty;
+    negatives.push(
+      `${deepAliasCount} type alias(es) reference >3 other aliases (hard to read after instantiation, -${penalty})`,
+    );
+  }
+
+  // --- Discoverability of the correct entrypoint ---
+  // Bonus: clear primary entrypoint with well-known main exports.
+  // Penalty: exports scattered across many small namespaces.
+  const fileSet = new Set<string>();
+  let hasIndexExport = false;
+  for (const decl of surface.declarations) {
+    fileSet.add(decl.filePath);
+    const fileLower = decl.filePath.toLowerCase();
+    if (fileLower.includes("index.") || fileLower.includes("main.") || fileLower.includes("mod.")) {
+      hasIndexExport = true;
+    }
+  }
+
+  if (hasIndexExport && totalExports >= 3) {
+    score += 3;
+    positives.push("Exports discoverable through main/index entrypoint (+3)");
+  }
+
+  const fileCount = fileSet.size;
+  if (fileCount > 8 && totalExports > 0) {
+    const exportsPerFile = totalExports / fileCount;
+    if (exportsPerFile < 2) {
+      const penalty = Math.min(4, Math.round(fileCount / 4));
+      score -= penalty;
+      negatives.push(
+        `Exports scattered across ${fileCount} files (avg ${exportsPerFile.toFixed(1)}/file, -${penalty})`,
+      );
+    }
+  }
+
+  // --- Quality of error/result discrimination ---
+  // Look for Result/Either/Effect types with discriminant fields
+  // And bonus for exhaustive matching patterns (narrow union branches).
+  let resultTypeCount = 0;
+  let discriminatedResultCount = 0;
+  const RESULT_NAMES = /result|either|effect|outcome|response|output/i;
+  const DISCRIMINANT_FIELDS = new Set([
+    "kind",
+    "type",
+    "tag",
+    "_tag",
+    "status",
+    "success",
+    "ok",
+    "error",
+  ]);
+
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "type-alias") {
+      continue;
+    }
+    if (!RESULT_NAMES.test(decl.name)) {
+      continue;
+    }
+    resultTypeCount++;
+    const bodyText = decl.bodyTypeNode?.getText() ?? "";
+    if (bodyText.includes("|")) {
+      const hasDiscriminant = [...DISCRIMINANT_FIELDS].some((field) => bodyText.includes(field));
+      if (hasDiscriminant) {
+        discriminatedResultCount++;
+      }
+    }
+  }
+
+  if (discriminatedResultCount > 0) {
+    const bonus = Math.min(5, discriminatedResultCount * 2);
+    score += bonus;
+    positives.push(
+      `${discriminatedResultCount} result/either type(s) with discriminant fields (exhaustive matching, +${bonus})`,
+    );
+  } else if (resultTypeCount > 0 && discriminatedResultCount === 0) {
+    score -= 2;
+    negatives.push(`${resultTypeCount} result-like type(s) without discriminant fields (-2)`);
+  }
+
+  // --- Happy-path helpers (create*, make*, define*, build*) ---
+  let happyPathHelperCount = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function") {
+      continue;
+    }
+    const nameLower = decl.name.toLowerCase();
+    if (HAPPY_PATH_PREFIXES.some((prefix) => nameLower.startsWith(prefix))) {
+      happyPathHelperCount++;
+    }
+  }
+
+  if (happyPathHelperCount > 0 && totalFunctions > 0) {
+    const helperRatio = happyPathHelperCount / totalFunctions;
+    if (helperRatio >= 0.15 || happyPathHelperCount >= 3) {
+      score += 4;
+      positives.push(
+        `${happyPathHelperCount} happy-path helper(s) (create*/make*/define*/build*, +4)`,
+      );
+    } else if (happyPathHelperCount >= 1) {
+      score += 2;
+      positives.push(
+        `${happyPathHelperCount} happy-path helper(s) (create*/make*/define*/build*, +2)`,
+      );
+    }
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   return {
@@ -434,15 +807,24 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     metrics: {
       ambiguousOverloads,
       clearOverloads,
+      confusableApiCount,
       constrainedGenerics,
+      constrainedReturnGenerics,
       correlatedGenericFunctions,
+      deepAliasCount,
       defaultExports,
+      discriminatedResultCount,
       functionsWithExample,
       functionsWithGenerics,
+      happyPathHelperCount,
+      methodShadowCount,
       namedExports,
       opaqueGenericCount,
       optionBagPenalties,
+      overlappingOverloads,
       readableGenericNames,
+      sameSignaturePairs,
+      similarNamePairs,
       specificReturnTypes,
       stableAliases,
       totalFunctions,

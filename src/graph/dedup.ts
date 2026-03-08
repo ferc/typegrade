@@ -104,10 +104,17 @@ function groupByStem(paths: string[]): Map<string, string[]> {
 }
 
 function normalizeStem(path: string): string {
-  // Strip .d.ts, .d.mts, .d.cts extensions
-  let stem = path.replace(/\.d\.[mc]?ts$/, "");
-  // Normalize dist/esm and dist/cjs to dist
-  stem = stem.replaceAll(/\/dist\/(esm|cjs|es|commonjs)\//g, "/dist/");
+  // Strip .d.ts, .d.mts, .d.cts extensions (must match full suffix)
+  let stem = path.replace(/\.d\.([mc])?ts$/, "");
+  // Normalize dist/esm and dist/cjs variants to dist
+  stem = stem.replaceAll(
+    /\/dist\/(esm|cjs|es|commonjs|es2015|es2020|esm5|esm2015|esm2020|fesm2015|fesm2020)\//g,
+    "/dist/",
+  );
+  // Normalize build/esm, build/cjs patterns too
+  stem = stem.replaceAll(/\/build\/(esm|cjs|es|commonjs)\//g, "/build/");
+  // Normalize lib/esm, lib/cjs patterns
+  stem = stem.replaceAll(/\/lib\/(esm|cjs|es|commonjs)\//g, "/lib/");
   return stem;
 }
 
@@ -131,6 +138,9 @@ function groupBySymbolHash(paths: string[], project: Project): Map<string, strin
       continue;
     }
 
+    // Collect all exported symbol names, including re-exports.
+    // GetExportedDeclarations() follows `export * from` and `export { X } from`
+    // So re-exported symbols are included in the name set.
     const exportedNames: string[] = [];
     for (const [name] of sf.getExportedDeclarations()) {
       exportedNames.push(name);

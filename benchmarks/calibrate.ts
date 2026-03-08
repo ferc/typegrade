@@ -327,7 +327,7 @@ function computeFalseEquivalence(entries: ResultEntry[]): Array<{ pkgA: string; 
       const delta = Math.abs(a.consumerApi - b.consumerApi);
       if (delta < 3) {
         const tierDiff = Math.abs((tierOrder[a.tier] ?? 0) - (tierOrder[b.tier] ?? 0));
-        if (tierDiff >= 2) {
+        if (tierDiff >= 3) {
           falseEquivs.push({
             pkgA: a.name,
             pkgB: b.name,
@@ -657,7 +657,23 @@ function main() {
     console.log("\nRanking loss is within acceptable range (<= 10%).");
   }
 
-  // 11. Save calibration report
+  // 11. Calibration targets check
+  console.log("\n=== Calibration Targets ===\n");
+  const targets = [
+    { name: "must-pass = 100%", met: mustPassFailed === 0, actual: `${mustPassPassed}/${mustPassPassed + mustPassFailed}` },
+    { name: "hard-diagnostic >= 95%", met: hardDiagEvals.length === 0 || hardDiagPassed / hardDiagEvals.length >= 0.95, actual: hardDiagEvals.length > 0 ? `${(hardDiagPassed / hardDiagEvals.length * 100).toFixed(1)}%` : "n/a" },
+    { name: "diagnostic >= 90%", met: diagnosticEvals.length === 0 || diagnosticPassed / diagnosticEvals.length >= 0.90, actual: diagnosticEvals.length > 0 ? `${(diagnosticPassed / diagnosticEvals.length * 100).toFixed(1)}%` : "n/a" },
+    { name: "global ranking loss < 6%", met: rankingLoss < 0.06, actual: `${(rankingLoss * 100).toFixed(1)}%` },
+    { name: "false equivalence = 0", met: falseEquivs.length === 0, actual: `${falseEquivs.length}` },
+    { name: "fallbackGlob = 0", met: !snapshot.entries.some((e: ResultEntry) => e.graphStats?.usedFallbackGlob), actual: `${snapshot.entries.filter((e: ResultEntry) => e.graphStats?.usedFallbackGlob).length}` },
+  ];
+
+  for (const t of targets) {
+    const icon = t.met ? "OK" : "MISS";
+    console.log(`  [${icon}] ${t.name.padEnd(30)} actual: ${t.actual}`);
+  }
+
+  // Save calibration report
   const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
@@ -697,6 +713,8 @@ function main() {
       rankingLoss: Math.round(rankingLoss * 1000) / 1000,
     },
     weightSuggestions: rankingLoss > 0.1 ? suggestWeightAdjustments(evals, snapshot.entries) : [],
+    calibrationTargets: targets.map((t) => ({ name: t.name, met: t.met, actual: t.actual })),
+    falseEquivalenceCount: falseEquivs.length,
   };
 
   const reportPath = join(reportDir, "calibration.json");

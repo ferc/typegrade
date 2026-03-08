@@ -189,7 +189,10 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
         continue;
       }
       const typeText = pos.type.getText();
-      const isResultLike = typeText.includes("Result") || typeText.includes("Either") || (typeText.includes("|") && typeText.includes("{"));
+      const isResultLike =
+        typeText.includes("Result") ||
+        typeText.includes("Either") ||
+        (typeText.includes("|") && typeText.includes("{"));
       if (isResultLike) {
         resultFunctionCount++;
         for (const prop of KNOWN_DISCRIMINANTS.filter((dp) => typeText.includes(dp))) {
@@ -206,6 +209,129 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     positives.push(`Consistent result discriminant: ${[...discriminantProperties][0]}`);
   }
 
+  // --- Method signature consistency ---
+  // For interfaces/classes with multiple methods, check if methods follow consistent
+  // Async/sync patterns (all Promise vs mixed) and callback vs return patterns
+  let methodSignatureInconsistencies = 0;
+  for (const decl of surface.declarations) {
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    const methods = decl.methods.filter((mt) => !mt.isPrivate);
+    if (methods.length < 3) {
+      continue;
+    }
+
+    // Check async/sync consistency: all returning Promise vs mixed
+    let asyncMethods = 0;
+    let syncMethods = 0;
+    // Check callback-style consistency: accepting callback params vs returning values
+    let callbackMethods = 0;
+    let returnMethods = 0;
+
+    for (const method of methods) {
+      const returnPositions = method.positions.filter((pos) => pos.role === "return");
+      const paramPositions = method.positions.filter((pos) => pos.role === "param");
+
+      for (const retPos of returnPositions) {
+        const retText = retPos.type.getText();
+        if (retText.includes("Promise<") || retText.includes("PromiseLike<")) {
+          asyncMethods++;
+        } else if (retText !== "void" && retText !== "undefined") {
+          syncMethods++;
+        }
+      }
+
+      const hasCallbackParam = paramPositions.some((pm) => {
+        const pmText = pm.type.getText();
+        return pmText.includes("=>") || pmText.includes("Callback") || pmText.includes("callback");
+      });
+      if (hasCallbackParam) {
+        callbackMethods++;
+      } else if (returnPositions.length > 0) {
+        returnMethods++;
+      }
+    }
+
+    // Flag mixed async/sync patterns (some Promise, some not)
+    if (asyncMethods > 0 && syncMethods > 0) {
+      const total = asyncMethods + syncMethods;
+      const dominantRatio = Math.max(asyncMethods, syncMethods) / total;
+      if (dominantRatio < 0.75) {
+        methodSignatureInconsistencies++;
+      }
+    }
+
+    // Flag mixed callback/return patterns
+    if (callbackMethods > 0 && returnMethods > 0) {
+      const total = callbackMethods + returnMethods;
+      const dominantRatio = Math.max(callbackMethods, returnMethods) / total;
+      if (dominantRatio < 0.75) {
+        methodSignatureInconsistencies++;
+      }
+    }
+  }
+
+  if (methodSignatureInconsistencies > 0) {
+    const penalty = Math.min(10, methodSignatureInconsistencies * 5);
+    score -= penalty;
+    negatives.push(
+      `${methodSignatureInconsistencies} interface(s)/class(es) with inconsistent method signatures (mixed async/sync or callback/return, -${penalty})`,
+    );
+  }
+
+  // --- Option bag consistency ---
+  // If multiple functions accept option-like object parameters, check if they follow
+  // A consistent naming pattern (all use "options", "opts", "config", etc.)
+  const optionBagNames: string[] = [];
+  const OPTION_BAG_PATTERNS = /^(options|opts|config|settings|params|args|props)$/i;
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function") {
+      continue;
+    }
+    for (const pos of decl.positions) {
+      if (pos.role !== "param") {
+        continue;
+      }
+      const paramName = pos.name;
+      const typeText = pos.type.getText();
+      // Detect option bags: param is an object-like type with a conventional name,
+      // Or any param whose type is an object literal / interface-like shape
+      const isObjectLike =
+        typeText.startsWith("{") ||
+        typeText.includes("Options") ||
+        typeText.includes("Config") ||
+        typeText.includes("Settings") ||
+        typeText.includes("Props");
+      if (isObjectLike || OPTION_BAG_PATTERNS.test(paramName)) {
+        optionBagNames.push(paramName.toLowerCase());
+      }
+    }
+  }
+
+  if (optionBagNames.length >= 3) {
+    const nameCounts = new Map<string, number>();
+    for (const nm of optionBagNames) {
+      nameCounts.set(nm, (nameCounts.get(nm) ?? 0) + 1);
+    }
+    let maxCount = 0;
+    for (const count of nameCounts.values()) {
+      if (count > maxCount) {
+        maxCount = count;
+      }
+    }
+    const dominantRatio = maxCount / optionBagNames.length;
+    if (dominantRatio < 0.6) {
+      score -= 5;
+      const uniqueNames = [...nameCounts.keys()].slice(0, 4).join(", ");
+      negatives.push(
+        `Inconsistent option bag naming (${uniqueNames}${nameCounts.size > 4 ? "..." : ""}, -5)`,
+      );
+    } else {
+      positives.push("Consistent option bag naming convention");
+    }
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   if (positives.length === 0 && negatives.length === 0) {
@@ -220,6 +346,8 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     metrics: {
       descriptiveGenerics,
       explicitReturns,
+      methodSignatureInconsistencies,
+      optionBagNames: optionBagNames.length,
       overloadRatio:
         totalFunctions > 0 ? Math.round((totalOverloads / totalFunctions) * 100) / 100 : 0,
       poorlyOrderedOverloads,

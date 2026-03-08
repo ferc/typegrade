@@ -2,6 +2,7 @@ import type {
   AnalysisMode,
   AnalysisResult,
   CompositeScore,
+  ConfidenceSummary,
   DimensionResult,
   DomainKey,
   DomainScore,
@@ -17,6 +18,7 @@ import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils
 import { basename, resolve } from "node:path";
 import { computeComposites, computeGrade } from "./scorer.js";
 import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
+import type { GraphStats } from "./graph/types.js";
 import { Project } from "ts-morph";
 import { analyzeAgentUsability } from "./analyzers/agent-usability.js";
 import { analyzeApiSafety } from "./analyzers/api-safety.js";
@@ -27,11 +29,32 @@ import { analyzeDeclarationFidelity } from "./analyzers/declaration-fidelity.js"
 import { analyzeImplementationSoundness } from "./analyzers/implementation-soundness.js";
 import { analyzePublishQuality } from "./analyzers/publish-quality.js";
 import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
+import { analyzeSpecializationPower } from "./analyzers/specialization-power.js";
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
 import { evaluateScenarioPack } from "./scenarios/types.js";
 import { extractPublicSurface } from "./surface/index.js";
 import { getScenarioPack } from "./scenarios/index.js";
+
+/** Minimum domain confidence to emit domainFitScore */
+const DOMAIN_CONFIDENCE_THRESHOLD = 0.7;
+/** Minimum gap between winner and runner-up for domain emission */
+const DOMAIN_AMBIGUITY_GAP = 0.15;
+/** Minimum domain confidence to run scenario packs */
+const SCENARIO_CONFIDENCE_THRESHOLD = 0.7;
+/** Confidence cap when graph resolution used fallback glob */
+const FALLBACK_CONFIDENCE_CAP = 0.55;
+
+function makeDefaultGraphStats(): GraphStats {
+  return {
+    dedupByStrategy: {},
+    filesDeduped: 0,
+    totalAfterDedup: 0,
+    totalEntrypoints: 0,
+    totalReachable: 0,
+    usedFallbackGlob: false,
+  };
+}
 
 export interface AnalyzeOptions {
   sourceFilesOptions?: GetSourceFilesOptions;
@@ -53,6 +76,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const isPackageMode = options?.mode === "package" || sourceFilesOptions?.includeDts === true;
   const mode: AnalysisMode = isPackageMode ? "package" : "source";
 
+  const graphStats = options?.packageContext?.graphStats ?? makeDefaultGraphStats();
+  const { usedFallbackGlob } = graphStats;
+
   const project = loadProject(absolutePath);
   let sourceFiles = getSourceFiles(project, sourceFilesOptions);
   if (options?.fileFilter) {
@@ -71,8 +97,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: 0 },
         { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
       ],
+      dedupStats: { filesRemoved: 0, groups: 0 },
       dimensions: [],
       filesAnalyzed: 0,
+      graphStats,
       mode,
       projectName,
       scoreComparability: "global",
@@ -141,10 +169,12 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const domainInference =
     domainOpt === "off"
       ? {
+          ambiguityGap: 0,
           confidence: 0,
           domain: "general" as const,
           falsePositiveRisk: 0,
           matchedRules: [] as string[],
+          runnerUpDomain: "general" as const,
           signals: [] as string[],
         }
       : detectDomain(consumerSurface, options?.packageContext?.packageName);
@@ -155,6 +185,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     analyzeApiSpecificity(consumerSurface),
     analyzeApiSafety(consumerSurface, packageName),
     analyzeSemanticLift(consumerSurface),
+    analyzeSpecializationPower(consumerSurface),
     analyzePublishQuality(consumerSurface, project, options?.packageContext),
     analyzeSurfaceConsistency(consumerSurface),
     analyzeSurfaceComplexity(consumerSurface),
@@ -196,9 +227,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Apply confidence penalty when source-mode consumer analysis fell back to raw source files
   if (usingSourceFallback) {
     for (const dim of dimensions) {
-      dim.confidence = dim.confidence === undefined
-        ? 0.6
-        : Math.min(dim.confidence, 0.6);
+      dim.confidence = dim.confidence === undefined ? 0.6 : Math.min(dim.confidence, 0.6);
       dim.confidenceSignals = dim.confidenceSignals ?? [];
       dim.confidenceSignals.push({
         reason: "Consumer analysis using raw source files instead of declarations",
@@ -206,6 +235,23 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         value: 0.6,
       });
     }
+  }
+
+  // Cap confidence when graph resolution used fallback glob
+  if (usedFallbackGlob) {
+    for (const dim of dimensions) {
+      dim.confidence =
+        dim.confidence === undefined
+          ? FALLBACK_CONFIDENCE_CAP
+          : Math.min(dim.confidence, FALLBACK_CONFIDENCE_CAP);
+      dim.confidenceSignals = dim.confidenceSignals ?? [];
+      dim.confidenceSignals.push({
+        reason: "Graph resolution used fallback glob — confidence capped",
+        source: "fallback-glob",
+        value: FALLBACK_CONFIDENCE_CAP,
+      });
+    }
+    caveats.push("Graph resolution used fallback glob; confidence capped at 0.55");
   }
 
   if (mode === "source") {
@@ -218,28 +264,30 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const globalScores = buildGlobalScores(composites);
 
   // Compute domainFitScore if domain was detected with sufficient confidence
+  // Requirements: confidence >= 0.70, ambiguity gap >= 0.15, not fallback glob (unless forced)
   let domainScore: DomainScore | undefined = undefined;
-  let scoreComparability: ScoreComparability = "global";
-  if (
+  const scoreComparability: ScoreComparability = "global";
+  const domainConfidenceMet =
     domainInference.domain !== "general" &&
-    domainInference.confidence >= 0.5 &&
-    domainOpt !== "off"
-  ) {
+    domainInference.confidence >= DOMAIN_CONFIDENCE_THRESHOLD &&
+    (domainInference.ambiguityGap ?? 1) >= DOMAIN_AMBIGUITY_GAP &&
+    domainOpt !== "off";
+
+  // Allow domain scoring even with fallback glob, but only if not auto-disabled
+  if (domainConfidenceMet && !usedFallbackGlob) {
     domainScore = computeDomainScore(
       dimensions,
       domainInference.domain as DomainType,
       domainInference.confidence,
     );
-    // Default is always global; domain is additive
-    scoreComparability = "global";
   }
 
-  // Run scenario pack if domain was detected with sufficient confidence
+  // Run scenario pack if domain was detected with sufficient confidence and no fallback glob
   let scenarioScore: ScenarioScore | undefined = undefined;
   if (
-    domainInference.domain !== "general" &&
-    domainInference.confidence >= 0.5 &&
-    domainOpt !== "off"
+    domainConfidenceMet &&
+    !usedFallbackGlob &&
+    domainInference.confidence >= SCENARIO_CONFIDENCE_THRESHOLD
   ) {
     const pack = getScenarioPack(domainInference.domain as DomainKey);
     if (pack) {
@@ -256,14 +304,38 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   const timeMs = Math.round(performance.now() - startTime);
 
+  // Compute dedup stats
+  const dedupStats = {
+    filesRemoved: graphStats.filesDeduped,
+    groups: Object.values(graphStats.dedupByStrategy).reduce((acc, val) => acc + val, 0),
+  };
+
+  // Compute confidence summary
+  const sampleCoverage = computeSampleCoverage(dimensions);
+  let scenarioApplicability = 0.1;
+  if (scenarioScore) {
+    scenarioApplicability = 0.9;
+  } else if (domainConfidenceMet) {
+    scenarioApplicability = 0.5;
+  }
+  const confidenceSummary: ConfidenceSummary = {
+    domainInference: domainInference.confidence,
+    graphResolution: usedFallbackGlob ? 0.3 : 0.95,
+    sampleCoverage,
+    scenarioApplicability,
+  };
+
   const result: AnalysisResult = {
     caveats,
     composites,
+    confidenceSummary,
+    dedupStats,
     dimensions,
     domainInference,
     domainScore,
     filesAnalyzed,
     globalScores,
+    graphStats,
     mode,
     projectName,
     scenarioScore,
@@ -278,17 +350,16 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     result.explainability = buildExplainability(dimensions, domainInference);
   }
 
-  // Pass through graph stats from package context
-  if (options?.packageContext?.graphStats) {
-    result.graphStats = options.packageContext.graphStats;
-    const gs = options.packageContext.graphStats;
-    result.dedupStats = {
-      filesRemoved: gs.filesDeduped,
-      groups: Object.values(gs.dedupByStrategy).reduce((acc, val) => acc + val, 0),
-    };
-  }
-
   return result;
+}
+
+function computeSampleCoverage(dimensions: DimensionResult[]): number {
+  const enabledDims = dimensions.filter((dim) => dim.enabled && dim.score !== null);
+  if (enabledDims.length === 0) {
+    return 0;
+  }
+  const confidences = enabledDims.map((dim) => dim.confidence ?? 0.5);
+  return confidences.reduce((sum, conf) => sum + conf, 0) / confidences.length;
 }
 
 function buildGlobalScores(composites: CompositeScore[]): GlobalScores {
@@ -351,6 +422,7 @@ function computeDomainScore(
 
   return {
     adjustments,
+    comparability: "domain",
     confidence: domainConfidence,
     domain: domain as DomainKey,
     grade: computeGrade(score),
@@ -368,6 +440,8 @@ function buildExplainability(
     matchedRules?: string[];
     suppressedIssues?: string[];
     adjustments?: { dimension: string; adjustment: string; reason: string }[];
+    runnerUpDomain?: string;
+    ambiguityGap?: number;
   },
 ): ExplainabilityReport {
   // Lowest specificity: issues from apiSpecificity
@@ -414,6 +488,13 @@ function buildExplainability(
     score: usabilityDim?.score ?? 0,
   }));
 
+  // Highest specialization power: from specializationPower positives
+  const specPowerDim = dimensions.find((dim) => dim.key === "specializationPower");
+  const highestSpecializationPower = (specPowerDim?.positives ?? []).slice(0, 10).map((pos) => ({
+    name: pos,
+    score: specPowerDim?.score ?? 0,
+  }));
+
   // Domain suppressions
   const domainSuppressions: { name: string; reason: string }[] = [];
   if (domainInference.suppressedIssues) {
@@ -427,17 +508,22 @@ function buildExplainability(
 
   // Domain ambiguities
   const domainAmbiguities: { domain: string; confidence: number; competingDomain?: string }[] = [];
-  if (domainInference.confidence < 0.5) {
-    domainAmbiguities.push({
+  if (domainInference.confidence < 0.7) {
+    const entry: { domain: string; confidence: number; competingDomain?: string } = {
       confidence: domainInference.confidence,
       domain: domainInference.domain,
-    });
+    };
+    if (domainInference.runnerUpDomain) {
+      entry.competingDomain = domainInference.runnerUpDomain;
+    }
+    domainAmbiguities.push(entry);
   }
 
   return {
     domainAmbiguities,
     domainSuppressions,
     highestLift,
+    highestSpecializationPower,
     highestSpecificity,
     lowestSpecificity,
     lowestUsability,

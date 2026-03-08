@@ -15,6 +15,18 @@ export interface PairwiseAssertion {
   expectedFailureUntil?: string;
 }
 
+export interface ScenarioAssertion {
+  higher: string;
+  lower: string;
+  domain: string;
+  scoreType: "scenarioScore" | "domainFitScore" | "agentReadiness";
+  class: "must-pass" | "diagnostic" | "hard-diagnostic" | "ambiguous" | "regression-watch";
+  reason?: string;
+  introducedAt?: string;
+  owner?: string;
+  minDelta?: number;
+}
+
 export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   // Tier boundary assertions (must-pass): elite/solid > loose
   { class: "must-pass", composite: "consumerApi", higher: "zod", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Validation library with rich branded types vs loosely-typed middleware framework" },
@@ -54,13 +66,13 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "diagnostic", composite: "consumerApi", higher: "remeda", lower: "axios" },
 
   // Loose tier differentiation (diagnostic)
-  { class: "diagnostic", composite: "consumerApi", higher: "moment", lower: "express" },
+  { ambiguity: "high", class: "ambiguous", composite: "consumerApi", higher: "moment", lower: "express" },
   { class: "diagnostic", composite: "consumerApi", higher: "uuid", lower: "axios" },
   { class: "diagnostic", composite: "consumerApi", higher: "lodash", lower: "express" },
 
   // Cross-tier (diagnostic)
   { class: "diagnostic", composite: "consumerApi", higher: "arktype", lower: "neverthrow" },
-  { class: "diagnostic", composite: "consumerApi", higher: "effect", lower: "remeda" },
+  { ambiguity: "medium", class: "ambiguous", composite: "consumerApi", higher: "effect", lower: "remeda" },
   { class: "diagnostic", composite: "consumerApi", higher: "date-fns", lower: "express" },
   { class: "diagnostic", composite: "consumerApi", higher: "zod", lower: "moment" },
   { class: "diagnostic", composite: "consumerApi", higher: "ts-pattern", lower: "axios" },
@@ -78,18 +90,20 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "diagnostic", composite: "consumerApi", higher: "rxjs", lower: "moment" },
   { class: "diagnostic", composite: "consumerApi", higher: "hono", lower: "express" },
 
-  // --- Agent readiness assertions (new) ---
+  // --- Agent readiness assertions ---
   // Fp-ts and io-ts: high sophistication but moderated agentReadiness
   { class: "hard-diagnostic", composite: "agentReadiness", higher: "zod", introducedAt: "v0.5.0", lower: "fp-ts", reason: "Zod is more agent-friendly than fp-ts despite lower sophistication" },
   { class: "hard-diagnostic", composite: "agentReadiness", higher: "valibot", introducedAt: "v0.5.0", lower: "io-ts", reason: "Valibot is more agent-friendly than io-ts" },
   { class: "diagnostic", composite: "agentReadiness", higher: "date-fns", lower: "fp-ts", reason: "date-fns is easier for AI agents than fp-ts" },
-  { class: "diagnostic", composite: "agentReadiness", higher: "remeda", lower: "io-ts", reason: "remeda has simpler API for AI agents" },
+  { ambiguity: "medium", class: "ambiguous", composite: "agentReadiness", higher: "remeda", lower: "io-ts", reason: "remeda has simpler API for AI agents but io-ts has rich typed codec system" },
 
-  // --- Type safety assertions (new) ---
+  // --- Type safety assertions ---
   { class: "hard-diagnostic", composite: "typeSafety", higher: "zod", introducedAt: "v0.5.0", lower: "express", reason: "Validation library must score higher on type safety" },
   { class: "hard-diagnostic", composite: "typeSafety", higher: "valibot", introducedAt: "v0.5.0", lower: "lodash", reason: "Validation library vs broad @types" },
   { class: "diagnostic", composite: "typeSafety", higher: "arktype", lower: "axios" },
   { class: "diagnostic", composite: "typeSafety", higher: "effect", lower: "moment" },
+  // fp-ts typeSafety high but agentReadiness lower than zod
+  { class: "diagnostic", composite: "typeSafety", higher: "fp-ts", lower: "express", reason: "fp-ts has strong type safety" },
 
   // --- Stretch corpus expansion assertions ---
   { class: "diagnostic", composite: "consumerApi", higher: "superstruct", lower: "express" },
@@ -99,4 +113,15 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
 
   // --- Regression watch ---
   { class: "regression-watch", composite: "consumerApi", higher: "drizzle-orm", introducedAt: "v0.5.0", lower: "express", reason: "drizzle-orm should not cluster with loose-tier" },
+];
+
+export const SCENARIO_ASSERTIONS: ScenarioAssertion[] = [
+  // Router scenario assertions (both detected as router domain)
+  { class: "diagnostic", domain: "router", higher: "@tanstack/react-router", introducedAt: "v0.6.0", lower: "hono", reason: "TanStack Router has more complete route typing coverage", scoreType: "scenarioScore" },
+
+  // ORM scenario assertions (both detected as orm domain)
+  { class: "diagnostic", domain: "orm", higher: "drizzle-orm", introducedAt: "v0.6.0", lower: "kysely", reason: "Drizzle ORM has stronger scenario coverage for schema inference", scoreType: "scenarioScore" },
+
+  // Validation scenario assertions (runtypes detected as validation)
+  { class: "diagnostic", domain: "validation", higher: "runtypes", introducedAt: "v0.6.0", lower: "type-fest", reason: "Runtypes has validation-specific scenario coverage", scoreType: "domainFitScore", minDelta: 0 },
 ];

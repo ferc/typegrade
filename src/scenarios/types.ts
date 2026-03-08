@@ -52,6 +52,7 @@ export function evaluateScenarioPack(
   }
 
   return {
+    comparability: "scenario",
     domain: pack.domain,
     grade,
     passedScenarios: passedCount,
