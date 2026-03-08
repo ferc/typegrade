@@ -1,3 +1,9 @@
+## [0.7.1](https://github.com/ferc/typegrade/compare/v0.7.0...v0.7.1) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** configure npm auth for release workflow ([943e4e8](https://github.com/ferc/typegrade/commit/943e4e86b455614da1d951c0917153d06b8afe58))
+
 ## [0.7.0](https://github.com/ferc/typegrade/compare/v0.6.0...v0.7.0) (2026-03-08)
 
 ### Features
