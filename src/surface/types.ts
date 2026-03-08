@@ -78,7 +78,7 @@ export interface SurfaceDeclaration {
   // Interface/class-specific
   methods?: SurfaceMethod[];
   // Type-alias specific
-  bodyTypeNode?: TypeNode;
+  bodyTypeNode?: TypeNode | undefined;
 }
 
 /** Aggregate stats for the surface */

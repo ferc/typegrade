@@ -1,6 +1,12 @@
 import type { AnalysisResult, PackageAnalysisContext } from "./types.js";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  computePackageCacheKey,
+  getPackageCachePath,
+  hasPackageCache,
+  markPackageCached,
+} from "./cache.js";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { GraphStats } from "./graph/types.js";
 import { analyzeProject } from "./analyzer.js";
@@ -101,9 +107,138 @@ function parsePackageSpec(spec: string): { name: string; version: string } {
   return { name: spec, version: "latest" };
 }
 
+function getTsVersion(): string {
+  try {
+    return execSync("tsc --version", { encoding: "utf8", stdio: "pipe" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
 export interface ScorePackageOptions {
   typesVersion?: string;
   domain?: "auto" | "off" | string;
+  /** Disable the package cache (always install fresh) */
+  noCache?: boolean;
+}
+
+/**
+ * Install a package into the cache directory, or reuse an existing cached install.
+ * Returns the path to the install root (which contains node_modules/).
+ */
+function ensureCachedInstall(
+  packageName: string,
+  packageVersion: string,
+  options?: { typesVersion?: string | undefined; noCache?: boolean | undefined },
+): { installRoot: string; cleanup: () => void } {
+  const tsVersion = getTsVersion();
+  const cacheKey = computePackageCacheKey({
+    packageSpec: `${packageName}@${packageVersion}`,
+    tsVersion,
+    typesVersion: options?.typesVersion,
+  });
+
+  // Check cache
+  if (!options?.noCache && hasPackageCache(cacheKey)) {
+    const cachePath = getPackageCachePath(cacheKey);
+    return { cleanup: () => {}, installRoot: cachePath };
+  }
+
+  // Install to temp dir, then copy to cache
+  const tmpDir = join(tmpdir(), `typegrade-${Date.now()}`);
+  mkdirSync(tmpDir, { recursive: true });
+
+  writeFileSync(
+    join(tmpDir, "package.json"),
+    JSON.stringify({
+      dependencies: {
+        [packageName]: packageVersion,
+      },
+      name: "typegrade-tmp",
+      version: "0.0.0",
+    }),
+  );
+
+  execSync("npm install --ignore-scripts --no-audit --no-fund", {
+    cwd: tmpDir,
+    stdio: "pipe",
+    timeout: 60_000,
+  });
+
+  const pkgDir = join(tmpDir, "node_modules", packageName);
+  let typesPackageName: string | undefined = undefined;
+
+  if (existsSync(pkgDir)) {
+    const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+    if (!pkgJson.types && !pkgJson.typings && !pkgJson.exports) {
+      typesPackageName = packageName.startsWith("@")
+        ? `@types/${packageName.slice(1).replace("/", "__")}`
+        : `@types/${packageName}`;
+
+      const typesSpec = options?.typesVersion
+        ? `${typesPackageName}@${options.typesVersion}`
+        : typesPackageName;
+
+      try {
+        execSync(`npm install ${typesSpec} --ignore-scripts --no-audit --no-fund`, {
+          cwd: tmpDir,
+          stdio: "pipe",
+          timeout: 30_000,
+        });
+      } catch {
+        typesPackageName = undefined;
+      }
+    }
+  }
+
+  // Determine effective package dir and write tsconfig
+  const effectivePkgName = typesPackageName ?? packageName;
+  writeFileSync(
+    join(tmpDir, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        module: "ESNext",
+        moduleResolution: "bundler",
+        skipLibCheck: false,
+        strict: true,
+        target: "ES2022",
+      },
+      include: [
+        `node_modules/${effectivePkgName}/**/*.d.ts`,
+        `node_modules/${effectivePkgName}/**/*.d.mts`,
+        `node_modules/${effectivePkgName}/**/*.d.cts`,
+      ],
+    }),
+  );
+
+  // Copy to cache
+  if (!options?.noCache) {
+    const cachePath = getPackageCachePath(cacheKey);
+    mkdirSync(cachePath, { recursive: true });
+    cpSync(tmpDir, cachePath, { recursive: true });
+    markPackageCached(cacheKey);
+
+    // Clean up temp dir
+    try {
+      rmSync(tmpDir, { force: true, recursive: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+
+    return { cleanup: () => {}, installRoot: cachePath };
+  }
+
+  // No cache — use temp dir directly, caller must clean up
+  return {
+    cleanup: () => {
+      try {
+        rmSync(tmpDir, { force: true, recursive: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    },
+    installRoot: tmpDir,
+  };
 }
 
 export function scorePackage(nameOrPath: string, options?: ScorePackageOptions): AnalysisResult {
@@ -135,83 +270,36 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
   // Parse name@version spec
   const { name: packageName, version: packageVersion } = parsePackageSpec(nameOrPath);
 
-  // Npm package — install to temp dir
-  const tmpDir = join(tmpdir(), `typegrade-${Date.now()}`);
+  // Use cached install
+  const { installRoot, cleanup } = ensureCachedInstall(packageName, packageVersion, {
+    noCache: options?.noCache,
+    typesVersion: options?.typesVersion,
+  });
 
   try {
-    mkdirSync(tmpDir, { recursive: true });
+    const pkgDir = join(installRoot, "node_modules", packageName);
 
-    writeFileSync(
-      join(tmpDir, "package.json"),
-      JSON.stringify({
-        dependencies: {
-          [packageName]: packageVersion,
-        },
-        name: "typegrade-tmp",
-        version: "0.0.0",
-      }),
-    );
-
-    execSync("npm install --ignore-scripts --no-audit --no-fund", {
-      cwd: tmpDir,
-      stdio: "pipe",
-      timeout: 60_000,
-    });
-
-    const pkgDir = join(tmpDir, "node_modules", packageName);
+    // Detect types package
     let typesPackageName: string | undefined = undefined;
-
     if (existsSync(pkgDir)) {
       const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
       if (!pkgJson.types && !pkgJson.typings && !pkgJson.exports) {
-        typesPackageName = packageName.startsWith("@")
+        const candidate = packageName.startsWith("@")
           ? `@types/${packageName.slice(1).replace("/", "__")}`
           : `@types/${packageName}`;
-
-        const typesSpec = options?.typesVersion
-          ? `${typesPackageName}@${options.typesVersion}`
-          : typesPackageName;
-
-        try {
-          execSync(`npm install ${typesSpec} --ignore-scripts --no-audit --no-fund`, {
-            cwd: tmpDir,
-            stdio: "pipe",
-            timeout: 30_000,
-          });
-        } catch {
-          typesPackageName = undefined;
+        if (existsSync(join(installRoot, "node_modules", candidate))) {
+          typesPackageName = candidate;
         }
       }
     }
 
-    // Resolve the actual package directory to use for declarations
     const effectivePkgDir = typesPackageName
-      ? join(tmpDir, "node_modules", typesPackageName)
+      ? join(installRoot, "node_modules", typesPackageName)
       : pkgDir;
-    const effectivePkgName = typesPackageName ?? packageName;
     const typesSource: "bundled" | "@types" = typesPackageName ? "@types" : "bundled";
 
-    // Write a broad tsconfig so ts-morph can resolve all imports within the package
-    writeFileSync(
-      join(tmpDir, "tsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          module: "ESNext",
-          moduleResolution: "bundler",
-          skipLibCheck: false,
-          strict: true,
-          target: "ES2022",
-        },
-        include: [
-          `node_modules/${effectivePkgName}/**/*.d.ts`,
-          `node_modules/${effectivePkgName}/**/*.d.mts`,
-          `node_modules/${effectivePkgName}/**/*.d.cts`,
-        ],
-      }),
-    );
-
     // Build declaration graph: resolve entrypoints → walk imports → deduplicate
-    const graphProject = loadProject(tmpDir);
+    const graphProject = loadProject(installRoot);
     const graph = buildDeclarationGraph(effectivePkgDir, graphProject, {
       followSiblingTypes: true,
     });
@@ -242,12 +330,8 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       opts!.fileFilter = new Set(graph.filesToAnalyze);
     }
 
-    return analyzeProject(tmpDir, opts);
+    return analyzeProject(installRoot, opts);
   } finally {
-    try {
-      rmSync(tmpDir, { force: true, recursive: true });
-    } catch {
-      // Ignore cleanup errors
-    }
+    cleanup();
   }
 }

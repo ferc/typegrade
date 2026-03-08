@@ -1,108 +1,58 @@
 # Scoring Contract
 
-This document specifies the complete scoring model: dimensions, formulas, weights, grading, and the three-layer score architecture.
+This document is the canonical reference for `typegrade`'s scoring model: all dimensions, weights, formulas, grading, and the three-layer score architecture.
 
-## Product Model
-
-typegrade produces scores at three layers:
+## Three-layer model
 
 | Layer | Score | Comparability | Description |
-|-------|-------|---------------|-------------|
-| Global | `globalConsumerApi`, `globalAgentReadiness`, `globalTypeSafety` | Across all libraries | Universal quality scores using fixed weights |
-| Domain | `domainFitScore` | Within same domain | Domain-adjusted score with weighted emphasis |
-| Scenario | `scenarioScore` | Within same scenario pack | Consumer-specified score from benchmark apps |
+|---|---|---|---|
+| Global | `consumerApi`, `agentReadiness`, `typeSafety` | Across all libraries | Universal quality scores using fixed weights |
+| Domain | `domainFitScore` | Within same domain | Domain-adjusted score with weight multipliers |
+| Scenario | `scenarioScore` | Within same scenario pack | Consumer benchmark tests for domain-specific DX |
 
-**Rule:** Unknown library default output always includes the three global scores. Domain and scenario scores are additional layers, never replacements.
+**Rule**: every library always gets the three global scores. Domain and scenario scores are additional layers, never replacements.
 
-## Global Composites
+## Global composite weights
 
-### Global Weight Model (Package Mode)
+### Package mode (8 consumer dimensions)
 
-| Dimension | consumerApi | agentReadiness | typeSafety |
-|-----------|------------|----------------|------------|
-| apiSpecificity | 0.28 | 0.18 | 0.25 |
-| apiSafety | 0.18 | 0.12 | 0.50 |
-| semanticLift | 0.12 | 0.10 | 0.10 |
-| publishQuality | 0.10 | 0.05 | 0.05 |
-| surfaceConsistency | 0.07 | 0.05 | — |
-| surfaceComplexity | 0.05 | 0.05 | — |
-| agentUsability | 0.20 | 0.35 | — |
+| Dimension | `consumerApi` | `agentReadiness` | `typeSafety` |
+|---|---|---|---|
+| apiSpecificity | 0.22 | 0.14 | 0.20 |
+| apiSafety | 0.18 | 0.12 | 0.45 |
+| semanticLift | 0.10 | 0.10 | 0.10 |
+| specializationPower | 0.15 | 0.20 | 0.10 |
+| publishQuality | 0.08 | 0.06 | 0.05 |
+| surfaceConsistency | 0.06 | 0.05 | — |
+| surfaceComplexity | 0.04 | 0.05 | — |
+| agentUsability | 0.17 | 0.28 | — |
 
-### Source Mode Additions
+### Source mode additions (4 more dimensions)
 
-Source mode adds these dimensions:
+Source mode adds these dimensions on top of the 8 above:
 
-| Dimension | consumerApi | agentReadiness | typeSafety | implementationQuality |
-|-----------|------------|----------------|------------|----------------------|
-| declarationFidelity | 0.10 | 0.05 | 0.10 | — |
-| implementationSoundness | — | — | 0.20 | 0.45 |
-| boundaryDiscipline | — | — | 0.10 | 0.25 |
-| configDiscipline | — | — | 0.05 | 0.20 |
+| Dimension | `consumerApi` | `agentReadiness` | `typeSafety` | `implementationQuality` |
+|---|---|---|---|---|
+| declarationFidelity | 0.10 | — | 0.10 | — |
+| implementationSoundness | — | — | 0.05 | 0.45 |
+| boundaryDiscipline | — | — | 0.03 | 0.25 |
+| configDiscipline | — | — | 0.02 | 0.20 |
 
-### Grading Scale
+`implementationQuality` is a fourth composite, only emitted in source mode. In package mode it is `null` with grade `N/A`.
 
-| Grade | Score Range |
-|-------|------------|
-| A+    | >= 95       |
-| A     | >= 85       |
-| B     | >= 70       |
-| C     | >= 55       |
-| D     | >= 40       |
-| F     | < 40       |
-| N/A   | null (no data) |
+**Source**: these weights are defined in `src/constants.ts` as `DIMENSION_CONFIGS`.
 
-## Domain-Fit Score
+## Grading scale
 
-When domain inference detects a known domain with ≥50% confidence, a `domainFitScore` is computed using domain-specific weight adjustments:
-
-| Domain | Key Adjustments |
-|--------|----------------|
-| router | apiSpecificity ×1.4, semanticLift ×1.3, surfaceComplexity ×0.7 |
-| validation | apiSpecificity ×1.2, semanticLift ×1.2 |
-| orm | apiSpecificity ×1.3, semanticLift ×1.2 |
-| result | semanticLift ×1.4, agentUsability ×1.2 |
-| schema | semanticLift ×1.3, surfaceComplexity ×0.6 |
-| stream | semanticLift ×1.2, surfaceComplexity ×0.7 |
-
-**Rule:** Domain inference may suppress false-positive issues but may NOT directly increase a global score.
-
-## Scenario Packs
-
-Domain-specific consumer benchmark tests that measure real downstream DX:
-
-### Router Pack
-- Path-param inference (template literal route types)
-- Search param inference
-- Loader/action result propagation
-- Route narrowing after navigation
-- Nested route context propagation
-- Link target correctness
-
-### Validation Pack
-- Unknown input to validated output
-- Refinement/transform pipelines
-- Discriminated schema composition
-- Parse/assert/guard ergonomics
-
-### ORM Pack
-- Schema-to-query result inference
-- Join result precision
-- Selected-column narrowing
-
-### Result/Effect Pack
-- Error channel propagation
-- map/flatMap/match precision
-- Async composition guidance
-
-### Schema/Utility Pack
-- Key-preserving transforms
-- Deep transforms (recursive)
-- Alias readability
-
-### Stream Pack
-- Pipe/operator inference
-- Value/error channel propagation
-- Composition patterns
+| Grade | Score range |
+|---|---|
+| A+ | >= 95 |
+| A | >= 85 |
+| B | >= 70 |
+| C | >= 55 |
+| D | >= 40 |
+| F | < 40 |
+| N/A | null (no data) |
 
 ## Dimensions
 
@@ -111,14 +61,16 @@ Domain-specific consumer benchmark tests that measure real downstream DX:
 Measures how precise exported type positions are, using per-position feature-model scoring with relation-aware signals.
 
 **Formula:**
+
 ```
-positionScore = clamp(0, 100, basePrecision + sum(featureBonus))
+positionScore = clamp(0, 100, basePrecision + sum(featureBonuses))
 score = weightedAverage(positionScores) + densityBonus + relationBonuses - penalties
 ```
 
 **Feature bonuses (per-position):**
+
 | Feature | Bonus |
-|---------|-------|
+|---|---|
 | branded | +8 |
 | constraint-strong | +8 |
 | discriminated-union | +6 |
@@ -136,9 +88,10 @@ score = weightedAverage(positionScores) + densityBonus + relationBonuses - penal
 | tuple | +3 |
 | never | +2 |
 
-**Relation-aware signals (new):**
+**Relation-aware signals:**
+
 | Signal | Effect |
-|--------|--------|
+|---|---|
 | Key-preserving transforms | +4 each (max +12) |
 | Path-param inference | +5 each (max +15) |
 | Latent discriminants | +3 each (max +9) |
@@ -149,72 +102,154 @@ score = weightedAverage(positionScores) + densityBonus + relationBonuses - penal
 
 ### apiSafety
 
-Measures `any` and `unknown` leakage in the public API.
+Measures `any` and `unknown` leakage in the public API. Domain-aware: suppresses `unknown`-parameter warnings for validation libraries where accepting `unknown` is intentional.
 
 ### semanticLift
 
 Measures type-level sophistication above both a widened baseline and an instantiated baseline.
 
-**Dual baseline model:**
-- Baseline A: erase advanced typing to broad approximations
-- Baseline B: estimate precision after generic instantiation with realistic types
-- Effective baseline = max(A, B) — lift must exceed both
+**Dual-baseline model:**
+- Baseline A: erase advanced typing to broad approximations.
+- Baseline B: estimate precision after generic instantiation with realistic types.
+- Effective baseline = max(A, B) — lift must exceed both.
 
-### agentUsability
+### specializationPower
 
-Consumer-guidance analyzer measuring how well the API guides AI agents:
+Measures how well the API specializes generic patterns into precise, domain-specific outputs. Rewards key-preserving transforms, path-param inference, decode/parse output narrowing, and channel propagation.
 
-**Signals:**
-- Discoverability: named vs default exports (+12/+6/-10)
-- Discriminated error unions (+10) vs generic Error (-5)
-- @example JSDoc coverage (+8/+4/-5)
-- Overload ambiguity (+5 clear, -3 per excessive)
-- Readable generic names (+5)
-- Parameter-to-result predictability (correlated generics, +8)
-- Narrow result types (+5)
-- Predictable export structure (+5)
-- Option bag discriminants (-3 per bag, max -9)
-- Stable alias quality (+5)
-- Generic opacity (-2 per opaque, max -8)
-- Wrong-path count (-penalty for >5 wrong paths, +3 for low ambiguity)
-- Inference stability (constrained vs unconstrained generics, +4/-3)
+### publishQuality
+
+Checks exported functions for explicit return types, typed parameters, JSDoc documentation, and proper entrypoint clarity.
 
 ### surfaceConsistency
 
-Scores semantic discipline: overload ordering, return type explicitness, naming consistency, nullability patterns, generic naming, result shape consistency.
+Scores semantic discipline: overload ordering, return type explicitness, naming consistency, nullability patterns, generic naming conventions, result shape consistency.
 
 ### surfaceComplexity
 
 Scores harmful complexity: non-conventional generics, nesting depth, wide unions, overload explosion, declaration sprawl, helper-chain depth, ambiguous call surfaces, duplicate concepts.
 
-### Source-Only Dimensions
+### agentUsability
 
-- **declarationFidelity**: Emitted `.d.ts` preserves generics and constraints
-- **implementationSoundness**: Type assertion abuse, double casts, unsound patterns
-- **boundaryDiscipline**: I/O boundary validation
-- **configDiscipline**: TypeScript compiler strictness
+Consumer-guidance analyzer measuring how well the API guides AI agents:
 
-## Composite Confidence
+| Signal | Effect |
+|---|---|
+| Named exports | +12 (named), +6 (namespace), -10 (default only) |
+| Discriminated error unions | +10 (discriminated), -5 (generic Error) |
+| @example JSDoc coverage | +8 (>50%), +4 (>20%), -5 (0%) |
+| Overload ambiguity | +5 (clear), -3 per excessive |
+| Readable generic names | +5 |
+| Parameter-to-result predictability | +8 (correlated generics) |
+| Narrow result types | +5 |
+| Predictable export structure | +5 |
+| Option bag discriminants | -3 per bag (max -9) |
+| Stable alias quality | +5 |
+| Generic opacity | -2 per opaque (max -8) |
+| Wrong-path count | -penalty for >5, +3 for low ambiguity |
+| Inference stability | +4 (constrained), -3 (unconstrained) |
+
+### declarationFidelity (source only)
+
+Checks that emitted `.d.ts` declarations preserve the source types, generic parameters, and constraints.
+
+### implementationSoundness (source only)
+
+Detects type assertion abuse (`as any`, double casts `as unknown as X`), non-null assertions, `@ts-ignore` usage, and other unsound patterns.
+
+### boundaryDiscipline (source only)
+
+Checks for runtime validation at I/O boundaries: `JSON.parse()`, `fetch()`, file reads. Rewards use of validation libraries (zod, valibot, etc.) at these boundaries.
+
+### configDiscipline (source only)
+
+Checks TypeScript compiler strictness flags. Each flag has a point value (defined in `src/constants.ts` as `STRICT_FLAGS`):
+
+| Flag | Points |
+|---|---|
+| strictNullChecks | 15 |
+| noUncheckedIndexedAccess | 12 |
+| strict | 10 |
+| noImplicitAny | 10 |
+| strictFunctionTypes | 10 |
+| exactOptionalPropertyTypes | 10 |
+| noImplicitReturns | 8 |
+| noFallthroughCasesInSwitch | 5 |
+| noImplicitOverride | 5 |
+| strictBindCallApply | 5 |
+| strictPropertyInitialization | 5 |
+| isolatedModules | 3 |
+| verbatimModuleSyntax | 2 |
+
+## Type precision hierarchy
+
+From lowest to highest precision:
+
+| Level | Base score | Example |
+|---|---|---|
+| `any` | 0 | `any` |
+| `unknown` | 20 | `unknown` |
+| `wide-primitive` | 40 | `string`, `number`, `boolean` |
+| `interface` | 55 | `{ name: string; age: number }` |
+| `void` | 60 | `void` |
+| `enum` | 65 | `enum Role { Admin, User }` |
+| `generic-bound` | 70 | `<T extends string>` |
+| `literal` | 80 | `'active'`, `42` |
+| `template-literal` | 82 | `` `/api/${string}` `` |
+| `literal-union` | 85 | `'a' \| 'b' \| 'c'` |
+| `branded` | 90 | `string & { __brand: 'UserId' }` |
+| `discriminated-union` | 95 | `{ kind: 'circle' } \| { kind: 'square' }` |
+
+## Composite confidence
 
 ```
 confidence = 0.6 * min(dimensionConfidences) + 0.4 * avg(dimensionConfidences)
 ```
 
-Default dimension confidence is 0.8 when not explicitly set.
+Default dimension confidence is 0.8 when not explicitly set. See [Confidence Model](confidence-model.md) for details.
 
-## Domain Inference
+## Domain-fit score
 
-Scored rule engine with five categories:
-- **package-name**: Direct match (+0.6)
-- **declaration-shape**: Pattern matching on names
-- **symbol-role**: Result/Either type alias detection
-- **generic-structure**: Generic parameter analysis
-- **issue-pattern**: Domain-specific patterns
+When domain inference detects a known domain with >= 70% confidence and >= 15% gap over runner-up, a `domainFitScore` is computed using domain-specific weight multipliers applied to the `consumerApi` base weights.
 
-Output: domain, confidence, falsePositiveRisk, matchedRules, adjustments.
+| Domain | Key adjustments |
+|---|---|
+| router | apiSpecificity ×1.4, semanticLift ×1.3, surfaceComplexity ×0.7, specializationPower ×1.4 |
+| validation | apiSpecificity ×1.2, semanticLift ×1.2, specializationPower ×1.2 |
+| orm | apiSpecificity ×1.3, semanticLift ×1.2, specializationPower ×1.3 |
+| result | semanticLift ×1.4, agentUsability ×1.2, specializationPower ×1.2 |
+| schema | semanticLift ×1.3, surfaceComplexity ×0.6, specializationPower ×1.3 |
+| stream | semanticLift ×1.2, surfaceComplexity ×0.7, specializationPower ×1.2 |
 
-**Hard rule:** Domain inference may suppress issue severity, but may not directly increase a score.
+**Source**: these multipliers are defined in `src/constants.ts` as `DOMAIN_FIT_ADJUSTMENTS`.
 
-## Zero-File Behavior
+**Hard rule**: domain inference may suppress issue severity but may never directly increase a global score. Domain adjustments only affect the domain-fit score layer.
 
-When no source files are found: all composites get score 0, grade "N/A".
+## Domain inference
+
+Scored rule engine with five rule categories:
+
+1. **package-name**: direct match against known library names (+0.6).
+2. **declaration-shape**: pattern matching on exported names.
+3. **symbol-role**: Result/Either type alias detection.
+4. **generic-structure**: generic parameter density analysis.
+5. **issue-pattern**: domain-specific patterns in analyzer output.
+
+Output: `domain`, `confidence`, `falsePositiveRisk`, `matchedRules`, `adjustments`.
+
+Supported domains: validation, result, router, orm, schema, stream, frontend, utility, general.
+
+## Scenario packs
+
+Domain-specific consumer benchmark tests:
+
+- **Router**: path-param inference, search-param inference, loader/action result propagation, route narrowing, nested route context, link target correctness.
+- **Validation**: unknown-to-validated output, refinement/transform pipelines, discriminated schema composition, parse/assert/guard ergonomics.
+- **ORM**: schema-to-query result inference, join result precision, selected-column narrowing.
+- **Result/Effect**: error channel propagation, map/flatMap/match precision, async composition guidance.
+- **Schema/Utility**: key-preserving transforms, deep recursive transforms, alias readability.
+- **Stream**: pipe/operator inference, value/error channel propagation, composition patterns.
+
+## Zero-file behavior
+
+When no source files are found: all composites get score 0, grade `N/A`.

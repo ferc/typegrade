@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
 import { flattenManifest, loadManifest, loadManifestByFilename, normalizeEntry, samplePool } from "./split-loader.js";
 import type { BenchmarkSplit, ManifestEntry } from "./types.js";
+import { runPool } from "./pool.js";
 
 // Parse CLI flags
 const args = process.argv.slice(2);
@@ -18,6 +19,9 @@ const poolCount = poolCountIdx >= 0 ? Number.parseInt(args[poolCountIdx + 1] ?? 
 const seedIdx = args.indexOf("--seed");
 const seed = seedIdx >= 0 ? Number.parseInt(args[seedIdx + 1] ?? "42", 10) : Date.now();
 const manifestFlag = args.find((a) => a.startsWith("--manifest="));
+const parallelMode = args.includes("--parallel");
+const concurrencyIdx = args.indexOf("--concurrency");
+const concurrency = concurrencyIdx >= 0 ? Number.parseInt(args[concurrencyIdx + 1] ?? "4", 10) : undefined;
 
 // Determine corpus split
 let corpusSplit: BenchmarkSplit | "holdout" | "pool" = "train";
@@ -60,7 +64,7 @@ function getCompositeScore(result: AnalysisResult, key: string): number | null {
   return result.composites.find((comp) => comp.key === key)?.score ?? null;
 }
 
-function main() {
+async function main() {
   // Load manifest with split-aware loader
   let packages: { tier: string; entry: ManifestEntry }[] = [];
 
@@ -93,13 +97,33 @@ function main() {
 
   const entries: BenchmarkEntry[] = [];
 
-  for (const { tier, entry } of packages) {
-    const normalized = normalizeEntry(entry);
-    const { spec, typesVersion } = normalized;
-    const name = spec.replaceAll(/@[\d.]+$/g, "");
-    console.log(`Scoring ${spec}...`);
-    try {
-      const result = scorePackage(spec, typesVersion ? { typesVersion } : undefined);
+  if (parallelMode) {
+    // Parallel scoring via worker pool
+    const tasks = packages.map(({ entry }) => {
+      const normalized = normalizeEntry(entry);
+      return { spec: normalized.spec, typesVersion: normalized.typesVersion };
+    });
+
+    console.log(`Scoring ${tasks.length} packages in parallel (concurrency: ${concurrency ?? "auto"})...\n`);
+
+    const poolResults = await runPool(tasks, {
+      concurrency,
+      onProgress: (done, total, spec) => {
+        console.log(`  [${done}/${total}] ${spec}`);
+      },
+    });
+
+    for (let i = 0; i < packages.length; i++) {
+      const { tier } = packages[i]!;
+      const poolResult = poolResults[i]!;
+      const name = poolResult.spec.replaceAll(/@[\d.]+$/g, "");
+
+      if (poolResult.error || !poolResult.result) {
+        console.error(`  FAILED: ${name}: ${poolResult.error}`);
+        continue;
+      }
+
+      const result = poolResult.result;
       const domainFitScore = result.domainScore?.score ?? null;
       const scenarioScore: ScenarioScore | null = result.scenarioScore ?? null;
 
@@ -113,12 +137,36 @@ function main() {
         tier,
         typeSafety: getCompositeScore(result, "typeSafety"),
       });
-      const domainStr = domainFitScore !== null ? ` | domainFit: ${domainFitScore}` : "";
-      const scenStr = scenarioScore ? ` | scenario: ${scenarioScore.score}(${scenarioScore.passedScenarios}/${scenarioScore.totalScenarios})` : "";
-      const fallbackStr = result.graphStats.usedFallbackGlob ? " [FALLBACK]" : "";
-      console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}${scenStr}${fallbackStr}`);
-    } catch (error) {
-      console.error(`  FAILED: ${error}`);
+    }
+  } else {
+    // Sequential scoring (default)
+    for (const { tier, entry } of packages) {
+      const normalized = normalizeEntry(entry);
+      const { spec, typesVersion } = normalized;
+      const name = spec.replaceAll(/@[\d.]+$/g, "");
+      console.log(`Scoring ${spec}...`);
+      try {
+        const result = scorePackage(spec, typesVersion ? { typesVersion } : undefined);
+        const domainFitScore = result.domainScore?.score ?? null;
+        const scenarioScore: ScenarioScore | null = result.scenarioScore ?? null;
+
+        entries.push({
+          agentReadiness: getCompositeScore(result, "agentReadiness"),
+          consumerApi: getCompositeScore(result, "consumerApi"),
+          domainFitScore,
+          name,
+          result,
+          scenarioScore,
+          tier,
+          typeSafety: getCompositeScore(result, "typeSafety"),
+        });
+        const domainStr = domainFitScore !== null ? ` | domainFit: ${domainFitScore}` : "";
+        const scenStr = scenarioScore ? ` | scenario: ${scenarioScore.score}(${scenarioScore.passedScenarios}/${scenarioScore.totalScenarios})` : "";
+        const fallbackStr = result.graphStats.usedFallbackGlob ? " [FALLBACK]" : "";
+        console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}${scenStr}${fallbackStr}`);
+      } catch (error) {
+        console.error(`  FAILED: ${error}`);
+      }
     }
   }
 
@@ -447,4 +495,7 @@ function mulberry32(a: number) {
   };
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

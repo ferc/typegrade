@@ -61,7 +61,7 @@ const VALID_DOMAINS = [
   "general",
 ] as const;
 
-export function run() {
+export function runCli() {
   const program = new Command();
 
   program
@@ -99,11 +99,13 @@ export function run() {
     .option("--verbose", "Show per-dimension breakdown")
     .option("--explain", "Show explainability report")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
+    .option("--no-cache", "Disable package cache (always install fresh)")
     .action((pkg: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
-      const result = scorePackage(pkg, { domain });
+      const noCache = opts.cache === false;
+      const result = scorePackage(pkg, { domain, noCache });
       outputResult(result, opts as OutputOptions);
     });
 
@@ -112,13 +114,15 @@ export function run() {
     .description("Compare two packages side-by-side")
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
+    .option("--no-cache", "Disable package cache (always install fresh)")
     .action((pkgA: string, pkgB: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
+      const noCache = opts.cache === false;
 
-      const resultA = scorePackage(pkgA, { domain });
-      const resultB = scorePackage(pkgB, { domain });
+      const resultA = scorePackage(pkgA, { domain, noCache });
+      const resultB = scorePackage(pkgB, { domain, noCache });
 
       if (opts.json) {
         console.log(JSON.stringify({ comparison: { first: resultA, second: resultB } }, null, 2));

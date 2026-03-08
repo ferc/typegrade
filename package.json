@@ -3,9 +3,25 @@
   "version": "0.5.0",
   "description": "TypeScript type-safety and precision analyzer for the AI agent era",
   "type": "module",
-  "bin": {
-    "typegrade": "./dist/index.js"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
   },
+  "bin": {
+    "typegrade": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -15,6 +31,8 @@
     "lint:fix": "oxlint -c .oxlintrc.json --tsconfig tsconfig.json --vitest-plugin --fix src/ test/",
     "format": "oxfmt --write src/ test/",
     "format:check": "oxfmt --check src/ test/",
+    "prepack": "pnpm build && pnpm test:run",
+    "pack:check": "pnpm pack --dry-run",
     "benchmark": "tsx benchmarks/run.ts",
     "benchmark:train": "tsx benchmarks/run.ts",
     "benchmark:holdout": "tsx benchmarks/run.ts --holdout",
@@ -28,7 +46,11 @@
     "benchmark:gate": "tsx benchmarks/gate.ts",
     "benchmark:report": "tsx benchmarks/calibrate.ts",
     "gate:train": "tsx benchmarks/gate.ts",
-    "gate:eval": "tsx benchmarks/gate.ts --eval"
+    "gate:eval": "tsx benchmarks/gate.ts --eval",
+    "perf": "tsx perf/run.ts all",
+    "perf:cli": "tsx perf/run.ts cli",
+    "perf:score": "tsx perf/run.ts score",
+    "perf:benchmark": "tsx perf/run.ts benchmark"
   },
   "dependencies": {
     "commander": "^14.0.3",
@@ -47,6 +69,19 @@
   "engines": {
     "node": ">=18"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "typescript",
+    "type-safety",
+    "analyzer",
+    "linter",
+    "types",
+    "quality",
+    "ai-agents"
+  ],
+  "license": "MIT",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"

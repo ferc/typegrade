@@ -1,20 +1,20 @@
-import type {
-  ClassDeclaration,
-  EnumDeclaration,
-  ExportDeclaration,
-  FunctionDeclaration,
-  InterfaceDeclaration,
-  MethodDeclaration,
-  MethodSignature,
-  ModuleDeclaration,
+import {
+  type ClassDeclaration,
+  type EnumDeclaration,
+  type ExportDeclaration,
+  type FunctionDeclaration,
+  type InterfaceDeclaration,
+  type MethodDeclaration,
+  type MethodSignature,
+  type ModuleDeclaration,
   Node,
-  SourceFile,
-  Type,
-  TypeAliasDeclaration,
-  TypeNode,
-  TypeParameterDeclaration,
-  VariableDeclaration,
-  VariableStatement,
+  type SourceFile,
+  type Type,
+  type TypeAliasDeclaration,
+  type TypeNode,
+  type TypeParameterDeclaration,
+  type VariableDeclaration,
+  type VariableStatement,
 } from "ts-morph";
 import type {
   PublicSurface,
@@ -133,13 +133,13 @@ function extractNamespaceExports(
   declarations: SurfaceDeclaration[],
 ): void {
   const body = mod.getBody();
-  if (!body) {
+  if (!body || !Node.isModuleBlock(body)) {
     return;
   }
   const nsName = mod.getName().replaceAll(/["']/g, "");
 
   // Extract functions from namespace
-  for (const fn of body.getFunctions?.() ?? []) {
+  for (const fn of body.getFunctions() ?? []) {
     if (!fn.isExported()) {
       continue;
     }
@@ -152,7 +152,7 @@ function extractNamespaceExports(
   }
 
   // Extract interfaces from namespace
-  for (const iface of body.getInterfaces?.() ?? []) {
+  for (const iface of body.getInterfaces() ?? []) {
     if (!iface.isExported()) {
       continue;
     }
@@ -165,7 +165,7 @@ function extractNamespaceExports(
   }
 
   // Extract type aliases from namespace
-  for (const alias of body.getTypeAliases?.() ?? []) {
+  for (const alias of body.getTypeAliases() ?? []) {
     if (!alias.isExported()) {
       continue;
     }

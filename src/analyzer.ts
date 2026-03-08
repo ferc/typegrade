@@ -17,6 +17,7 @@ import type {
 import { type DomainType, detectDomain } from "./domain.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
+import { buildDerivedIndex, extractPublicSurface } from "./surface/index.js";
 import { computeComposites, computeGrade } from "./scorer.js";
 import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
 import type { GraphStats } from "./graph/types.js";
@@ -34,7 +35,6 @@ import { analyzeSpecializationPower } from "./analyzers/specialization-power.js"
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
 import { evaluateScenarioPack } from "./scenarios/types.js";
-import { extractPublicSurface } from "./surface/index.js";
 import { getScenarioPack } from "./scenarios/index.js";
 
 /** Minimum domain confidence to emit domainFitScore */
@@ -243,6 +243,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Extract public surface once, shared by all consumer-facing analyzers
   const consumerSurface = extractPublicSurface(consumerFiles);
 
+  // Build derived index once — precomputed aggregates for all analyzers
+  const derivedIndex = buildDerivedIndex(consumerSurface);
+
   // Domain detection
   const domainOpt = options?.domain ?? "auto";
   const domainInference =
@@ -404,12 +407,14 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     scenarioApplicability,
   };
 
-  // Compute coverage diagnostics
+  // Compute coverage diagnostics (use derivedIndex totals for consistency)
   const typesSource = options?.packageContext?.typesSource ?? "unknown";
+  const totalPositions =
+    Object.values(derivedIndex.roleCounts).reduce((sum, count) => sum + count, 0);
   const coverageDiagnostics = computeCoverageDiagnostics({
     graphStats,
     surfaceDeclarations: consumerSurface.stats.totalDeclarations,
-    surfacePositions: consumerSurface.stats.totalPositions,
+    surfacePositions: totalPositions,
     typesSource,
   });
   if (coverageDiagnostics.undersampled) {

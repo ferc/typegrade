@@ -1,138 +1,129 @@
 # typegrade
 
-A fast CLI tool that scores TypeScript projects on **type precision quality** — not just "do you have types?" but "how narrow, specific, and useful are your types?"
+Score your TypeScript on **type precision** — how narrow, specific, and useful your types actually are for humans and AI agents.
 
-AI coding agents produce better output when operating within tighter static boundaries. This tool measures how tight those boundaries are.
+AI coding agents generate better code when they operate within tight static boundaries. Broad types, `any` leaks, and unclear API surfaces cause wrong suggestions, invalid payloads, and brittle edits — whether the consumer is a human or an agent. `typegrade` makes that quality measurable.
 
-## Install
+Even if you are not using AI agents today, precise types improve editor autocomplete, catch bugs earlier, and make your API surface self-documenting.
+
+## Who it is for
+
+- **Library and package authors** — validate that your published declarations are precise and consumer-friendly before releasing.
+- **App teams with internal platforms or SDKs** — enforce type quality standards across shared code.
+- **Teams using AI agents** — in CI, refactors, and code generation — ensure the types your agents code against are tight enough to guide correct output.
+
+## What it measures
+
+`typegrade` produces three global scores from up to 12 dimensions:
+
+| Score | What it answers |
+|---|---|
+| **Consumer API** | How precise and well-structured is your exported API surface? |
+| **Agent Readiness** | How well does your API guide AI agents toward correct usage? |
+| **Type Safety** | How safe is your code from `any` leaks, unsound casts, and weak boundaries? |
+
+In **source mode** (`typegrade analyze`), all 12 dimensions contribute — 8 consumer-facing plus 4 implementation dimensions (soundness, boundary discipline, config discipline, declaration fidelity).
+
+In **package mode** (`typegrade score`), only the 8 consumer-facing dimensions apply, because published `.d.ts` declarations are all a consumer sees.
+
+Beyond global scores, `typegrade` also computes:
+- **Domain-fit scores** — adjusted for validation, router, ORM, stream, and other library categories.
+- **Scenario scores** — consumer benchmark tests that measure real downstream DX within a domain.
+- **Confidence and coverage diagnostics** — so you know how much evidence supports each score.
+
+## Quickstart
 
 ```bash
-npx typegrade
+# Analyze a local TypeScript project (source mode, all 12 dimensions)
+npx typegrade analyze .
+
+# Score a published npm package (package mode, 8 consumer dimensions)
+npx typegrade score zod
+npx typegrade score express@5
+
+# Compare two packages side-by-side
+npx typegrade compare zod valibot
+
+# JSON output for automation
+npx typegrade score zod --json
+
+# CI gate: fail if agent readiness score < 70
+npx typegrade --min-score 70
+
+# Detailed per-dimension breakdown
+npx typegrade --verbose
+
+# Explainability report — why each score is what it is
+npx typegrade --explain
 ```
 
-Or install globally:
+Install globally for repeated use:
 
 ```bash
 npm install -g typegrade
 ```
 
-## Usage
+## Actual workflows
+
+**Library maintainer checking a release candidate:**
 
 ```bash
-# Analyze current directory
-typegrade
-
-# Analyze specific path
-typegrade analyze ./src
-
-# Score an npm package's published declarations
-typegrade score zod
-typegrade score zod@3.24.2
-
-# Score a local package
-typegrade score ./node_modules/@tanstack/router-core
-
-# JSON output
-typegrade --json
-
-# CI gate: fail if score < 70
-typegrade --min-score 70
-
-# Verbose per-dimension details
-typegrade --verbose
-
-# Explainability report
-typegrade --explain
+typegrade analyze ./src --verbose
+# Fix issues, re-run until satisfied, then publish
 ```
 
-## Output
+**Comparing dependencies before adoption:**
 
-```
-  typegrade v0.4.0
-
-  Project: my-project (source analysis)
-  Files: 42 analyzed in 1.2s
-
-  ╔═══════════════════════════════════════════╗
-  ║  Agent Readiness:    78/100 (B)           ║
-  ║  Consumer API:       82/100 (B)           ║
-  ║  Implementation:     71/100 (B)           ║
-  ╚═══════════════════════════════════════════╝
-
-  Consumer API Dimensions:
-  API Specificity       ████████████░░░░░░░░  61%
-  API Safety            ████████████████████  99%
-  Semantic Lift         ██████████████░░░░░░  68%
-  Publish Quality       ████████████████░░░░  82%
-  Surface Consistency   ██████████████████░░  90%
-  Surface Complexity    ████████████████████  95%
-  Agent Usability       ████████████████░░░░  80%
-  Declaration Fidelity  ████████████████████  95%
-
-  Implementation Dimensions:
-  Soundness             ██████████████████░░  88%
-  Boundary Discipline   ████████████░░░░░░░░  58%
-  Config Discipline     ██████████████████░░  90%
-
-  Top issues:
-   ✖  src/api.ts:23 — parameter 'data' in processInput() leaks 'any'
-   ⚠  src/handlers.ts:45 — JSON.parse() without runtime validation
-   ℹ  tsconfig.json — enable noUncheckedIndexedAccess for stricter indexing
+```bash
+typegrade compare zod valibot
+# Side-by-side global scores, domain scores, and deltas
 ```
 
-## Scoring Architecture
+**AI workflow feeding downstream tooling:**
 
-typegrade produces three composite scores from eleven dimensions:
+```bash
+typegrade score my-sdk --json | jq '.globalScores.agentReadiness'
+# Use the score in agent prompts, tool selection, or CI decisions
+```
 
-### Composite Scores
+**CI gate for regression prevention:**
 
-| Composite | Source Mode | Package Mode |
-|---|---|---|
-| **Agent Readiness** | 65% Consumer API + 35% Implementation | 100% Consumer API |
-| **Consumer API** | Weighted average of 8 consumer dimensions | Weighted average of 7 consumer dimensions |
-| **Implementation** | Weighted average of 3 implementation dimensions | n/a (disabled) |
+```yaml
+# In your CI pipeline
+- run: npx typegrade --min-score 70
+```
 
-### Consumer API Dimensions
+## Why AI agents care
 
-These measure the quality of your **published API surface** — what downstream consumers and AI agents see:
+AI coding agents work against your exported types, not your intentions. When those types are broad or ambiguous:
 
-| Dimension | Weight | What it measures |
-|---|---|---|
-| **API Specificity** | 35% | How narrow and specific are your exported types? Per-position feature-model scoring with 16 feature bonuses. |
-| **API Safety** | 20% | How much `any` leaks into your public API? Domain-aware: suppresses false positives for validation libraries. |
-| **Semantic Lift** | 15% | How much do advanced type features lift your API above baseline? Per-feature scaling rewards discriminated unions, branded types, etc. |
-| **Publish Quality** | 8% | Do exported functions have explicit return types, typed parameters, JSDoc, and proper entrypoint clarity? |
-| **Surface Consistency** | 5% | Is your API consistent? Checks overload density, naming conventions, nullability, generic naming, and result shape consistency. |
-| **Surface Complexity** | 5% | Is your API approachable? Penalizes deep nesting, wide unions, overload explosion, and declaration sprawl. |
-| **Agent Usability** | 5% | Is your API AI-agent-friendly? Checks named exports, discriminated errors, correlated generics, overload clarity. |
-| **Declaration Fidelity** | 7% | Do emitted `.d.ts` declarations preserve the source types? Checks generic parameters and constraints. Source-only. |
+- **Wrong function calls** — the agent picks the wrong overload or passes invalid arguments because the types don't narrow the space enough.
+- **Hallucinated properties** — `Record<string, any>` gives the agent no signal about what fields exist.
+- **Brittle patches** — loose types mean the agent's edits compile but break at runtime.
+- **Poor tool autonomy** — agents need discriminated unions, branded types, and tight return types to make confident decisions without human review.
 
-### Implementation Dimensions (source mode only)
+`typegrade` measures exactly these qualities. A higher Agent Readiness score means agents produce fewer errors and need less human correction.
 
-| Dimension | Weight | What it measures |
-|---|---|---|
-| **Soundness** | 45% | Type assertions (`as any`, `as unknown as X`), non-null assertions, `@ts-ignore` usage |
-| **Boundary Discipline** | 25% | Runtime validation at I/O boundaries (JSON.parse, fetch, file reads) |
-| **Config Discipline** | 20% | TypeScript strict mode flags (`strictNullChecks`, `noUncheckedIndexedAccess`, etc.) |
+## How it works
 
-### Type Precision Hierarchy
+1. **Load** a TypeScript project or install/resolve an npm package.
+2. **Build** a declaration graph (package mode) or emit in-memory `.d.ts` (source mode) to see what consumers see.
+3. **Extract** the public surface — every exported function, type, interface, class, and their type positions.
+4. **Run analyzers** over that surface — 12 dimensions covering specificity, safety, semantic lift, specialization, usability, and more.
+5. **Compute scores** — global composites, domain-adjusted scores, and scenario benchmarks.
+6. **Attach diagnostics** — confidence, coverage, undersampling warnings, and actionable issues.
 
-From lowest to highest precision:
+For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 
-| Level | Score | Example |
-|---|---|---|
-| `any` | 0 | `any` |
-| `unknown` | 20 | `unknown` |
-| `wide-primitive` | 40 | `string`, `number`, `boolean` |
-| `interface` | 55 | `{ name: string; age: number }` |
-| `void` | 60 | `void` |
-| `enum` | 65 | `enum Role { Admin, User }` |
-| `generic-bound` | 70 | `<T extends string>` |
-| `literal` | 80 | `'active'`, `42` |
-| `template-literal` | 82 | `` `/api/${string}` `` |
-| `literal-union` | 85 | `'a' \| 'b' \| 'c'` |
-| `branded` | 90 | `string & { __brand: 'UserId' }` |
-| `discriminated-union` | 95 | `{ kind: 'circle' } \| { kind: 'square' }` |
+## How to interpret scores
+
+**Global scores** (`consumerApi`, `agentReadiness`, `typeSafety`) use fixed weights and are comparable across all libraries. Use these for cross-library comparisons and CI gates.
+
+**Domain scores** apply domain-specific weight adjustments (e.g., routers get higher weight on path-param inference). Only comparable within the same domain.
+
+**Scenario scores** come from domain-specific consumer benchmark tests. Only comparable within the same scenario pack.
+
+**Confidence** tells you how much evidence supports the score. Scores with confidence below 0.5 should be treated as indicative only — typically from undersampled packages with few public declarations.
 
 ### Grades
 
@@ -145,116 +136,90 @@ From lowest to highest precision:
 | 40-54 | D |
 | 0-39 | F |
 
-## Source vs Package Mode
-
-**Source mode** (`typegrade analyze`) examines your TypeScript source files directly. All 11 dimensions contribute. Best for analyzing projects you own.
-
-**Package mode** (`typegrade score`) analyzes published `.d.ts` declarations — what consumers actually import. Only the 7 consumer-facing dimensions apply (Declaration Fidelity and all 3 implementation dimensions are disabled). Best for evaluating npm packages.
-
-In source mode, typegrade emits declarations in-memory via `ts-morph` to build a "consumer view" of your API, then scores both the source (implementation dimensions) and the emitted declarations (consumer dimensions).
-
-## Domain Detection
-
-typegrade detects library domains and adjusts scoring accordingly:
-
-- **Validation** (zod, valibot, arktype, etc.): `unknown` parameters suppressed in API Safety
-- **Result** (neverthrow, effect, fp-ts): Recognized for discriminated union patterns
-- **Stream** (rxjs, xstate, most): Higher-order generic signatures accepted
-- **Schema/Utility** (type-fest, ts-toolbelt): High generic density expected
-- **Router** (express, fastify, hono): Route/handler/middleware pattern detection
-- **ORM** (drizzle-orm, prisma): Model/schema/table pattern detection
-- **Frontend** (react, preact, vue, svelte): Package name matching
-
-Domain is inferred from package name patterns and API surface analysis.
-
-## Declaration Graph Engine
-
-For package scoring, typegrade builds a declaration import graph rather than analyzing all `.d.ts` files in a package:
-
-1. **Resolve entrypoints** from `types`, `typings`, and `exports` fields in `package.json`
-2. **Walk imports** via BFS following `import`/`export` statements and `/// <reference path>` directives
-3. **Deduplicate** ESM/CJS twins (`.d.ts` vs `.d.mts`/`.d.cts`), symbol-identical files, and same-subpath condition variants
-
-This ensures only reachable, consumer-visible declarations are scored.
-
-## How to Improve Your Score
+## Improving your score
 
 1. **Use literal unions** instead of `string` for known values: `type Status = 'active' | 'inactive'`
 2. **Use branded types** for IDs: `type UserId = string & { __brand: 'UserId' }`
 3. **Use discriminated unions** for variants: `type Shape = { kind: 'circle'; r: number } | { kind: 'square'; s: number }`
 4. **Add explicit return types** to exported functions
 5. **Enable strict tsconfig flags**, especially `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`
-6. **Use zod/valibot** at I/O boundaries instead of `as` type assertions
+6. **Validate at I/O boundaries** — use zod/valibot instead of `as` casts on `JSON.parse()`
 7. **Replace `@ts-ignore`** with `@ts-expect-error`
 8. **Avoid `as any`** and double assertions (`as unknown as X`)
 
-## JSON Output
+## Limits
+
+- **Package mode only sees published declarations.** Internal implementation quality (soundness, boundary discipline, config) is not visible. A package can score well on consumer dimensions while hiding `as any` internally — this is by design, since consumers only see the published surface.
+- **Undersampled packages should be read cautiously.** Packages with very few public declarations produce lower-confidence scores. Check the `confidenceSummary` and `coverageDiagnostics` fields in JSON output.
+- **Scenario scores are domain-specific.** A high router scenario score says nothing about how the library would perform as a validation tool.
+- **Domain detection is heuristic.** It uses package name patterns and API surface analysis. Override with `--domain <domain>` if needed.
+
+## JSON output
 
 ```bash
-typegrade --json
+typegrade score zod --json
 ```
 
-Returns an `AnalysisResult` object with:
+Returns an `AnalysisResult` with:
 
 ```jsonc
 {
-  "mode": "source",                    // "source" | "package"
-  "scoreProfile": "source-project",   // scoring profile used
-  "projectName": "my-project",
-  "filesAnalyzed": 42,
-  "timeMs": 1200,
-  "composites": [
-    {
-      "key": "agentReadiness",
-      "score": 78,
-      "grade": "B",
-      "rationale": ["65% Consumer API (82) + 35% Implementation (71)"],
-      "confidence": 0.82
-    }
-    // ... consumerApi, implementationQuality
-  ],
-  "dimensions": [
-    {
-      "key": "apiSpecificity",
-      "label": "API Specificity",
-      "enabled": true,
-      "score": 61,
-      "weights": { "consumerApi": 0.35 },
-      "metrics": { /* dimension-specific */ },
-      "positives": ["Strong use of discriminated unions"],
-      "negatives": ["42% of positions are wide primitives"],
-      "issues": [/* file-level issues */],
-      "confidence": 0.85
-    }
-    // ... 10 more dimensions
-  ],
-  "domainInference": {
-    "domain": "validation",
-    "confidence": 0.9,
-    "signals": ["Package name matches validation pattern"]
+  "mode": "package",
+  "scoreProfile": "published-declarations",
+  "projectName": "zod",
+  "filesAnalyzed": 12,
+  "timeMs": 1800,
+  "globalScores": {
+    "consumerApi": { "score": 67, "grade": "C", "confidence": 0.82 },
+    "agentReadiness": { "score": 71, "grade": "B", "confidence": 0.82 },
+    "typeSafety": { "score": 65, "grade": "C", "confidence": 0.82 }
   },
-  "caveats": [],
+  "domainScore": {
+    "domain": "validation",
+    "score": 72,
+    "grade": "B",
+    "confidence": 0.9
+  },
+  "scenarioScore": {
+    "scenario": "validation",
+    "score": 78,
+    "passedScenarios": 3,
+    "totalScenarios": 4
+  },
+  "confidenceSummary": {
+    "graphResolution": 0.95,
+    "domainInference": 0.9,
+    "sampleCoverage": 0.82,
+    "scenarioApplicability": 0.9
+  },
+  "coverageDiagnostics": {
+    "typesSource": "bundled",
+    "reachableFiles": 12,
+    "measuredPositions": 156,
+    "undersampled": false
+  },
+  "dimensions": [/* 8 dimension results with scores, metrics, issues */],
   "topIssues": [/* top 10 issues by severity */]
 }
 ```
 
-## Benchmarks
+## Programmatic API
 
-typegrade ships with a benchmark suite of 20 npm packages across four tiers:
+```typescript
+import { analyzeProject, scorePackage, comparePackages } from 'typegrade';
 
-| Tier | Packages | Score Range |
-|---|---|---|
-| Elite | valibot (84), ts-pattern (74), arktype (68), effect (68), zod (67) | 67-84 |
-| Solid | date-fns (72), remeda (71), neverthrow (64), type-fest (62), drizzle-orm (58) | 58-72 |
-| Loose | uuid (64), lodash (62), express (60), moment (57), axios (50) | 50-64 |
-| Stretch | io-ts (78), fp-ts (77), rxjs (65), hono (63), @tanstack/react-router (58) | 58-78 |
-
-Run benchmarks:
-
-```bash
-pnpm benchmark                      # Score all 20 packages + run assertions
-npx tsx benchmarks/calibrate.ts     # Evaluate assertions + calibration analysis
+const sourceResult = analyzeProject('./src');
+const packageResult = scorePackage('zod');
+const comparison = comparePackages('zod', 'valibot');
 ```
+
+## Read more
+
+- [How It Works](docs/how-it-works.md) — technical walkthrough of source mode, package mode, the declaration graph, analyzers, and scoring layers.
+- [Scoring Contract](docs/scoring-contract.md) — canonical reference for all 12 dimensions, weights, formulas, and grading.
+- [Confidence Model](docs/confidence-model.md) — how confidence is computed and what it means.
+- [Benchmark Policy](docs/benchmark-policy.md) — governance rules for the benchmark suite.
+- [Benchmarks](docs/benchmarks.md) — how to run and interpret benchmarks.
 
 ## License
 
