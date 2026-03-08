@@ -34,6 +34,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Setup npm OIDC auth
+        run: |
+          OIDC_TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            | jq -r '.value')
+          NPM_TOKEN=$(curl -sLS "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/typegrade" \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            | jq -r '.token')
+          echo "::add-mask::${NPM_TOKEN}"
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
