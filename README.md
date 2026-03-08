@@ -147,6 +147,21 @@ For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 7. **Replace `@ts-ignore`** with `@ts-expect-error`
 8. **Avoid `as any`** and double assertions (`as unknown as X`)
 
+## Benchmark proof
+
+`typegrade` is validated against a real corpus of npm packages spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins.
+
+Run benchmarks yourself:
+
+```bash
+pnpm benchmark:train       # Score train corpus + run assertions
+pnpm benchmark:calibrate   # Detailed calibration diagnostics
+```
+
+> Benchmark snapshot as of March 2026. These results come from typegrade's current benchmark corpus and are best read as regression-proof and directional evidence, not a universal ranking of all TypeScript packages.
+
+For details on corpus structure, assertion classes, and how to interpret results, see [Benchmarks](docs/benchmarks.md).
+
 ## Limits
 
 - **Package mode only sees published declarations.** Internal implementation quality (soundness, boundary discipline, config) is not visible. A package can score well on consumer dimensions while hiding `as any` internally — this is by design, since consumers only see the published surface.

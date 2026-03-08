@@ -1,53 +1,44 @@
 # Benchmark Policy
 
-This document describes the governance rules for the typegrade benchmark suite.
+This document describes the governance rules for the `typegrade` benchmark suite, including the train/eval split, assertion classes, gate policies, and quarantine boundaries.
 
-## Corpus
+## Train/eval split
 
-The benchmark corpus consists of real npm packages across five tiers:
+The benchmark corpus is split into isolated sets to prevent overfitting:
 
-| Tier | Packages | Expected Behavior |
-|------|----------|-------------------|
-| Elite | valibot, effect, ts-pattern, arktype, zod | Highest consumer API scores |
-| Solid | date-fns, remeda, type-fest, drizzle-orm, neverthrow | Mid-range scores |
-| Loose | lodash, express, axios, uuid, moment | Lowest consumer API scores |
-| Stretch | fp-ts, io-ts, rxjs, hono, @tanstack/react-router | Extended validation |
-| Stretch-2 | kysely, xstate, superstruct, runtypes | Hard AI-agent and type-safety cases |
+| Set | Purpose | Builder agent access |
+|---|---|---|
+| **Train** (`manifest.train.json`) | Tune scoring weights and calibrate | May read and modify |
+| **Eval-fixed** (`manifest.eval.fixed.json`) | Stable generalization test | Must NOT read |
+| **Eval-pool** (`manifest.eval.pool.json`) | Large stratified pool for statistical validation | Must NOT read |
+| **Holdout** (`manifest.holdout.json`) | Reserved for final validation | Read-only, no tuning |
 
-## Assertion Classes
+The quarantine policy is enforced by CI and documented in `CLAUDE.md`.
+
+## Assertion classes
 
 Each pairwise assertion has a class:
 
 ### must-pass
 
-Tier-boundary assertions that encode fundamental ranking correctness. If a must-pass assertion fails, the benchmark suite exits with code 1.
+Tier-boundary assertions that encode fundamental ranking correctness. If a must-pass assertion fails, the gate exits with code 1.
 
-**Properties:**
-- `minDelta`: Minimum score difference required (typically 3-5 for tier boundaries)
-- `reason`: Ground-truth rationale for the assertion
-- `introducedAt`: Version when the assertion was added
+Properties:
+- `minDelta`: minimum score difference required (typically 3-5 for tier boundaries).
+- `reason`: ground-truth rationale for the assertion.
+- `introducedAt`: version when the assertion was added.
 
-**Examples:**
-- `zod > express (minDelta: 3)` — elite must beat loose
-- `arktype > axios (minDelta: 5)` — elite must beat loose with margin
-- `neverthrow > moment (minDelta: 2)` — solid must beat loose
+A must-pass assertion fails if:
+- The higher package scores lower than the lower package, OR
+- The delta is less than `minDelta` (reported as a "MARGIN" failure).
 
 ### hard-diagnostic
 
-Assertions that do not block the benchmark run, but fail the calibration targets. These represent important cross-composite ranking expectations.
-
-**Examples:**
-- `zod > fp-ts` on agentReadiness — Zod should be more agent-friendly
-- `zod > express` on typeSafety — validation library must score higher
+Assertions that do not block the benchmark run but fail calibration targets. These represent important cross-composite ranking expectations.
 
 ### diagnostic
 
-Intra-tier and nuanced cross-tier assertions. Failures are reported as warnings but do not cause benchmark failure.
-
-**Examples:**
-- `valibot > zod` — intra-elite ordering
-- `remeda > axios` — solid vs loose
-- `fp-ts > express` — stretch vs loose
+Intra-tier and nuanced cross-tier assertions. Failures are reported as warnings but do not cause gate failure.
 
 ### ambiguous
 
@@ -55,76 +46,84 @@ Assertions where the expected outcome is genuinely unclear. Tracked but not coun
 
 ### regression-watch
 
-Assertions that watch for specific regression patterns (e.g., `drizzle-orm` clustering with loose-tier).
+Assertions that watch for specific regression patterns (e.g., a solid-tier library clustering with loose-tier).
 
-## MinDelta Enforcement
+## Gate system
 
-Must-pass assertions can specify a `minDelta` — the minimum score difference required for the assertion to pass. A must-pass assertion with `minDelta: 3` fails if:
-- The higher package scores lower than the lower package, OR
-- The delta is less than 3 (reported as "MARGIN" failure)
+Two gates run at different stages:
 
-## Assertion Metadata
+### Train gate (`pnpm gate:train`)
+
+Runs against the train corpus. Checks:
+- All must-pass assertions pass, including `minDelta` requirements.
+- Ranking loss is below threshold.
+
+**Runs on every PR.**
+
+### Eval gate (`pnpm gate:eval`)
+
+Runs against the eval corpus. Checks:
+- Pareto violations (new regressions not offset by improvements).
+- Seed robustness (scores stable across different random seeds).
+- Train-eval drift (train performance vs eval performance gap).
+- Score compression and domain/scenario overreach.
+
+**Runs on main branch only** — builder agents never see raw eval results.
+
+## Judge system (`pnpm benchmark:judge`)
+
+The judge evaluates eval results and produces a **redacted summary**:
+
+- Emits only aggregate metrics: pass/fail, Pareto violation count, drift magnitude.
+- Writes redacted output to `benchmarks-output/eval-summary.json`.
+- **Never** emits per-package names, scores, or rankings in builder-visible output.
+
+Raw eval details are only available with the `--audit` flag (explicit audit mode).
+
+## Assertion metadata
 
 Each assertion carries:
-- `reason`: Ground-truth basis for the expected ranking
-- `introducedAt`: Version when added (for traceability)
-- `owner`: Optional — who added this assertion
-- `expectedFailureUntil`: Optional — deadline for fixing known failures
+- `reason`: ground-truth basis for the expected ranking.
+- `introducedAt`: version when added.
+- `owner`: optional — who added this assertion.
+- `expectedFailureUntil`: optional — deadline for fixing known failures.
 
-**Removal policy:** No assertion may be removed without a replacement or a written rationale entry in this document.
+**Removal policy**: no assertion may be removed without a replacement or a written rationale.
 
-## Running Benchmarks
+## Policy rules
 
-```bash
-pnpm benchmark        # Score all packages, evaluate assertions
-npx tsx benchmarks/calibrate.ts  # Analyze rankings and suggest adjustments
-```
-
-## Adding New Assertions
-
-1. Determine the expected ranking relationship
-2. Classify as `must-pass`, `hard-diagnostic`, `diagnostic`, `ambiguous`, or `regression-watch`
-3. Add `minDelta` for must-pass assertions (typically 3-5)
-4. Add `reason` and `introducedAt` strings
-5. Add to `benchmarks/assertions.ts`
-6. Run the benchmark to verify
-
-## Calibration
-
-The calibration tool (`benchmarks/calibrate.ts`) provides:
-
-- Sorted scores by consumerApi, agentReadiness, and typeSafety
-- Per-assertion pass/fail with deltas and minDelta enforcement
-- Ranking loss calculation: `failed / evaluated`
-- **Per-dimension concordance analysis** — how well each dimension individually predicts assertion outcomes
-- **Tie analysis** — packages with near-identical scores (delta < 2)
-- **False equivalence analysis** — packages from different tiers with near-identical scores (delta < 3, tier gap >= 2)
-- **Margin analysis** — must-pass assertions with uncomfortably small deltas (< 5)
-- **Weight sensitivity analysis** — simulates +/-20% weight perturbation, reports how many assertions flip
-- **Delta histogram** — with must-pass/hard-diagnostic/diagnostic class breakdown
-- **Top misranked packages** — packages that appear most frequently in failed assertions
-- Weight adjustment suggestions when ranking loss > 10%
-
-## Benchmark Artifacts
-
-Each benchmark run saves:
-- Per-package dimension scores, confidence, and metrics
-- Graph stats and dedup stats
-- Domain inference with signals, falsePositiveRisk, matchedRules
-- Top issues per package
-- Explainability data (when enabled)
-- Assertion results with deltas and minDelta outcomes
-- Caveats from analysis
-
-## Policy Rules
-
-1. **Must-pass assertions must always pass** including minDelta requirements. If a code change causes a must-pass failure, the change needs investigation.
-2. **Hard-diagnostic failures do not block**, but fail calibration targets. They must be resolved before a release is considered benchmark-grade.
+1. **Must-pass assertions must always pass**, including `minDelta` requirements.
+2. **Hard-diagnostic failures do not block** but fail calibration targets. They must be resolved before a release is considered benchmark-grade.
 3. **Diagnostic assertions are aspirational.** They guide scoring improvements but don't block releases.
 4. **New packages require at least 2 pairwise assertions** — one must-pass (vs different tier) and one diagnostic.
-5. **Weight changes require full benchmark run** with all must-pass assertions passing.
+5. **Weight changes require a full benchmark run** with all must-pass assertions passing.
 6. **Ranking loss target: < 5%.** Above this threshold, calibration suggests weight adjustments.
-7. **Must-pass assertions require `reason` and `minDelta`** to ensure they encode durable, defensible truths.
-8. **Every package must appear in at least one must-pass assertion** to ensure meaningful validation.
+7. **Must-pass assertions require `reason` and `minDelta`** to ensure they encode durable truths.
+8. **Every package must appear in at least one must-pass assertion.**
 9. **No solid or elite library may tie a loose library** unless the assertion is explicitly marked ambiguous.
 10. **`agentReadiness` must meaningfully differ from `consumerApi`** on at least the hard stretch packages.
+
+## Quarantine boundaries
+
+These boundaries are enforced by CI:
+
+1. **Static import test**: calibration/optimizer code must not import or reference eval manifests.
+2. **Output isolation**: eval commands write to `benchmarks-output/eval-raw/`, never to `benchmarks/results/`.
+3. **Redaction**: `benchmark:judge` emits only `RedactedEvalSummary` — no package names, no per-package scores.
+
+## Adding new assertions
+
+1. Determine the expected ranking relationship.
+2. Classify as `must-pass`, `hard-diagnostic`, `diagnostic`, `ambiguous`, or `regression-watch`.
+3. Add `minDelta` for must-pass assertions (typically 3-5).
+4. Add `reason` and `introducedAt` strings.
+5. Add to `benchmarks/assertions.ts`.
+6. Run `pnpm benchmark:train` to verify.
+
+## CI integration
+
+The CI workflow (`.github/workflows/ci.yml`) runs:
+
+- **Quality job** (all PRs): lint, format check, build, test.
+- **Train gate job** (all PRs): `pnpm gate:train`.
+- **Eval gate job** (main only): `pnpm gate:eval`.
