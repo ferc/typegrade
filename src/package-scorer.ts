@@ -42,6 +42,7 @@ function scoreLocalPackage(
         packageName,
         packageRoot: localPath,
         typesEntrypoint: null,
+        typesSource: "unknown",
       },
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
@@ -60,6 +61,7 @@ function scoreLocalPackage(
     typesEntrypoint: entrypoints[0]?.filePath
       ? entrypoints[0].filePath.replace(`${localPath}/`, "")
       : null,
+    typesSource: "bundled",
   };
 
   const opts: Parameters<typeof analyzeProject>[1] = {
@@ -124,6 +126,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
         packageName: "local-package",
         packageRoot: localPath,
         typesEntrypoint: null,
+        typesSource: "unknown",
       },
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
@@ -186,6 +189,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       ? join(tmpDir, "node_modules", typesPackageName)
       : pkgDir;
     const effectivePkgName = typesPackageName ?? packageName;
+    const typesSource: "bundled" | "@types" = typesPackageName ? "@types" : "bundled";
 
     // Write a broad tsconfig so ts-morph can resolve all imports within the package
     writeFileSync(
@@ -223,6 +227,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       typesEntrypoint: entrypoints[0]?.filePath
         ? entrypoints[0].filePath.replace(`${effectivePkgDir}/`, "")
         : null,
+      typesSource,
     };
 
     const opts: Parameters<typeof analyzeProject>[1] = {

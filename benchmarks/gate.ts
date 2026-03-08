@@ -1,0 +1,255 @@
+#!/usr/bin/env tsx
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS } from "./assertions.js";
+
+interface GateResult {
+  gate: string;
+  passed: boolean;
+  detail: string;
+  durationMs: number;
+}
+
+function runGate(name: string, fn: () => { passed: boolean; detail: string }): GateResult {
+  const start = performance.now();
+  try {
+    const { passed, detail } = fn();
+    return { detail, durationMs: Math.round(performance.now() - start), gate: name, passed };
+  } catch (error) {
+    return {
+      detail: `Error: ${error instanceof Error ? error.message : String(error)}`,
+      durationMs: Math.round(performance.now() - start),
+      gate: name,
+      passed: false,
+    };
+  }
+}
+
+function execCheck(cmd: string, cwd: string, timeoutMs = 120_000): { success: boolean; output: string } {
+  try {
+    const output = execSync(cmd, { cwd, encoding: "utf8", stdio: "pipe", timeout: timeoutMs });
+    return { output, success: true };
+  } catch (error) {
+    const err = error as { status?: number; stderr?: string; stdout?: string };
+    return { output: err.stderr ?? err.stdout ?? "", success: false };
+  }
+}
+
+function findLatestSnapshot(splitPrefix?: string): Record<string, unknown> | null {
+  const resultsDir = join(import.meta.dirname, "results");
+  if (!existsSync(resultsDir)) return null;
+  const files = readdirSync(resultsDir).filter((f) => f.endsWith(".json")).sort();
+  if (files.length === 0) return null;
+  // If splitPrefix, find last matching snapshot
+  for (let i = files.length - 1; i >= 0; i--) {
+    const data = JSON.parse(readFileSync(join(resultsDir, files[i]!), "utf8"));
+    if (!splitPrefix || data.corpusSplit === splitPrefix || !data.corpusSplit) {
+      return data;
+    }
+  }
+  return null;
+}
+
+function main() {
+  const projectRoot = join(import.meta.dirname, "..");
+  const gates: GateResult[] = [];
+
+  console.log("=== typegrade Gate Check ===\n");
+
+  // Gate 1: Build
+  gates.push(
+    runGate("build", () => {
+      const { success, output } = execCheck("pnpm build", projectRoot);
+      return { detail: success ? "Build succeeded" : `Build failed: ${output.slice(0, 200)}`, passed: success };
+    }),
+  );
+
+  // Gate 2: Unit tests
+  gates.push(
+    runGate("unit-tests", () => {
+      const { success, output } = execCheck("pnpm test:run", projectRoot, 300_000);
+      const passMatch = output.match(/(\d+) passed/);
+      const failMatch = output.match(/(\d+) failed/);
+      const passCount = passMatch ? passMatch[1] : "?";
+      const failCount = failMatch ? Number.parseInt(failMatch[1]!) : 0;
+      return {
+        detail: success ? `${passCount} tests passed` : `${failCount} test(s) failed`,
+        passed: success,
+      };
+    }),
+  );
+
+  // Gate 3-9: Based on latest benchmark snapshot
+  const snapshot = findLatestSnapshot("train") ?? findLatestSnapshot();
+  if (!snapshot) {
+    console.log("WARNING: No benchmark snapshot found. Run 'pnpm benchmark' first.\n");
+    console.log("Skipping benchmark-dependent gates.\n");
+  } else {
+    const summary = snapshot["summary"] as {
+      mustPass?: { passed: number; failed: number; total: number };
+      hardDiagnostic?: { passed: number; failed: number; total: number };
+      diagnostic?: { passed: number; failed: number; total: number };
+      fallbackGlobCount?: number;
+      undersampledAnchorCount?: number;
+    } | undefined;
+
+    // Gate 3: Must-pass
+    gates.push(
+      runGate("must-pass-100%", () => {
+        const mp = summary?.mustPass;
+        if (!mp) return { detail: "No must-pass data", passed: false };
+        return {
+          detail: `${mp.passed}/${mp.total} passed`,
+          passed: mp.failed === 0,
+        };
+      }),
+    );
+
+    // Gate 4: Hard-diagnostic
+    gates.push(
+      runGate("hard-diagnostic->=95%", () => {
+        const hd = summary?.hardDiagnostic;
+        if (!hd) return { detail: "No hard-diagnostic data", passed: true };
+        const rate = hd.total > 0 ? hd.passed / hd.total : 1;
+        return {
+          detail: `${hd.passed}/${hd.total} (${(rate * 100).toFixed(1)}%)`,
+          passed: rate >= 0.95,
+        };
+      }),
+    );
+
+    // Gate 5: Diagnostic
+    gates.push(
+      runGate("diagnostic->=90%", () => {
+        const diag = summary?.diagnostic;
+        if (!diag) return { detail: "No diagnostic data", passed: true };
+        const rate = diag.total > 0 ? diag.passed / diag.total : 1;
+        return {
+          detail: `${diag.passed}/${diag.total} (${(rate * 100).toFixed(1)}%)`,
+          passed: rate >= 0.9,
+        };
+      }),
+    );
+
+    // Gate 6: Ranking loss
+    gates.push(
+      runGate("ranking-loss-<6%", () => {
+        const assertions = snapshot["assertions"] as { result: string }[] | undefined;
+        if (!assertions) return { detail: "No assertion data", passed: false };
+        const evaluated = assertions.filter((a) => a.result !== "skip");
+        const failed = evaluated.filter((a) => a.result === "fail");
+        const loss = evaluated.length > 0 ? failed.length / evaluated.length : 0;
+        return {
+          detail: `${(loss * 100).toFixed(1)}% (${failed.length}/${evaluated.length})`,
+          passed: loss < 0.06,
+        };
+      }),
+    );
+
+    // Gate 7: False equivalence
+    gates.push(
+      runGate("false-equivalence-=0", () => {
+        const entries = snapshot["entries"] as { name: string; tier: string; consumerApi: number | null }[] | undefined;
+        if (!entries) return { detail: "No entry data", passed: false };
+        const tierOrder: Record<string, number> = { elite: 4, solid: 3, stretch: 2, "stretch-2": 2, loose: 1 };
+        let feCount = 0;
+        for (let i = 0; i < entries.length; i++) {
+          for (let j = i + 1; j < entries.length; j++) {
+            const a = entries[i]!;
+            const b = entries[j]!;
+            if (a.consumerApi === null || b.consumerApi === null) continue;
+            const delta = Math.abs(a.consumerApi - b.consumerApi);
+            const tierDiff = Math.abs((tierOrder[a.tier] ?? 0) - (tierOrder[b.tier] ?? 0));
+            if (delta < 3 && tierDiff >= 3) feCount++;
+          }
+        }
+        return { detail: `${feCount} false equivalence(s)`, passed: feCount === 0 };
+      }),
+    );
+
+    // Gate 8: Fallback glob
+    gates.push(
+      runGate("fallback-glob-=0", () => {
+        const count = summary?.fallbackGlobCount ?? 0;
+        return { detail: `${count} package(s)`, passed: count === 0 };
+      }),
+    );
+
+    // Gate 9: Undersampled anchors
+    gates.push(
+      runGate("undersampled-anchor-=0", () => {
+        const count = summary?.undersampledAnchorCount ?? 0;
+        return { detail: `${count} anchor(s)`, passed: count === 0 };
+      }),
+    );
+
+    // Gate 10: Domain accuracy — wrong-specific rate
+    gates.push(
+      runGate("wrong-specific-domain-<10%", () => {
+        const domainAcc = snapshot["domainAccuracy"] as { wrongSpecificRate?: number; correct?: number; total?: number } | undefined;
+        if (!domainAcc || !domainAcc.total) {
+          // Compute from entries
+          const entries = snapshot["entries"] as { name: string; domainInference?: { domain: string } }[] | undefined;
+          if (!entries) return { detail: "No data", passed: true };
+          let wrong = 0;
+          let total = 0;
+          for (const e of entries) {
+            const expected = EXPECTED_DOMAINS[e.name];
+            if (!expected) continue;
+            total++;
+            const actual = e.domainInference?.domain ?? "general";
+            if (actual !== expected && actual !== "general") wrong++;
+          }
+          const rate = total > 0 ? wrong / total : 0;
+          return { detail: `${wrong}/${total} (${(rate * 100).toFixed(1)}%)`, passed: rate < 0.1 };
+        }
+        return {
+          detail: `${(domainAcc.wrongSpecificRate! * 100).toFixed(1)}%`,
+          passed: domainAcc.wrongSpecificRate! < 0.1,
+        };
+      }),
+    );
+  }
+
+  // Print results
+  console.log("=== Gate Results ===\n");
+  let allPassed = true;
+  for (const gate of gates) {
+    const icon = gate.passed ? "PASS" : "FAIL";
+    const time = gate.durationMs > 100 ? ` (${(gate.durationMs / 1000).toFixed(1)}s)` : "";
+    console.log(`  [${icon}] ${gate.gate.padEnd(30)} ${gate.detail}${time}`);
+    if (!gate.passed) allPassed = false;
+  }
+
+  const passedCount = gates.filter((g) => g.passed).length;
+  console.log(`\n  ${passedCount}/${gates.length} gates passed`);
+
+  // Save gate report
+  const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
+  if (!existsSync(outputDir)) {
+    mkdirSync(outputDir, { recursive: true });
+  }
+  const reportPath = join(outputDir, "gate-report.json");
+  writeFileSync(
+    reportPath,
+    JSON.stringify(
+      {
+        allPassed,
+        gates,
+        passedCount,
+        timestamp: new Date().toISOString(),
+        totalGates: gates.length,
+      },
+      null,
+      2,
+    ),
+  );
+  console.log(`\nGate report saved to benchmarks-output/gate-report.json`);
+
+  if (!allPassed) {
+    process.exit(1);
+  }
+}
+
+main();

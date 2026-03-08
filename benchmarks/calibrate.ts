@@ -659,6 +659,18 @@ function main() {
 
   // 11. Calibration targets check
   console.log("\n=== Calibration Targets ===\n");
+  // Check for undersampled must-pass anchors
+  const mustPassPkgs = new Set<string>();
+  for (const a of PAIRWISE_ASSERTIONS) {
+    if (a.class === "must-pass") {
+      mustPassPkgs.add(a.higher);
+      mustPassPkgs.add(a.lower);
+    }
+  }
+  const undersampledAnchorCount = snapshot.entries.filter(
+    (e: ResultEntry) => mustPassPkgs.has(e.name) && (e as any).coverageDiagnostics?.undersampled,
+  ).length;
+
   const targets = [
     { name: "must-pass = 100%", met: mustPassFailed === 0, actual: `${mustPassPassed}/${mustPassPassed + mustPassFailed}` },
     { name: "hard-diagnostic >= 95%", met: hardDiagEvals.length === 0 || hardDiagPassed / hardDiagEvals.length >= 0.95, actual: hardDiagEvals.length > 0 ? `${(hardDiagPassed / hardDiagEvals.length * 100).toFixed(1)}%` : "n/a" },
@@ -666,11 +678,118 @@ function main() {
     { name: "global ranking loss < 6%", met: rankingLoss < 0.06, actual: `${(rankingLoss * 100).toFixed(1)}%` },
     { name: "false equivalence = 0", met: falseEquivs.length === 0, actual: `${falseEquivs.length}` },
     { name: "fallbackGlob = 0", met: !snapshot.entries.some((e: ResultEntry) => e.graphStats?.usedFallbackGlob), actual: `${snapshot.entries.filter((e: ResultEntry) => e.graphStats?.usedFallbackGlob).length}` },
+    { name: "undersampled-anchor = 0", met: undersampledAnchorCount === 0, actual: `${undersampledAnchorCount}` },
   ];
 
   for (const t of targets) {
     const icon = t.met ? "OK" : "MISS";
     console.log(`  [${icon}] ${t.name.padEnd(30)} actual: ${t.actual}`);
+  }
+
+  // 12. Constrained weight optimization
+  console.log("\n=== Constrained Weight Search ===\n");
+  const hasDimensions = snapshot.entries.some((e) => e.dimensions && e.dimensions.length > 0);
+  let optimalWeights: Record<string, number> | null = null;
+  let optimalConcordance = 0;
+
+  if (hasDimensions) {
+    const dimKeys = Object.keys(CONSUMER_WEIGHTS);
+    const steps = 5; // 5% increments
+    let bestWeights = { ...CONSUMER_WEIGHTS };
+    let bestConcordance = 0;
+    let candidatesEvaluated = 0;
+
+    // Compute current concordance baseline
+    const currentConcordance = concordance["composite"]?.rate ?? 0;
+    bestConcordance = currentConcordance;
+
+    // Generate candidate weight vectors via pairwise perturbation
+    // Instead of full grid search, perturb one dimension at a time relative to current
+    for (const dimA of dimKeys) {
+      for (const dimB of dimKeys) {
+        if (dimA === dimB) continue;
+        for (let delta = -3; delta <= 3; delta++) {
+          if (delta === 0) continue;
+          const candidate = { ...CONSUMER_WEIGHTS };
+          const shift = delta * 0.01 * steps;
+          candidate[dimA] = Math.max(0.01, candidate[dimA]! + shift);
+          candidate[dimB] = Math.max(0.01, candidate[dimB]! - shift);
+
+          // Normalize
+          const total = Object.values(candidate).reduce((a, b) => a + b, 0);
+          for (const k of dimKeys) {
+            candidate[k] = Math.round((candidate[k]! / total) * 100) / 100;
+          }
+
+          // Evaluate concordance with these weights
+          let concordant = 0;
+          let evalTotal = 0;
+          for (const assertion of PAIRWISE_ASSERTIONS) {
+            if (assertion.composite !== "consumerApi") continue;
+            const higherEntry = entryMap.get(assertion.higher);
+            const lowerEntry = entryMap.get(assertion.lower);
+            if (!higherEntry || !lowerEntry) continue;
+
+            const higherScore = recomputeConsumerApi(higherEntry, candidate);
+            const lowerScore = recomputeConsumerApi(lowerEntry, candidate);
+            if (higherScore === null || lowerScore === null) continue;
+
+            evalTotal++;
+            if (higherScore > lowerScore) concordant++;
+          }
+
+          candidatesEvaluated++;
+          const rate = evalTotal > 0 ? concordant / evalTotal : 0;
+          if (rate > bestConcordance) {
+            bestConcordance = rate;
+            bestWeights = { ...candidate };
+          }
+        }
+      }
+    }
+
+    if (bestConcordance > currentConcordance) {
+      optimalWeights = bestWeights;
+      optimalConcordance = bestConcordance;
+      console.log(`  Found improved weights (${candidatesEvaluated} candidates evaluated):`);
+      console.log(`  Current concordance: ${(currentConcordance * 100).toFixed(1)}%`);
+      console.log(`  Optimal concordance: ${(bestConcordance * 100).toFixed(1)}%`);
+      for (const [dim, weight] of Object.entries(bestWeights)) {
+        const diff = weight - (CONSUMER_WEIGHTS[dim] ?? 0);
+        const diffStr = diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2);
+        console.log(`    ${dim.padEnd(22)} ${weight.toFixed(2)} (${diffStr})`);
+      }
+    } else {
+      console.log(`  Current weights are already optimal (${candidatesEvaluated} candidates evaluated)`);
+      console.log(`  Concordance: ${(currentConcordance * 100).toFixed(1)}%`);
+    }
+  } else {
+    console.log("  No dimension data available for weight optimization");
+  }
+
+  // 13. Domain accuracy from snapshot
+  console.log("\n=== Domain Accuracy ===\n");
+  const domainAccuracy: { correct: number; wrong: number; abstained: number; total: number } = { abstained: 0, correct: 0, total: 0, wrong: 0 };
+  const { EXPECTED_DOMAINS: expectedDomains } = await import("./assertions.js");
+  for (const entry of snapshot.entries) {
+    const expected = expectedDomains[entry.name as keyof typeof expectedDomains];
+    if (!expected) continue;
+    domainAccuracy.total++;
+    const actual = entry.domainInference?.domain ?? "general";
+    if (actual === expected) {
+      domainAccuracy.correct++;
+    } else if (actual === "general" && expected !== "general") {
+      domainAccuracy.abstained++;
+    } else {
+      domainAccuracy.wrong++;
+    }
+  }
+  if (domainAccuracy.total > 0) {
+    const accuracy = domainAccuracy.correct / domainAccuracy.total;
+    const wrongRate = domainAccuracy.wrong / domainAccuracy.total;
+    console.log(`  Correct: ${domainAccuracy.correct}/${domainAccuracy.total} (${(accuracy * 100).toFixed(1)}%)`);
+    console.log(`  Abstained: ${domainAccuracy.abstained}/${domainAccuracy.total}`);
+    console.log(`  Wrong-specific: ${domainAccuracy.wrong}/${domainAccuracy.total} (${(wrongRate * 100).toFixed(1)}%)`);
   }
 
   // Save calibration report
@@ -715,6 +834,9 @@ function main() {
     weightSuggestions: rankingLoss > 0.1 ? suggestWeightAdjustments(evals, snapshot.entries) : [],
     calibrationTargets: targets.map((t) => ({ name: t.name, met: t.met, actual: t.actual })),
     falseEquivalenceCount: falseEquivs.length,
+    optimalWeights: optimalWeights ?? null,
+    optimalConcordance: optimalWeights ? Math.round(optimalConcordance * 1000) / 1000 : null,
+    domainAccuracy,
   };
 
   const reportPath = join(reportDir, "calibration.json");

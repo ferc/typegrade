@@ -115,6 +115,37 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "regression-watch", composite: "consumerApi", higher: "drizzle-orm", introducedAt: "v0.5.0", lower: "express", reason: "drizzle-orm should not cluster with loose-tier" },
 ];
 
+/**
+ * Expected domain ground truth for each benchmark package.
+ * Used to measure domain inference accuracy.
+ */
+export const EXPECTED_DOMAINS: Record<string, string> = {
+  "@tanstack/react-router": "router",
+  arktype: "validation",
+  axios: "general",
+  "date-fns": "general",
+  "drizzle-orm": "orm",
+  effect: "result",
+  express: "router",
+  "fp-ts": "result",
+  hono: "router",
+  "io-ts": "validation",
+  kysely: "orm",
+  lodash: "general",
+  moment: "general",
+  neverthrow: "result",
+  remeda: "general",
+  runtypes: "validation",
+  rxjs: "stream",
+  superstruct: "validation",
+  "ts-pattern": "general",
+  "type-fest": "schema",
+  uuid: "general",
+  valibot: "validation",
+  xstate: "stream",
+  zod: "validation",
+};
+
 export const SCENARIO_ASSERTIONS: ScenarioAssertion[] = [
   // Router scenario assertions (both detected as router domain)
   { class: "diagnostic", domain: "router", higher: "@tanstack/react-router", introducedAt: "v0.6.0", lower: "hono", reason: "TanStack Router has more complete route typing coverage", scoreType: "scenarioScore" },

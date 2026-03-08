@@ -88,6 +88,8 @@ describe("confidence signal propagation", () => {
     const ca = composites.find((comp) => comp.key === "consumerApi");
     expect(ca!.compositeConfidenceReasons).toBeDefined();
     expect(ca!.compositeConfidenceReasons!.length).toBeGreaterThan(0);
-    expect(ca!.compositeConfidenceReasons!.some((reason) => reason.includes("Bottleneck"))).toBeTruthy();
+    expect(
+      ca!.compositeConfidenceReasons!.some((reason) => reason.includes("Bottleneck")),
+    ).toBeTruthy();
   });
 });

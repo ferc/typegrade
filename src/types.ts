@@ -143,6 +143,8 @@ export interface AnalysisResult {
   dedupStats: { groups: number; filesRemoved: number };
   /** Confidence summary across all layers */
   confidenceSummary?: ConfidenceSummary;
+  /** Coverage diagnostics — reachable files, positions, undersampling */
+  coverageDiagnostics?: CoverageDiagnostics;
   explainability?: ExplainabilityReport;
   benchmarkDiagnostics?: BenchmarkDiagnostics;
   scenarioDiagnostics?: {
@@ -183,10 +185,28 @@ export interface ExplainabilityReport {
   scenarioFailures?: { scenario: string; reason: string }[];
 }
 
+/** Coverage diagnostics for a package analysis */
+export interface CoverageDiagnostics {
+  /** How types are provided: bundled in package, @types/* sibling, or mixed */
+  typesSource: "bundled" | "@types" | "mixed" | "unknown";
+  /** Total files reachable from entrypoints */
+  reachableFiles: number;
+  /** Total measured type positions in the public surface */
+  measuredPositions: number;
+  /** Total declarations in the public surface */
+  measuredDeclarations: number;
+  /** Whether the package is considered undersampled */
+  undersampled: boolean;
+  /** If undersampled, reason(s) why */
+  undersampledReasons: string[];
+}
+
 export interface PackageAnalysisContext {
   packageName: string;
   packageRoot: string;
   packageJsonPath: string;
   typesEntrypoint: string | null;
   graphStats?: GraphStats;
+  /** Whether types come from @types/* package */
+  typesSource?: "bundled" | "@types" | "mixed" | "unknown";
 }

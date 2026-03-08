@@ -264,7 +264,8 @@ interface MakeReturnPositionOpts {
 }
 
 function makeReturnPosition(opts: MakeReturnPositionOpts): SurfacePosition {
-  const { owner, returnType, returnTypeNode, declarationName, declarationKind, filePath, weight } = opts;
+  const { owner, returnType, returnTypeNode, declarationName, declarationKind, filePath, weight } =
+    opts;
   const loc = nodeLocation(owner);
   return {
     column: loc.column,
@@ -296,15 +297,17 @@ function extractFunction(fn: FunctionDeclaration, filePath: string): SurfaceDecl
   const positions: SurfacePosition[] = [];
 
   for (const param of fn.getParameters()) {
-    positions.push(makePosition({
-      declarationKind: "function",
-      declarationName: name,
-      filePath,
-      name: param.getName(),
-      node: param,
-      role: "param",
-      weight: 1,
-    }));
+    positions.push(
+      makePosition({
+        declarationKind: "function",
+        declarationName: name,
+        filePath,
+        name: param.getName(),
+        node: param,
+        role: "param",
+        weight: 1,
+      }),
+    );
   }
 
   positions.push(
@@ -578,15 +581,17 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
     if (prop.getScope() === "private") {
       continue;
     }
-    positions.push(makePosition({
-      declarationKind: "class",
-      declarationName: name,
-      filePath,
-      name: prop.getName(),
-      node: prop,
-      role: "property",
-      weight: 0.75,
-    }));
+    positions.push(
+      makePosition({
+        declarationKind: "class",
+        declarationName: name,
+        filePath,
+        name: prop.getName(),
+        node: prop,
+        role: "property",
+        weight: 0.75,
+      }),
+    );
   }
 
   // Getters
@@ -721,15 +726,17 @@ function extractVariable(
     line: decl.getStartLineNumber(),
     name,
     node: decl,
-    positions: [makePosition({
-      declarationKind: "variable",
-      declarationName: name,
-      filePath,
-      name,
-      node: decl,
-      role: "variable",
-      weight: 1,
-    })],
+    positions: [
+      makePosition({
+        declarationKind: "variable",
+        declarationName: name,
+        filePath,
+        name,
+        node: decl,
+        role: "variable",
+        weight: 1,
+      }),
+    ],
     typeParameters: [],
   };
 }

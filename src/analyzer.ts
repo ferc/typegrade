@@ -3,6 +3,7 @@ import type {
   AnalysisResult,
   CompositeScore,
   ConfidenceSummary,
+  CoverageDiagnostics,
   DimensionResult,
   DomainKey,
   DomainScore,
@@ -45,6 +46,13 @@ const SCENARIO_CONFIDENCE_THRESHOLD = 0.7;
 /** Confidence cap when graph resolution used fallback glob */
 const FALLBACK_CONFIDENCE_CAP = 0.55;
 
+/** Minimum reachable files to consider a package adequately sampled */
+const MIN_REACHABLE_FILES = 3;
+/** Minimum measured positions to consider a package adequately sampled */
+const MIN_MEASURED_POSITIONS = 10;
+/** Minimum declarations to consider a package adequately sampled */
+const MIN_MEASURED_DECLARATIONS = 5;
+
 function makeDefaultGraphStats(): GraphStats {
   return {
     dedupByStrategy: {},
@@ -53,6 +61,56 @@ function makeDefaultGraphStats(): GraphStats {
     totalEntrypoints: 0,
     totalReachable: 0,
     usedFallbackGlob: false,
+  };
+}
+
+/**
+ * Detect undersampling — packages where we have too little data
+ * to produce a reliable score.
+ */
+function computeCoverageDiagnostics(opts: {
+  graphStats: GraphStats;
+  surfacePositions: number;
+  surfaceDeclarations: number;
+  typesSource: "bundled" | "@types" | "mixed" | "unknown";
+}): CoverageDiagnostics {
+  const { graphStats, surfacePositions, surfaceDeclarations, typesSource } = opts;
+  const reasons: string[] = [];
+
+  if (graphStats.totalReachable < MIN_REACHABLE_FILES && !graphStats.usedFallbackGlob) {
+    reasons.push(
+      `Only ${graphStats.totalReachable} reachable file(s) from entrypoints (minimum: ${MIN_REACHABLE_FILES})`,
+    );
+  }
+  if (surfacePositions < MIN_MEASURED_POSITIONS) {
+    reasons.push(
+      `Only ${surfacePositions} measured type position(s) (minimum: ${MIN_MEASURED_POSITIONS})`,
+    );
+  }
+  if (surfaceDeclarations < MIN_MEASURED_DECLARATIONS) {
+    reasons.push(
+      `Only ${surfaceDeclarations} public declaration(s) (minimum: ${MIN_MEASURED_DECLARATIONS})`,
+    );
+  }
+  if (graphStats.usedFallbackGlob) {
+    reasons.push("Graph resolution used fallback glob — entrypoint traversal failed");
+  }
+  if (
+    graphStats.totalAfterDedup < MIN_REACHABLE_FILES &&
+    graphStats.totalReachable >= MIN_REACHABLE_FILES
+  ) {
+    reasons.push(
+      `After dedup only ${graphStats.totalAfterDedup} file(s) remain (high dedup ratio may indicate incomplete surface)`,
+    );
+  }
+
+  return {
+    measuredDeclarations: surfaceDeclarations,
+    measuredPositions: surfacePositions,
+    reachableFiles: graphStats.totalReachable,
+    typesSource,
+    undersampled: reasons.length > 0,
+    undersampledReasons: reasons,
   };
 }
 
@@ -325,10 +383,23 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     scenarioApplicability,
   };
 
+  // Compute coverage diagnostics
+  const typesSource = options?.packageContext?.typesSource ?? "unknown";
+  const coverageDiagnostics = computeCoverageDiagnostics({
+    graphStats,
+    surfaceDeclarations: consumerSurface.stats.totalDeclarations,
+    surfacePositions: consumerSurface.stats.totalPositions,
+    typesSource,
+  });
+  if (coverageDiagnostics.undersampled) {
+    caveats.push(`Package is undersampled: ${coverageDiagnostics.undersampledReasons.join("; ")}`);
+  }
+
   const result: AnalysisResult = {
     caveats,
     composites,
     confidenceSummary,
+    coverageDiagnostics,
     dedupStats,
     dimensions,
     domainInference,

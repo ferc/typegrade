@@ -182,7 +182,9 @@ function renderComparison(opts: ComparisonOpts): string {
     const domA = resultA.domainScore?.score ?? "n/a";
     const domB = resultB.domainScore?.score ?? "n/a";
     const domainLabel =
-      `Domain Fit (${resultA.domainScore?.domain ?? resultB.domainScore?.domain ?? "?"})`.padEnd(22);
+      `Domain Fit (${resultA.domainScore?.domain ?? resultB.domainScore?.domain ?? "?"})`.padEnd(
+        22,
+      );
     lines.push(`  ${domainLabel}${String(domA).padEnd(16)}${String(domB).padEnd(16)}`);
   }
 

@@ -105,7 +105,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
-  // ── Category 1: Package-name rules (strongest, score 0.6) ──────────────
+  // ── Category 1: Package-name rules (strongest, score 1.0) ──────────────
 
   let packageNameMatchedDomain: string | undefined = undefined;
 
@@ -124,7 +124,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
             domain,
             reason: `Package name matches ${domain} library '${lib}'`,
             ruleId: `pkg-name:${lib}`,
-            weight: 0.6,
+            weight: 1,
           });
           signals.push(`package name matches ${domain} library '${lib}'`);
           break;
@@ -136,17 +136,26 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
+  // When a package-name match exists, declaration-role rules for competing domains
+  // Are halved to prevent generic symbol names from overriding the strong prior
+  const competingDomainPenalty = packageNameMatchedDomain ? 0.5 : 1;
+
   // ── Category 2: Declaration-role rules ─────────────────────────────────
 
   // 2a: Validation — functions accepting unknown params (score 0.3)
   if (totalFunctions > 0 && unknownParamFunctions / totalFunctions > 0.3) {
+    const weight =
+      0.3 *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "validation"
+        ? competingDomainPenalty
+        : 1);
     emit({
       category: "declaration-role",
       direction: "positive",
       domain: "validation",
       reason: `${unknownParamFunctions}/${totalFunctions} functions accept 'unknown' params`,
       ruleId: "unknown-param-density",
-      weight: 0.3,
+      weight,
     });
     signals.push(`${unknownParamFunctions}/${totalFunctions} functions accept 'unknown' params`);
   }
@@ -169,17 +178,10 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
-  // 2c: Router — route/handler/middleware/request/response declarations
-  // Score: 0.2 + 0.1 per match, max 0.6
-  const routerNames = [
-    "route",
-    "handler",
-    "middleware",
-    "request",
-    "response",
-    "router",
-    "endpoint",
-  ];
+  // 2c: Router — route/middleware/router/endpoint declarations
+  // Score: 0.2 + 0.1 per match, max 0.6 (penalized if competing with package-name domain)
+  // "request"/"response" removed — too generic, matches axios/effect/many others
+  const routerNames = ["route", "middleware", "router", "endpoint"];
   let routerMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
@@ -188,7 +190,12 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (routerMatchCount >= 2) {
-    const routerSignal = Math.min(0.6, 0.2 + routerMatchCount * 0.1);
+    const baseSignal = Math.min(0.6, 0.2 + routerMatchCount * 0.1);
+    const routerSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "router"
+        ? competingDomainPenalty
+        : 1);
     emit({
       category: "declaration-role",
       direction: "positive",
@@ -200,9 +207,10 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     signals.push(`${routerMatchCount} declarations match router patterns`);
   }
 
-  // 2d: ORM — model/schema/column/migration/query/table declarations
-  // Score: 0.2 + 0.1 per match, max 0.6
-  const ormNames = ["model", "schema", "column", "migration", "query", "table", "entity"];
+  // 2d: ORM — column/migration/table/entity/relation declarations
+  // Score: 0.2 + 0.1 per match, max 0.6 (penalized if competing with package-name domain)
+  // "model"/"schema"/"query" removed — too generic, matches validation/schema libraries
+  const ormNames = ["column", "migration", "table", "entity", "relation"];
   let ormMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
@@ -211,7 +219,10 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (ormMatchCount >= 2) {
-    const ormSignal = Math.min(0.6, 0.2 + ormMatchCount * 0.1);
+    const baseSignal = Math.min(0.6, 0.2 + ormMatchCount * 0.1);
+    const ormSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "orm" ? competingDomainPenalty : 1);
     emit({
       category: "declaration-role",
       direction: "positive",
@@ -223,17 +234,10 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     signals.push(`${ormMatchCount} declarations match ORM patterns`);
   }
 
-  // 2e: Stream — observable/subject/stream/subscription/pipe declarations
-  // Score: 0.2 + 0.1 per match, max 0.6
-  const streamNames = [
-    "observable",
-    "subject",
-    "stream",
-    "subscription",
-    "pipe",
-    "operator",
-    "subscriber",
-  ];
+  // 2e: Stream — observable/subject/stream/subscription/operator/subscriber
+  // Score: 0.2 + 0.1 per match, max 0.6 (penalized if competing with package-name domain)
+  // "pipe" removed — too generic, matches remeda, fp-ts, lodash
+  const streamNames = ["observable", "subject", "stream", "subscription", "operator", "subscriber"];
   let streamMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
@@ -242,7 +246,12 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (streamMatchCount >= 2) {
-    const streamSignal = Math.min(0.6, 0.2 + streamMatchCount * 0.1);
+    const baseSignal = Math.min(0.6, 0.2 + streamMatchCount * 0.1);
+    const streamSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "stream"
+        ? competingDomainPenalty
+        : 1);
     emit({
       category: "declaration-role",
       direction: "positive",
@@ -450,15 +459,15 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       }
     }
 
-    // If declaration evidence strongly contradicts the package-name match
-    if (strongestDeclarationDomain && strongestDeclarationScore >= 0.4) {
+    // If declaration evidence contradicts the package-name match
+    if (strongestDeclarationDomain && strongestDeclarationScore >= 0.3) {
       emit({
         category: "negative",
         direction: "negative",
         domain: packageNameMatchedDomain,
-        reason: `Package name says '${packageNameMatchedDomain}' but declarations strongly suggest '${strongestDeclarationDomain}'`,
+        reason: `Package name says '${packageNameMatchedDomain}' but declarations suggest '${strongestDeclarationDomain}'`,
         ruleId: "neg:pkg-vs-decl-contradiction",
-        weight: -0.2,
+        weight: -0.3,
       });
       signals.push(
         `Declaration patterns contradict package-name domain: ${packageNameMatchedDomain} vs ${strongestDeclarationDomain}`,
@@ -526,16 +535,26 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     bestScore = 0;
   }
 
+  // ── Compute ambiguity gap ───────────────────────────────────────────────
+
+  const ambiguityGap = bestScore - secondBestScore;
+
+  // Abstain when no package-name match and ambiguity gap is too narrow
+  // This prevents low-confidence guesses from triggering wrong domain adjustments
+  if (!packageNameMatchedDomain && bestDomain !== "general" && ambiguityGap < 0.2) {
+    signals.push(
+      `Abstaining from ${bestDomain}: ambiguity gap ${ambiguityGap.toFixed(2)} < 0.2 without package-name match`,
+    );
+    bestDomain = "general";
+    bestScore = 0;
+  }
+
   // Fallback: utility if mostly type aliases and nothing else won
   if (bestDomain === "general" && totalDecls > 0 && typeAliases / totalDecls > 0.5) {
     bestDomain = "utility";
     bestScore = 0.4;
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases (utility fallback)`);
   }
-
-  // ── Compute ambiguity gap ───────────────────────────────────────────────
-
-  const ambiguityGap = bestScore - secondBestScore;
 
   // ── Compute false-positive risk ─────────────────────────────────────────
 

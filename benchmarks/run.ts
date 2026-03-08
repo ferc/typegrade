@@ -1,12 +1,79 @@
 #!/usr/bin/env tsx
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import type { AnalysisResult, DomainKey, ScenarioScore } from "../src/types.js";
-import { PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS } from "./assertions.js";
+import type { AnalysisResult, CoverageDiagnostics, DomainKey, ScenarioScore } from "../src/types.js";
+import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS } from "./assertions.js";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
 
-const manifestPath = join(import.meta.dirname, "manifest.json");
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+// Parse CLI flags
+const args = process.argv.slice(2);
+const holdoutMode = args.includes("--holdout");
+const poolSampleIdx = args.indexOf("--pool-sample");
+const poolSampleCount = poolSampleIdx >= 0 ? Number.parseInt(args[poolSampleIdx + 1] ?? "5", 10) : 0;
+const seedIdx = args.indexOf("--seed");
+const seed = seedIdx >= 0 ? Number.parseInt(args[seedIdx + 1] ?? "42", 10) : Date.now();
+const manifestFlag = args.find((a) => a.startsWith("--manifest="));
+const corpusSplit: "train" | "holdout" | "pool" = holdoutMode ? "holdout" : poolSampleCount > 0 ? "pool" : "train";
+
+function loadManifest(filename: string): Record<string, (string | { spec: string; typesVersion?: string })[]> {
+  const manifestPath = join(import.meta.dirname, filename);
+  if (!existsSync(manifestPath)) {
+    console.error(`Manifest not found: ${manifestPath}`);
+    process.exit(1);
+  }
+  return JSON.parse(readFileSync(manifestPath, "utf8")).packages;
+}
+
+// Seeded PRNG for reproducible pool sampling
+function mulberry32(a: number) {
+  return () => {
+    let t = (a += 0x6D2B79F5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function resolveManifestFilename(): string {
+  if (manifestFlag) {
+    return manifestFlag.split("=")[1]!;
+  }
+  if (holdoutMode) {
+    return "manifest.holdout.json";
+  }
+  return "manifest.train.json";
+}
+
+const manifestFilename = resolveManifestFilename();
+const manifest = { packages: loadManifest(manifestFilename) };
+
+// Apply pool sampling if requested
+if (poolSampleCount > 0) {
+  const allPackages: { tier: string; entry: string | { spec: string; typesVersion?: string } }[] = [];
+  for (const [tier, packages] of Object.entries(manifest.packages)) {
+    for (const pkg of packages) {
+      allPackages.push({ entry: pkg, tier });
+    }
+  }
+  // Fisher-Yates shuffle with seeded PRNG
+  const rng = mulberry32(seed);
+  for (let i = allPackages.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [allPackages[i], allPackages[j]] = [allPackages[j]!, allPackages[i]!];
+  }
+  const sampled = allPackages.slice(0, Math.min(poolSampleCount, allPackages.length));
+  // Rebuild manifest with sampled packages
+  manifest.packages = {};
+  for (const { tier, entry } of sampled) {
+    if (!manifest.packages[tier]) {
+      manifest.packages[tier] = [];
+    }
+    manifest.packages[tier]!.push(entry);
+  }
+  console.log(`Pool sample: ${sampled.length} packages (seed=${seed})\n`);
+}
+
+console.log(`Corpus: ${corpusSplit} (manifest: ${manifestFilename})\n`);
 
 interface ManifestEntry {
   spec: string;
@@ -249,10 +316,89 @@ function main() {
     }
   }
 
+  // Domain accuracy
+  console.log("\n=== Domain Accuracy ===\n");
+  let domainCorrect = 0;
+  let domainIncorrect = 0;
+  let domainAbstained = 0;
+  const domainConfusion: { name: string; expected: string; actual: string }[] = [];
+
+  for (const entry of entries) {
+    const expected = EXPECTED_DOMAINS[entry.name];
+    if (!expected) {
+      continue;
+    }
+    const actual = entry.result.domainInference?.domain ?? "general";
+    if (actual === expected) {
+      domainCorrect++;
+      console.log(`  OK: ${entry.name.padEnd(25)} expected=${expected.padEnd(12)} actual=${actual}`);
+    } else if (actual === "general" && expected !== "general") {
+      domainAbstained++;
+      console.log(`  ABSTAIN: ${entry.name.padEnd(21)} expected=${expected.padEnd(12)} actual=${actual}`);
+    } else {
+      domainIncorrect++;
+      domainConfusion.push({ actual, expected, name: entry.name });
+      console.log(`  WRONG: ${entry.name.padEnd(22)} expected=${expected.padEnd(12)} actual=${actual}`);
+    }
+  }
+
+  const domainTotal = domainCorrect + domainIncorrect + domainAbstained;
+  const domainAccuracy = domainTotal > 0 ? domainCorrect / domainTotal : 0;
+  const wrongSpecificRate = domainTotal > 0 ? domainIncorrect / domainTotal : 0;
+  console.log(`\n  Correct: ${domainCorrect}/${domainTotal} (${(domainAccuracy * 100).toFixed(1)}%)`);
+  console.log(`  Abstained: ${domainAbstained}/${domainTotal}`);
+  console.log(`  Wrong-specific: ${domainIncorrect}/${domainTotal} (${(wrongSpecificRate * 100).toFixed(1)}%)`);
+
   // Persist results to JSON
   const resultsDir = join(import.meta.dirname, "results");
   if (!existsSync(resultsDir)) {
     mkdirSync(resultsDir, { recursive: true });
+  }
+
+  // Check for undersampled packages used as must-pass anchors
+  const mustPassPackages = new Set<string>();
+  for (const assertion of PAIRWISE_ASSERTIONS) {
+    if (assertion.class === "must-pass") {
+      mustPassPackages.add(assertion.higher);
+      mustPassPackages.add(assertion.lower);
+    }
+  }
+
+  const undersampledAnchors: { name: string; reasons: string[] }[] = [];
+  for (const entry of entries) {
+    const coverage = entry.result.coverageDiagnostics;
+    if (coverage?.undersampled && mustPassPackages.has(entry.name)) {
+      undersampledAnchors.push({ name: entry.name, reasons: coverage.undersampledReasons });
+    }
+  }
+
+  if (undersampledAnchors.length > 0) {
+    console.log("\n=== Undersampled Must-Pass Anchors (WARNING) ===\n");
+    for (const anchor of undersampledAnchors) {
+      console.log(`  ${anchor.name}: ${anchor.reasons.join("; ")}`);
+    }
+    console.log(
+      "\n  NOTE: Undersampled packages should not act as must-pass anchors without an explicit waiver.",
+    );
+  }
+
+  // Print coverage diagnostics
+  console.log("\n=== Coverage Diagnostics ===\n");
+  console.log(
+    `${"Package".padEnd(25)}${"Source".padEnd(10)}${"Reachable".padEnd(12)}${"Positions".padEnd(12)}${"Decls".padEnd(8)}${"XPkgRefs".padEnd(10)}Undersampled`,
+  );
+  console.log("-".repeat(95));
+  for (const entry of entries) {
+    const cov = entry.result.coverageDiagnostics;
+    const xrefs = entry.result.graphStats.crossPackageTypeRefs ?? 0;
+    if (cov) {
+      const undersampledStr = cov.undersampled ? `YES (${cov.undersampledReasons.length} reason(s))` : "no";
+      console.log(
+        `${entry.name.padEnd(25)}${cov.typesSource.padEnd(10)}${String(cov.reachableFiles).padEnd(12)}${String(cov.measuredPositions).padEnd(12)}${String(cov.measuredDeclarations).padEnd(8)}${String(xrefs).padEnd(10)}${undersampledStr}`,
+      );
+    } else {
+      console.log(`${entry.name.padEnd(25)}${"n/a".padEnd(10)}${"n/a".padEnd(12)}${"n/a".padEnd(12)}${"n/a".padEnd(8)}${"n/a".padEnd(10)}n/a`);
+    }
   }
 
   const snapshot = {
@@ -262,6 +408,7 @@ function main() {
       caveats: en.result.caveats,
       confidenceSummary: en.result.confidenceSummary ?? null,
       consumerApi: en.consumerApi,
+      coverageDiagnostics: en.result.coverageDiagnostics ?? null,
       dedupStats: en.result.dedupStats,
       dimensions: en.result.dimensions.map((dim) => ({
         confidence: dim.confidence ?? null,
@@ -291,7 +438,20 @@ function main() {
       fallbackGlobCount: fallbackPackages.length,
       hardDiagnostic: { failed: hardDiagFailed, passed: hardDiagPassed, total: totalHardDiag },
       mustPass: { failed: mustPassFailed, passed: mustPassPassed, total: totalMustPass },
+      undersampledAnchorCount: undersampledAnchors.length,
+      undersampledAnchors: undersampledAnchors.map((a) => a.name),
     },
+    corpusSplit,
+    domainAccuracy: {
+      abstained: domainAbstained,
+      accuracy: Math.round(domainAccuracy * 1000) / 1000,
+      confusion: domainConfusion,
+      correct: domainCorrect,
+      total: domainTotal,
+      wrongSpecificRate: Math.round(wrongSpecificRate * 1000) / 1000,
+    },
+    manifestSource: manifestFilename,
+    seed: poolSampleCount > 0 ? seed : undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -299,8 +459,8 @@ function main() {
   writeFileSync(join(resultsDir, filename), JSON.stringify(snapshot, null, 2));
   console.log(`\nResults saved to benchmarks/results/${filename}`);
 
-  // Exit code 1 only on must-pass failures
-  if (mustPassFailed > 0) {
+  // Exit code 1 only on must-pass failures in train mode
+  if (mustPassFailed > 0 && corpusSplit === "train") {
     process.exit(1);
   }
 }

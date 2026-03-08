@@ -13,6 +13,7 @@ export type {
   GraphStats,
   ResolvedEntrypoint,
 } from "./types.js";
+export type { WalkResult } from "./walker.js";
 export { resolveEntrypoints } from "./resolve.js";
 
 /** Well-known locations for declaration index files, tried in order */
@@ -69,7 +70,8 @@ export function buildDeclarationGraph(pkgDir: string, project: Project): Declara
   }
 
   // Walk the import graph from entrypoints
-  const nodes = walkDeclarationGraph(entrypoints, project, pkgDir);
+  const walkResult = walkDeclarationGraph(entrypoints, project, pkgDir);
+  const { nodes, crossPackageTypeRefs } = walkResult;
 
   // Deduplicate
   const { groups, filesToRemove } = deduplicateGraph(nodes, entrypoints, project);
@@ -84,6 +86,7 @@ export function buildDeclarationGraph(pkgDir: string, project: Project): Declara
   }
 
   const stats: GraphStats = {
+    crossPackageTypeRefs,
     dedupByStrategy,
     ...(fallbackReason === undefined ? {} : { fallbackReason }),
     filesDeduped: filesToRemove.size,

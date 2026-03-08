@@ -6,6 +6,12 @@ import { existsSync } from "node:fs";
 /** Declaration file extensions to try when resolving reference path directives */
 const DTS_EXTENSIONS = [".d.ts", ".d.mts", ".d.cts"] as const;
 
+export interface WalkResult {
+  nodes: Map<string, GraphNode>;
+  /** Number of import/reference edges that pointed outside the package directory */
+  crossPackageTypeRefs: number;
+}
+
 /**
  * Walk the declaration import graph via BFS from resolved entrypoints.
  * Follows:
@@ -13,12 +19,13 @@ const DTS_EXTENSIONS = [".d.ts", ".d.mts", ".d.cts"] as const;
  * - `/// <reference path="...">` directives (resolved with .d.ts/.d.mts/.d.cts fallback)
  * - `/// <reference types="...">` directives
  * Only includes files within the package directory.
+ * Cross-package references are counted but not followed.
  */
 export function walkDeclarationGraph(
   entrypoints: ResolvedEntrypoint[],
   project: Project,
   pkgDir: string,
-): Map<string, GraphNode> {
+): WalkResult {
   const nodes = new Map<string, GraphNode>();
 
   // Normalize pkgDir for path prefix matching
@@ -56,6 +63,7 @@ export function walkDeclarationGraph(
 
   // BFS
   let head = 0;
+  let crossPackageTypeRefs = 0;
   while (head < queue.length) {
     const { filePath, depth, subpath } = queue[head]!;
     head++;
@@ -66,9 +74,10 @@ export function walkDeclarationGraph(
     }
 
     // Collect all referenced files: imports/exports + reference directives
-    const referencedFiles = collectAllReferences(sf, project, normalizedPkgDir);
+    const refs = collectAllReferences(sf, project, normalizedPkgDir);
+    crossPackageTypeRefs += refs.crossPackageCount;
 
-    for (const refPath of referencedFiles) {
+    for (const refPath of refs.inPackage) {
       if (nodes.has(refPath)) {
         const existing = nodes.get(refPath)!;
         if (!existing.reachableFrom.includes(subpath)) {
@@ -89,21 +98,32 @@ export function walkDeclarationGraph(
     }
   }
 
-  return nodes;
+  return { crossPackageTypeRefs, nodes };
+}
+
+interface CollectedRefs {
+  inPackage: string[];
+  crossPackageCount: number;
 }
 
 function collectAllReferences(
   sf: SourceFile,
   project: Project,
   normalizedPkgDir: string,
-): string[] {
+): CollectedRefs {
   const seen = new Set<string>();
-  const results: string[] = [];
+  const inPackage: string[] = [];
+  let crossPackageCount = 0;
 
   function addRef(absPath: string): void {
-    if (absPath.startsWith(normalizedPkgDir) && !seen.has(absPath)) {
-      seen.add(absPath);
-      results.push(absPath);
+    if (seen.has(absPath)) {
+      return;
+    }
+    seen.add(absPath);
+    if (absPath.startsWith(normalizedPkgDir)) {
+      inPackage.push(absPath);
+    } else {
+      crossPackageCount++;
     }
   }
 
@@ -135,7 +155,7 @@ function collectAllReferences(
     }
   }
 
-  return results;
+  return { crossPackageCount, inPackage };
 }
 
 /**

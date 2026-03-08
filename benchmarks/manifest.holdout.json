@@ -1,0 +1,8 @@
+{
+  "packages": {
+    "holdout-elite": ["typebox@0.34.33"],
+    "holdout-solid": ["@trpc/server@11.0.0", "ts-rest@3.52.0"],
+    "holdout-loose": ["chalk@5.4.1", "commander@13.1.0"],
+    "holdout-stretch": ["mobx@6.13.6"]
+  }
+}

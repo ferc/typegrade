@@ -54,4 +54,6 @@ export interface GraphStats {
   usedFallbackGlob: boolean;
   /** If a fallback was used, explains which strategy found the entrypoints */
   fallbackReason?: string;
+  /** Number of import/reference edges that point outside the package directory */
+  crossPackageTypeRefs?: number;
 }

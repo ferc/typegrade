@@ -302,4 +302,47 @@ describe("e2e: analyzeProject", () => {
     expect(impl).toBeDefined();
     expect(impl!.score).toBeLessThan(ca!.score!);
   });
+
+  it("source-mode analysis includes coverageDiagnostics", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    expect(result.coverageDiagnostics).toBeDefined();
+    expect(result.coverageDiagnostics!.typesSource).toBe("unknown");
+    expect(result.coverageDiagnostics!.measuredPositions).toBeGreaterThan(0);
+    expect(result.coverageDiagnostics!.measuredDeclarations).toBeGreaterThan(0);
+  });
+
+  it("detects undersampling for tiny fixtures", () => {
+    // The high-precision fixture has enough declarations to not be undersampled on those grounds
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    expect(result.coverageDiagnostics).toBeDefined();
+    // Source-mode won't have reachable files (no package entrypoints), so it will be undersampled
+    expect(result.coverageDiagnostics!.undersampled).toBeTruthy();
+    expect(result.coverageDiagnostics!.undersampledReasons.length).toBeGreaterThan(0);
+  });
+
+  it("package-mode analysis populates coverageDiagnostics with typesSource", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"), {
+      mode: "package",
+      packageContext: {
+        graphStats: {
+          dedupByStrategy: {},
+          filesDeduped: 0,
+          totalAfterDedup: 10,
+          totalEntrypoints: 1,
+          totalReachable: 10,
+          usedFallbackGlob: false,
+        },
+        packageJsonPath: "",
+        packageName: "test-package",
+        packageRoot: resolve(fixturesDir, "high-precision"),
+        typesEntrypoint: null,
+        typesSource: "bundled",
+      },
+      sourceFilesOptions: { includeDts: false },
+    });
+    expect(result.coverageDiagnostics).toBeDefined();
+    expect(result.coverageDiagnostics!.typesSource).toBe("bundled");
+    // With 10 reachable files and enough declarations, should not be undersampled
+    expect(result.coverageDiagnostics!.undersampled).toBeFalsy();
+  });
 });
