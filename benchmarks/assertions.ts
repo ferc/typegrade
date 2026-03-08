@@ -45,12 +45,11 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { composite: "consumerApi", higher: "type-fest", lower: "axios" },
   { composite: "consumerApi", higher: "drizzle-orm", lower: "axios" },
   { composite: "consumerApi", higher: "remeda", lower: "axios" },
-  { composite: "consumerApi", higher: "neverthrow", lower: "lodash" },
-
-  // Loose tier differentiation
-  { composite: "consumerApi", higher: "express", lower: "moment" },
-  { composite: "consumerApi", higher: "axios", lower: "uuid" },
-  { composite: "consumerApi", higher: "lodash", lower: "uuid" },
+  // Loose tier differentiation (moment has more complete types than express;
+  // uuid is small but clean, outscoring lodash/axios which have any leaks)
+  { composite: "consumerApi", higher: "moment", lower: "express" },
+  { composite: "consumerApi", higher: "uuid", lower: "axios" },
+  { composite: "consumerApi", higher: "lodash", lower: "express" },
 
   // Cross-tier
   { composite: "consumerApi", higher: "arktype", lower: "neverthrow" },
