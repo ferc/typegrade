@@ -99,6 +99,7 @@
     "url": "https://github.com/ferc/typegrade/issues"
   },
   "license": "MIT",
+  "packageManager": "pnpm@10.13.1",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
