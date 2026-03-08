@@ -1,3 +1,9 @@
+## [0.7.6](https://github.com/ferc/typegrade/compare/v0.7.5...v0.7.6) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** use npm 11.5.1+ for trusted publishing OIDC support ([8f94228](https://github.com/ferc/typegrade/commit/8f9422818bdb16d12b97e252b48a635373c1a8f5))
+
 ## [0.7.5](https://github.com/ferc/typegrade/compare/v0.7.4...v0.7.5) (2026-03-08)
 
 ### Bug Fixes
