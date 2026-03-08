@@ -415,13 +415,170 @@ const subcommandContract: ScenarioTest = {
 };
 
 // ---------------------------------------------------------------------------
+// Scenario 4: Handler/context typing
+// ---------------------------------------------------------------------------
+
+function isHandlerRelated(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("handler") ||
+    lower.includes("context") ||
+    lower.includes("action") ||
+    lower.includes("callback") ||
+    lower.includes("middleware")
+  );
+}
+
+interface PositionLike {
+  role: string;
+  type: { getText(): string };
+}
+
+function hasTypedContextParam(positions: readonly PositionLike[]): boolean {
+  for (const pos of positions) {
+    if (pos.role !== "param") {
+      continue;
+    }
+    const typeText = pos.type.getText();
+    // Context params should not be any/unknown and should carry structure
+    if (typeText !== "any" && typeText !== "unknown" && typeText.includes("{")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const handlerContextTyping: ScenarioTest = {
+  description:
+    "Handler/context types should carry option schema through generics, ensuring typed access to parsed arguments in command handlers",
+  evaluate: (surface: PublicSurface): ScenarioResult => {
+    let handlerDecls = 0;
+    let genericHandlers = 0;
+    let constrainedHandlers = 0;
+    let overloadedHandlers = 0;
+    let typedContextHandlers = 0;
+    let handlerMethodCount = 0;
+
+    for (const decl of surface.declarations) {
+      if (!isHandlerRelated(decl.name)) {
+        continue;
+      }
+      handlerDecls++;
+
+      if (decl.typeParameters.length > 0) {
+        genericHandlers++;
+        if (decl.typeParameters.some((tp) => tp.hasConstraint)) {
+          constrainedHandlers++;
+        }
+      }
+      if (decl.overloadCount && decl.overloadCount > 1) {
+        overloadedHandlers++;
+      }
+
+      // Check for typed context parameters
+      if (hasTypedContextParam(decl.positions)) {
+        typedContextHandlers++;
+      }
+
+      // Check methods for handler patterns
+      if (decl.methods) {
+        const ms = countMethodMatches(decl.methods, isHandlerRelated);
+        handlerMethodCount += ms.matchCount;
+        genericHandlers += ms.genericCount;
+        constrainedHandlers += ms.constrainedCount;
+        overloadedHandlers += ms.overloadedCount;
+
+        // Check for typed context in handler methods
+        for (const method of decl.methods) {
+          if (isHandlerRelated(method.name) && hasTypedContextParam(method.positions)) {
+            typedContextHandlers++;
+          }
+        }
+      }
+    }
+
+    if (handlerDecls === 0) {
+      return makeResult({
+        name: "handlerContextTyping",
+        passed: false,
+        reason: "No handler/context declarations found",
+        score: 25,
+      });
+    }
+
+    // 40% compile-success: handler declarations with generics
+    let compileScore = 0;
+    if (genericHandlers > 0) {
+      compileScore = 40;
+    } else if (handlerDecls >= 2 || handlerMethodCount >= 2) {
+      compileScore = 20;
+    } else if (handlerDecls > 0) {
+      compileScore = 10;
+    }
+
+    // 25% compile-failure: constrained handlers reject wrong context types
+    let failureScore = 0;
+    if (constrainedHandlers > 0) {
+      failureScore += 12;
+    }
+    if (overloadedHandlers > 0) {
+      failureScore += 8;
+    }
+    if (typedContextHandlers > 0) {
+      failureScore += 5;
+    }
+    failureScore = Math.min(25, failureScore);
+
+    // 25% inferred-type exactness: generic context propagation
+    let exactnessScore = 0;
+    if (genericHandlers >= 2) {
+      exactnessScore += 12;
+    }
+    if (constrainedHandlers >= 2) {
+      exactnessScore += 8;
+    }
+    if (typedContextHandlers >= 2) {
+      exactnessScore += 5;
+    }
+    exactnessScore = Math.min(25, exactnessScore);
+
+    // 10% wrong-path prevention
+    let wrongPathScore = 0;
+    const untypedHandlers = handlerDecls - genericHandlers;
+    if (untypedHandlers <= 0 && handlerDecls > 0) {
+      wrongPathScore = 10;
+    } else if (handlerDecls > 0 && untypedHandlers < handlerDecls / 2) {
+      wrongPathScore = 5;
+    }
+
+    const score = Math.min(100, compileScore + failureScore + exactnessScore + wrongPathScore);
+    const passed = score >= 40;
+
+    return makeResult({
+      name: "handlerContextTyping",
+      passed,
+      reason: passed
+        ? `${genericHandlers} generic handlers, ${constrainedHandlers} constrained, ${typedContextHandlers} typed contexts`
+        : "Handlers lack typed context propagation",
+      score,
+    });
+  },
+  name: "handlerContextTyping",
+};
+
+// ---------------------------------------------------------------------------
 // Pack export
 // ---------------------------------------------------------------------------
 
 export const CLI_PACK: ScenarioPack = {
   description:
-    "Tests CLI libraries for option schema inference, parsed argument typing, and subcommand contracts",
+    "Tests CLI libraries for option schema inference, parsed argument typing, subcommand contracts, and handler context typing",
   domain: "cli",
   name: "cli",
-  scenarios: [optionSchemaInference, parsedArgumentInference, subcommandContract],
+  scenarios: [
+    optionSchemaInference,
+    parsedArgumentInference,
+    subcommandContract,
+    handlerContextTyping,
+  ],
 };

@@ -615,6 +615,83 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
 
   // ── Category 5b+: Additional contradiction penalties ────────────────────
 
+  // 5c: Package-name prior beats weak generic-density signals
+  // Penalize competing domains whose evidence comes only from
+  // Generic-structure rules (category 3) when a package-name match exists
+  if (packageNameMatchedDomain) {
+    for (const [domain, domainRules] of Object.entries(rulesByDomain)) {
+      if (domain === packageNameMatchedDomain || domain === "general") {
+        continue;
+      }
+      const positiveRules = domainRules.filter((rl) => rl.score > 0);
+      const onlyGenericEvidence = positiveRules.every((rl) => rl.category === "generic-structure");
+      if (onlyGenericEvidence && positiveRules.length > 0) {
+        emit({
+          category: "negative",
+          direction: "negative",
+          domain,
+          reason: `Package-name prior '${packageNameMatchedDomain}' overrides weak generic-structure evidence for '${domain}'`,
+          ruleId: "neg:pkg-name-beats-generic",
+          weight: -0.2,
+        });
+        signals.push(
+          `Package-name match '${packageNameMatchedDomain}' penalizes weak generic evidence for '${domain}'`,
+        );
+      }
+    }
+  }
+
+  // 5d: Scenario evidence beats weak alias-density signals
+  // Penalize domains whose evidence comes only from generic-structure rules
+  // When scenario-trigger evidence exists for a different domain
+  const domainsWithScenarioEvidence = new Set<string>();
+  for (const em of emissions) {
+    if (em.category === "scenario-trigger" && em.direction === "positive") {
+      domainsWithScenarioEvidence.add(em.domain);
+    }
+  }
+  if (domainsWithScenarioEvidence.size > 0) {
+    for (const [domain, domainRules] of Object.entries(rulesByDomain)) {
+      if (domainsWithScenarioEvidence.has(domain) || domain === "general") {
+        continue;
+      }
+      const positiveRules = domainRules.filter((rl) => rl.score > 0);
+      const onlyGenericEvidence = positiveRules.every((rl) => rl.category === "generic-structure");
+      if (onlyGenericEvidence && positiveRules.length > 0) {
+        emit({
+          category: "negative",
+          direction: "negative",
+          domain,
+          reason: `Scenario evidence for ${[...domainsWithScenarioEvidence].join("/")} overrides weak generic-structure evidence for '${domain}'`,
+          ruleId: "neg:scenario-beats-generic",
+          weight: -0.15,
+        });
+        signals.push(`Scenario evidence penalizes weak generic evidence for '${domain}'`);
+      }
+    }
+  }
+
+  // 5e: Conflicting domains reduce certainty before changing the chosen label
+  // Reduce scores by 10% for all domains within 0.15 of each other
+  // Makes it harder for weak evidence to flip the domain label
+  const positiveDomains = Object.entries(scores)
+    .filter(([, sc]) => sc > 0.1)
+    .toSorted(([, scoreA], [, scoreB]) => scoreB - scoreA);
+  if (positiveDomains.length >= 2) {
+    const [, topScore] = positiveDomains[0]!;
+    const closeCompetitors = positiveDomains.filter(([, sc]) => topScore - sc < 0.15);
+    if (closeCompetitors.length >= 2) {
+      for (const [domain] of closeCompetitors) {
+        if (domain !== "general") {
+          scores[domain] = (scores[domain] ?? 0) * 0.9;
+        }
+      }
+      signals.push(
+        `${closeCompetitors.length} domains within 0.15 of each other — all reduced by 10%`,
+      );
+    }
+  }
+
   // If multiple competing domains have similar scores, penalize the weaker ones
   const domainScoreEntries = Object.entries(scores).filter(([, sc]) => sc > 0.1);
   if (domainScoreEntries.length >= 3 && !packageNameMatchedDomain) {
@@ -682,6 +759,14 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       // Only generic-structure rules matched — too weak to commit
       signals.push(
         `Abstaining from ${bestDomain}: only generic-structure evidence (no declaration-role or scenario-trigger)`,
+      );
+      bestDomain = "general";
+      bestScore = 0;
+    } else if (bestDomain === "utility" && !packageNameMatchedDomain && bestScore < 0.5) {
+      // Utility with weak evidence and no package-name match — prefer general
+      // Generic density alone is insufficient to classify as utility
+      signals.push(
+        `Abstaining from utility: weak evidence (score ${bestScore.toFixed(2)}) without package-name match — preferring general`,
       );
       bestDomain = "general";
       bestScore = 0;

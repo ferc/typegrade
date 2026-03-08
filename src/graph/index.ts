@@ -1,7 +1,7 @@
 import type { DeclarationGraph, GraphStats, ResolvedEntrypoint } from "./types.js";
 import { type WalkOptions, walkDeclarationGraph } from "./walker.js";
 import { basename, dirname, join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { Project } from "ts-morph";
 import { deduplicateGraph } from "./dedup.js";
 import { resolveEntrypoints } from "./resolve.js";
@@ -73,6 +73,11 @@ export function buildDeclarationGraph(
       }
     }
   }
+
+  // Include sibling .d.ts files in the same directory as existing entrypoints.
+  // Pick up ambient declarations like globals.d.ts and types.d.ts.
+  // These are not explicitly imported but live alongside the main entrypoint.
+  entrypoints = addSiblingDeclarationEntrypoints(entrypoints);
 
   // If still nothing, return empty graph
   if (entrypoints.length === 0) {
@@ -182,6 +187,68 @@ function findSiblingTypePackages(pkgDir: string): string[] {
     // Ignore filesystem errors
     return [];
   }
+}
+
+/** Well-known sibling declaration file names that packages commonly include */
+const SIBLING_DTS_NAMES = new Set([
+  "globals.d.ts",
+  "types.d.ts",
+  "ambient.d.ts",
+  "global.d.ts",
+  "typings.d.ts",
+  "declarations.d.ts",
+]);
+
+/**
+ * Scan entrypoint directories for sibling .d.ts files that are not already in
+ * the entrypoint list. Only adds well-known sibling names to avoid pulling in
+ * unrelated declaration files.
+ */
+function addSiblingDeclarationEntrypoints(entrypoints: ResolvedEntrypoint[]): ResolvedEntrypoint[] {
+  if (entrypoints.length === 0) {
+    return entrypoints;
+  }
+
+  // Collect all existing entrypoint file paths for dedup
+  const existingPaths = new Set(entrypoints.map((ep) => ep.filePath));
+
+  // Collect unique directories from existing entrypoints
+  const entrypointDirs = new Set<string>();
+  for (const ep of entrypoints) {
+    entrypointDirs.add(dirname(ep.filePath));
+  }
+
+  const siblings: ResolvedEntrypoint[] = [];
+  for (const dir of entrypointDirs) {
+    try {
+      const files = readdirSync(dir);
+      for (const file of files) {
+        if (!SIBLING_DTS_NAMES.has(file)) {
+          continue;
+        }
+        const fullPath = join(dir, file);
+        if (existingPaths.has(fullPath)) {
+          continue;
+        }
+        if (existsSync(fullPath)) {
+          siblings.push({
+            condition: "sibling-declaration",
+            filePath: fullPath,
+            subpath: ".",
+          });
+          existingPaths.add(fullPath);
+        }
+      }
+    } catch {
+      // Ignore directory read errors
+    }
+  }
+
+  if (siblings.length === 0) {
+    return entrypoints;
+  }
+
+  return [...entrypoints, ...siblings];
 }
 
 /**

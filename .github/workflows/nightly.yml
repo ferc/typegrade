@@ -1,0 +1,73 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nightly-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test:run
+
+      - name: Run train benchmarks
+        run: pnpm benchmark:train
+
+      - name: Run train gate
+        run: pnpm gate:train
+
+      - name: Run eval benchmarks (fixed)
+        run: pnpm benchmark:eval
+
+      - name: Run eval benchmarks (25-seed multi-eval)
+        run: pnpm benchmark:random:multi -- --seeds 25 --count 50
+
+      - name: Run eval judge
+        run: pnpm benchmark:judge
+
+      - name: Run eval gate
+        run: pnpm gate:eval
+
+      - name: Upload eval summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-eval-summary
+          path: benchmarks-output/eval-summary.json
+          retention-days: 90
+
+      - name: Upload gate reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-gate-reports
+          path: |
+            benchmarks-output/tune-report.json
+            benchmarks-output/eval-summary.json
+          retention-days: 90

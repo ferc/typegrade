@@ -217,8 +217,16 @@ function resolveReferencePath(fileDir: string, rawPath: string, project: Project
 
 /**
  * Resolve a `/// <reference types="..." />` directive.
- * Looks for the types within the package's own files (e.g., a globals.d.ts).
+ * Looks for the types within the package's own files first, then
+ * checks `@types/<name>/index.d.ts` in the node_modules tree for
+ * non-relative references (e.g., `/// <reference types="node" />`).
  */
+interface ResolveTypesInput {
+  typesName: string;
+  normalizedPkgDir: string;
+  project: Project;
+}
+
 function resolveReferenceTypes(
   typesName: string,
   normalizedPkgDir: string,
@@ -235,6 +243,38 @@ function resolveReferenceTypes(
         return sf.getFilePath();
       }
     }
+    return null;
+  }
+
+  // Non-relative reference — look for @types/<name>/index.d.ts in node_modules
+  return resolveAtTypesPackage({ normalizedPkgDir, project, typesName });
+}
+
+/**
+ * Resolve a non-relative `/// <reference types="..." />` to an @types package.
+ * Walks up the directory tree looking for node_modules/@types/<name>/index.d.ts.
+ */
+function resolveAtTypesPackage(input: ResolveTypesInput): string | null {
+  const { typesName, normalizedPkgDir, project } = input;
+
+  // Walk up from the package directory looking for node_modules
+  let searchDir = normalizedPkgDir.endsWith("/") ? normalizedPkgDir.slice(0, -1) : normalizedPkgDir;
+
+  // Limit traversal depth to avoid infinite loops
+  const maxDepth = 10;
+  for (let depth = 0; depth < maxDepth; depth++) {
+    const candidate = resolve(searchDir, "node_modules", "@types", typesName, "index.d.ts");
+    if (existsSync(candidate)) {
+      // Try to get existing source file, or add it to the project
+      const sf = project.getSourceFile(candidate) ?? project.addSourceFileAtPath(candidate);
+      return sf.getFilePath();
+    }
+
+    const parent = dirname(searchDir);
+    if (parent === searchDir) {
+      break;
+    }
+    searchDir = parent;
   }
 
   return null;

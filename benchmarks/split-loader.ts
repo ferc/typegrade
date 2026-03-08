@@ -134,8 +134,20 @@ function mulberry32(a: number) {
 }
 
 /**
+ * Build a stratification key from family, size band, and types source.
+ * This ensures sampling diversity across all three dimensions.
+ */
+function stratKey(entry: NormalizedEntry): string {
+  const family = entry.proxyFamily ?? "general";
+  const size = entry.sizeBand ?? "medium";
+  const source = entry.typesSourceHint ?? "bundled";
+  return `${family}|${size}|${source}`;
+}
+
+/**
  * Sample N packages from the pool manifest using a seeded PRNG.
- * Sampling is stratified by proxyFamily to ensure domain diversity.
+ * Sampling is stratified by proxyFamily, sizeBand, and typesSourceHint
+ * to ensure diversity across domain, surface size, and type source.
  */
 export function samplePool(manifest: BenchmarkManifestV2, spec: RandomSampleSpec): {
   sampled: FlatEntry[];
@@ -156,28 +168,29 @@ export function samplePool(manifest: BenchmarkManifestV2, spec: RandomSampleSpec
     };
   }
 
-  // Group by proxyFamily for stratified sampling
-  const byFamily = new Map<string, FlatEntry[]>();
+  // Group by stratification key (family + sizeBand + typesSource)
+  const byStratum = new Map<string, FlatEntry[]>();
   for (const entry of flat) {
-    const family = entry.entry.proxyFamily ?? "general";
-    if (!byFamily.has(family)) byFamily.set(family, []);
-    byFamily.get(family)!.push(entry);
+    const key = stratKey(entry.entry);
+    if (!byStratum.has(key)) {
+      byStratum.set(key, []);
+    }
+    byStratum.get(key)!.push(entry);
   }
 
-  // Proportional allocation per family
-  const families = [...byFamily.entries()];
+  const strata = [...byStratum.entries()];
   const totalAvailable = flat.length;
   const rng = mulberry32(spec.seed);
 
-  // Shuffle within each family, then take proportional count
+  // Shuffle within each stratum, then take proportional count
   const sampled: FlatEntry[] = [];
   const remaining = spec.count;
 
-  for (const [, entries] of families) {
+  for (const [, entries] of strata) {
     // Fisher-Yates shuffle
-    for (let i = entries.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [entries[i], entries[j]] = [entries[j]!, entries[i]!];
+    for (let idx = entries.length - 1; idx > 0; idx--) {
+      const jj = Math.floor(rng() * (idx + 1));
+      [entries[idx], entries[jj]] = [entries[jj]!, entries[idx]!];
     }
     const take = Math.max(1, Math.round((entries.length / totalAvailable) * remaining));
     sampled.push(...entries.slice(0, take));
@@ -186,9 +199,9 @@ export function samplePool(manifest: BenchmarkManifestV2, spec: RandomSampleSpec
   // If we have too many, trim; if too few, add from remainder
   if (sampled.length > spec.count) {
     // Shuffle the whole sampled set and trim
-    for (let i = sampled.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [sampled[i], sampled[j]] = [sampled[j]!, sampled[i]!];
+    for (let idx = sampled.length - 1; idx > 0; idx--) {
+      const jj = Math.floor(rng() * (idx + 1));
+      [sampled[idx], sampled[jj]] = [sampled[jj]!, sampled[idx]!];
     }
     sampled.length = spec.count;
   }

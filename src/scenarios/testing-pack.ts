@@ -417,13 +417,165 @@ const fixtureTyping: ScenarioTest = {
 };
 
 // ---------------------------------------------------------------------------
+// Scenario 4: Request/response helper typing
+// ---------------------------------------------------------------------------
+
+function isRequestRelated(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("request") ||
+    lower.includes("response") ||
+    lower.includes("handler") ||
+    lower.includes("intercept") ||
+    lower.includes("supertest") ||
+    lower.includes("fetch")
+  );
+}
+
+interface PositionLike {
+  role: string;
+  type: { getText(): string };
+}
+
+function hasDiscriminatedType(positions: readonly PositionLike[]): boolean {
+  for (const pos of positions) {
+    const typeText = pos.type.getText();
+    // Check for status code or body type discrimination patterns
+    const isTyped = typeText !== "any" && typeText !== "unknown";
+    const hasStructure = typeText.includes("|") || typeText.includes("&") || typeText.includes("<");
+    if (isTyped && hasStructure) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const requestResponseHelperTyping: ScenarioTest = {
+  description:
+    "Request/response helpers should preserve HTTP method and path inference, with typed status codes and body discrimination",
+  evaluate: (surface: PublicSurface): ScenarioResult => {
+    let requestDecls = 0;
+    let genericRequests = 0;
+    let constrainedRequests = 0;
+    let overloadedRequests = 0;
+    let discriminatedRequests = 0;
+    let requestMethodCount = 0;
+
+    for (const decl of surface.declarations) {
+      if (!isRequestRelated(decl.name)) {
+        continue;
+      }
+      requestDecls++;
+
+      if (decl.typeParameters.length > 0) {
+        genericRequests++;
+        if (decl.typeParameters.some((tp) => tp.hasConstraint)) {
+          constrainedRequests++;
+        }
+      }
+      if (decl.overloadCount && decl.overloadCount > 1) {
+        overloadedRequests++;
+      }
+
+      // Check for discriminated response types
+      if (hasDiscriminatedType(decl.positions)) {
+        discriminatedRequests++;
+      }
+
+      // Check methods for request/response patterns
+      if (decl.methods) {
+        const ms = countMethodMatches(decl.methods, isRequestRelated);
+        requestMethodCount += ms.matchCount;
+        genericRequests += ms.genericCount;
+        constrainedRequests += ms.constrainedCount;
+        overloadedRequests += ms.overloadedCount;
+
+        // Check for discriminated types in methods
+        for (const method of decl.methods) {
+          if (isRequestRelated(method.name) && hasDiscriminatedType(method.positions)) {
+            discriminatedRequests++;
+          }
+        }
+      }
+    }
+
+    if (requestDecls === 0) {
+      return makeResult({
+        name: "requestResponseHelperTyping",
+        passed: false,
+        reason: "No request/response/handler declarations found",
+        score: 25,
+      });
+    }
+
+    // 40% compile-success: request declarations with generics
+    let compileScore = 0;
+    if (genericRequests > 0) {
+      compileScore = 40;
+    } else if (requestDecls >= 2 || requestMethodCount >= 2) {
+      compileScore = 20;
+    } else if (requestDecls > 0) {
+      compileScore = 10;
+    }
+
+    // 25% compile-failure: constrained requests reject wrong types
+    let failureScore = 0;
+    if (constrainedRequests > 0) {
+      failureScore += 12;
+    }
+    if (overloadedRequests > 0) {
+      failureScore += 8;
+    }
+    if (discriminatedRequests > 0) {
+      failureScore += 5;
+    }
+    failureScore = Math.min(25, failureScore);
+
+    // 25% inferred-type exactness: rich request/response types
+    let exactnessScore = 0;
+    if (genericRequests >= 2) {
+      exactnessScore += 12;
+    }
+    if (constrainedRequests >= 2) {
+      exactnessScore += 8;
+    }
+    if (discriminatedRequests >= 2) {
+      exactnessScore += 5;
+    }
+    exactnessScore = Math.min(25, exactnessScore);
+
+    // 10% wrong-path prevention
+    let wrongPathScore = 0;
+    const untypedRequests = requestDecls - genericRequests;
+    if (untypedRequests <= 0 && requestDecls > 0) {
+      wrongPathScore = 10;
+    } else if (requestDecls > 0 && untypedRequests < requestDecls / 2) {
+      wrongPathScore = 5;
+    }
+
+    const score = Math.min(100, compileScore + failureScore + exactnessScore + wrongPathScore);
+    const passed = score >= 40;
+
+    return makeResult({
+      name: "requestResponseHelperTyping",
+      passed,
+      reason: passed
+        ? `${genericRequests} generic requests, ${constrainedRequests} constrained, ${discriminatedRequests} discriminated`
+        : "Request/response helpers lack type precision",
+      score,
+    });
+  },
+  name: "requestResponseHelperTyping",
+};
+
+// ---------------------------------------------------------------------------
 // Pack export
 // ---------------------------------------------------------------------------
 
 export const TESTING_PACK: ScenarioPack = {
   description:
-    "Tests testing libraries for mock precision, matcher specificity, and fixture typing",
+    "Tests testing libraries for mock precision, matcher specificity, fixture typing, and request/response helpers",
   domain: "testing",
   name: "testing",
-  scenarios: [mockPrecision, matcherSpecificity, fixtureTyping],
+  scenarios: [mockPrecision, matcherSpecificity, fixtureTyping, requestResponseHelperTyping],
 };

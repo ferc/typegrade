@@ -452,6 +452,7 @@ async function main() {
       undersampledAnchors: undersampledAnchors.map((a) => a.name),
     },
     corpusSplit,
+    split: corpusSplit,
     manifestHash: poolManifestHash,
     domainAccuracy: {
       abstained: domainAbstained,

@@ -429,13 +429,147 @@ const subscriptionTyping: ScenarioTest = {
 };
 
 // ---------------------------------------------------------------------------
+// Scenario 4: Action/update payload precision
+// ---------------------------------------------------------------------------
+
+function isActionRelated(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("action") ||
+    lower.includes("dispatch") ||
+    lower.includes("update") ||
+    lower.includes("reducer") ||
+    lower.includes("setstate")
+  );
+}
+
+function hasAnyPayload(positions: readonly PositionLike[]): boolean {
+  for (const pos of positions) {
+    if (pos.role !== "param") {
+      continue;
+    }
+    const typeText = pos.type.getText();
+    if (typeText === "any") {
+      return true;
+    }
+  }
+  return false;
+}
+
+const actionPayloadPrecision: ScenarioTest = {
+  description:
+    "Action/update types should have typed payloads and preserve state shape through generic constraints on dispatch and reducers",
+  evaluate: (surface: PublicSurface): ScenarioResult => {
+    let actionDecls = 0;
+    let genericActions = 0;
+    let constrainedActions = 0;
+    let anyPayloadCount = 0;
+    let actionMethodCount = 0;
+
+    for (const decl of surface.declarations) {
+      if (!isActionRelated(decl.name)) {
+        continue;
+      }
+      actionDecls++;
+
+      if (decl.typeParameters.length > 0) {
+        genericActions++;
+        if (decl.typeParameters.some((tp) => tp.hasConstraint)) {
+          constrainedActions++;
+        }
+      }
+
+      // Check for any-typed payloads
+      if (hasAnyPayload(decl.positions)) {
+        anyPayloadCount++;
+      }
+
+      // Check methods for action/dispatch patterns
+      if (decl.methods) {
+        const ms = countMethodMatches(decl.methods, isActionRelated);
+        actionMethodCount += ms.matchCount;
+        genericActions += ms.genericCount;
+        constrainedActions += ms.constrainedCount;
+
+        // Check for any payloads in action methods
+        for (const method of decl.methods) {
+          if (isActionRelated(method.name) && hasAnyPayload(method.positions)) {
+            anyPayloadCount++;
+          }
+        }
+      }
+    }
+
+    if (actionDecls === 0) {
+      return makeResult({
+        name: "actionPayloadPrecision",
+        passed: false,
+        reason: "No action/dispatch/update declarations found",
+        score: 25,
+      });
+    }
+
+    // 40% compile-success: action declarations exist
+    let compileScore = 0;
+    if (genericActions > 0) {
+      compileScore = 40;
+    } else if (actionDecls >= 2) {
+      compileScore = 20;
+    } else if (actionDecls > 0) {
+      compileScore = 10;
+    }
+
+    // 25% inferred-type exactness: generic constraints on actions
+    let exactnessScore = 0;
+    if (constrainedActions > 0) {
+      exactnessScore += 15;
+    }
+    if (genericActions >= 2) {
+      exactnessScore += 10;
+    }
+    exactnessScore = Math.min(25, exactnessScore);
+
+    // 25% type safety: no any payloads
+    let safetyScore = 0;
+    const totalActionSurface = actionDecls + actionMethodCount;
+    if (anyPayloadCount === 0 && totalActionSurface > 0) {
+      safetyScore = 25;
+    } else if (totalActionSurface > 0 && anyPayloadCount < totalActionSurface / 2) {
+      safetyScore = 12;
+    }
+
+    // 10% wrong-path prevention
+    let wrongPathScore = 0;
+    const untypedActions = actionDecls - genericActions;
+    if (untypedActions === 0 && actionDecls > 0) {
+      wrongPathScore = 10;
+    } else if (actionDecls > 0 && untypedActions < actionDecls / 2) {
+      wrongPathScore = 5;
+    }
+
+    const score = Math.min(100, compileScore + exactnessScore + safetyScore + wrongPathScore);
+    const passed = score >= 40;
+
+    return makeResult({
+      name: "actionPayloadPrecision",
+      passed,
+      reason: passed
+        ? `${genericActions}/${actionDecls} generic actions, ${constrainedActions} constrained, ${anyPayloadCount} any payloads`
+        : "Action/update payloads lack type precision",
+      score,
+    });
+  },
+  name: "actionPayloadPrecision",
+};
+
+// ---------------------------------------------------------------------------
 // Pack export
 // ---------------------------------------------------------------------------
 
 export const STATE_PACK: ScenarioPack = {
   description:
-    "Tests state management libraries for store inference, selector narrowing, and subscription typing",
+    "Tests state management libraries for store inference, selector narrowing, subscription typing, and action payload precision",
   domain: "state",
   name: "state",
-  scenarios: [storeSliceInference, selectorNarrowing, subscriptionTyping],
+  scenarios: [storeSliceInference, selectorNarrowing, subscriptionTyping, actionPayloadPrecision],
 };

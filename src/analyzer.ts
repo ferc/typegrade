@@ -45,6 +45,18 @@ const DOMAIN_AMBIGUITY_GAP = 0.15;
 const SCENARIO_CONFIDENCE_THRESHOLD = 0.7;
 /** Confidence cap when graph resolution used fallback glob */
 const FALLBACK_CONFIDENCE_CAP = 0.55;
+/** Maximum composite score allowed for undersampled packages */
+const UNDERSAMPLE_SCORE_CAP = 65;
+/** TypeSafety cap when anyDensity exceeds moderate threshold */
+const ANY_LEAKAGE_MODERATE_CAP = 60;
+/** TypeSafety cap when anyDensity exceeds severe threshold */
+const ANY_LEAKAGE_SEVERE_CAP = 45;
+/** AnyDensity threshold for moderate any leakage */
+const ANY_LEAKAGE_MODERATE_THRESHOLD = 0.3;
+/** AnyDensity threshold for severe any leakage */
+const ANY_LEAKAGE_SEVERE_THRESHOLD = 0.5;
+/** FalsePositiveRisk threshold above which domain score is suppressed */
+const DOMAIN_FALSE_POSITIVE_THRESHOLD = 0.5;
 
 /** Minimum reachable files to consider a package adequately sampled */
 const MIN_REACHABLE_FILES = 3;
@@ -466,7 +478,20 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         value: undersampleCap,
       });
     }
+
+    // Apply score cap to composites for undersampled packages.
+    // This prevents inflated scores when coverage is insufficient.
+    applyUndersampleScoreCap(composites);
   }
+
+  // Enforce monotonic scoring constraints (any-leakage cap, domain suppression)
+  domainScore = enforceMonotonicConstraints({
+    caveats,
+    composites,
+    dimensions,
+    domainInference,
+    domainScore,
+  });
 
   const result: AnalysisResult = {
     caveats,
@@ -520,6 +545,87 @@ function computeUndersampleConfidenceCap(diagnostics: CoverageDiagnostics): numb
 
   // Mild: 1 reason (e.g., just slightly below minimum files)
   return 0.65;
+}
+
+/**
+ * Cap composite scores for undersampled packages.
+ * Prevents inflated scores when coverage evidence is insufficient.
+ * Does not affect composites already at or below the cap.
+ */
+function applyUndersampleScoreCap(composites: CompositeScore[]): void {
+  for (const composite of composites) {
+    if (composite.score !== null && composite.score > UNDERSAMPLE_SCORE_CAP) {
+      const originalScore = composite.score;
+      composite.score = UNDERSAMPLE_SCORE_CAP;
+      composite.grade = computeGrade(UNDERSAMPLE_SCORE_CAP);
+      composite.rationale.push(
+        `Score capped from ${originalScore} to ${UNDERSAMPLE_SCORE_CAP} (undersampled package)`,
+      );
+    }
+  }
+}
+
+/** Determine the typeSafety cap based on any-leakage density */
+function computeAnyLeakageCap(anyDensity: number): number | undefined {
+  if (anyDensity > ANY_LEAKAGE_SEVERE_THRESHOLD) {
+    return ANY_LEAKAGE_SEVERE_CAP;
+  }
+  if (anyDensity > ANY_LEAKAGE_MODERATE_THRESHOLD) {
+    return ANY_LEAKAGE_MODERATE_CAP;
+  }
+  return undefined;
+}
+
+/**
+ * Enforce monotonic scoring constraints:
+ * 1. High any-leakage must not produce high typeSafety scores
+ * 2. High domain false-positive risk must suppress domain score emission
+ *
+ * Returns the (possibly suppressed) domainScore.
+ */
+function enforceMonotonicConstraints(opts: {
+  composites: CompositeScore[];
+  dimensions: DimensionResult[];
+  domainInference: { falsePositiveRisk?: number };
+  domainScore: DomainScore | undefined;
+  caveats: string[];
+}): DomainScore | undefined {
+  const { composites, dimensions, domainInference, caveats } = opts;
+  let { domainScore: resultDomainScore } = opts;
+
+  // Constraint 1: High any-leakage caps typeSafety
+  const safetyDim = dimensions.find((dim) => dim.key === "apiSafety");
+  const anyDensity = (safetyDim?.metrics?.["anyDensity"] as number) ?? 0;
+
+  if (anyDensity > 0) {
+    const typeSafetyComposite = composites.find((comp) => comp.key === "typeSafety");
+    if (typeSafetyComposite && typeSafetyComposite.score !== null) {
+      const cap = computeAnyLeakageCap(anyDensity);
+
+      if (cap !== undefined && typeSafetyComposite.score > cap) {
+        const originalScore = typeSafetyComposite.score;
+        typeSafetyComposite.score = cap;
+        typeSafetyComposite.grade = computeGrade(cap);
+        typeSafetyComposite.rationale.push(
+          `Score capped from ${originalScore} to ${cap} (anyDensity=${anyDensity.toFixed(2)} exceeds monotonic threshold)`,
+        );
+        caveats.push(
+          `TypeSafety capped at ${cap} due to high any-leakage rate (${(anyDensity * 100).toFixed(0)}%)`,
+        );
+      }
+    }
+  }
+
+  // Constraint 2: High falsePositiveRisk suppresses domain score
+  const fpRisk = domainInference.falsePositiveRisk ?? 0;
+  if (fpRisk > DOMAIN_FALSE_POSITIVE_THRESHOLD && resultDomainScore !== undefined) {
+    caveats.push(
+      `Domain score suppressed (falsePositiveRisk=${fpRisk.toFixed(2)} exceeds ${DOMAIN_FALSE_POSITIVE_THRESHOLD})`,
+    );
+    resultDomainScore = undefined;
+  }
+
+  return resultDomainScore;
 }
 
 function computeSampleCoverage(dimensions: DimensionResult[]): number {

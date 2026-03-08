@@ -43,6 +43,12 @@ export interface RawBenchmarkSnapshotV2 {
   split: BenchmarkSplit;
   manifestSource: string;
   seed?: number;
+  /** SHA-256 prefix of the source manifest content */
+  manifestHash?: string;
+  /** Number of packages sampled (pool-sampled runs only) */
+  sampleCount?: number;
+  /** SHA-256 prefixes of sampled package specs */
+  sampledHashes?: string[];
   entries: RawBenchmarkEntry[];
   assertions?: unknown[];
   summary?: unknown;
@@ -99,6 +105,25 @@ export interface RedactedEvalSummary {
   gates: { gate: string; passed: boolean; detail: string }[];
   /** Overall pass/fail */
   allGatesPassed: boolean;
+  /** Multi-seed aggregate metrics (present when multiple seeds available) */
+  multiSeedMetrics?: {
+    seedCount: number;
+    wrongSpecificP50: number;
+    wrongSpecificP90: number;
+    undersampledP50: number;
+    undersampledP90: number;
+    scenarioOverreachP50: number;
+    scenarioOverreachP90: number;
+    perFamilyScoreVariance: number;
+  };
+  /** Comparison against an approved baseline snapshot */
+  baselineComparison?: {
+    baselineTimestamp: string;
+    regressions: { metric: string; baseline: number; current: number }[];
+    improvements: { metric: string; baseline: number; current: number }[];
+  };
+  /** Confidence calibration bands — measures how well confidence predicts reasonable scores */
+  calibration?: { band: string; count: number; meanConfidence: number; reasonableRate: number }[];
 }
 
 // ─── Unlabeled Eval Metrics ────────────────────────────────────────────────

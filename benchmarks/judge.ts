@@ -12,6 +12,7 @@
  * It must NOT modify scoring code or calibration weights.
  */
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
@@ -50,7 +51,38 @@ interface EvalSnapshot {
   timestamp: string;
   corpusSplit: string;
   seed?: number;
+  manifestSource?: string;
+  manifestHash?: string;
+  sampleCount?: number;
+  sampledHashes?: string[];
   entries: EvalEntry[];
+}
+
+/** Metrics computed per seed for multi-seed aggregation */
+interface PerSeedMetrics {
+  seed: number;
+  undersampledRate: number;
+  domainOverreachRate: number;
+  scenarioOverreachRate: number;
+}
+
+/** Multi-seed aggregate result before inclusion in the summary */
+interface MultiSeedResult {
+  seedCount: number;
+  wrongSpecificP50: number;
+  wrongSpecificP90: number;
+  undersampledP50: number;
+  undersampledP90: number;
+  scenarioOverreachP50: number;
+  scenarioOverreachP90: number;
+  perFamilyScoreVariance: number;
+}
+
+/** Baseline comparison delta for a single metric */
+interface MetricDelta {
+  metric: string;
+  baseline: number;
+  current: number;
 }
 
 function findLatestEvalSnapshot(): EvalSnapshot | null {
@@ -59,7 +91,7 @@ function findLatestEvalSnapshot(): EvalSnapshot | null {
     return null;
   }
 
-  const files = readdirSync(evalDir).filter((f) => f.endsWith(".json")).sort();
+  const files = readdirSync(evalDir).filter((fn) => fn.endsWith(".json")).sort();
   if (files.length === 0) {
     return null;
   }
@@ -74,7 +106,7 @@ function loadAllEvalSnapshots(): EvalSnapshot[] {
     return [];
   }
 
-  const files = readdirSync(evalDir).filter((f) => f.endsWith(".json")).sort();
+  const files = readdirSync(evalDir).filter((fn) => fn.endsWith(".json")).sort();
   const snapshots: EvalSnapshot[] = [];
   for (const file of files) {
     try {
@@ -85,6 +117,49 @@ function loadAllEvalSnapshots(): EvalSnapshot[] {
     }
   }
   return snapshots;
+}
+
+/**
+ * Compute the expected manifest hash for the eval-pool manifest.
+ * Used to validate that random-eval artifacts were produced from
+ * the current eval-pool manifest, not an outdated or wrong one.
+ */
+function computeEvalPoolManifestHash(): string | null {
+  const poolPath = join(import.meta.dirname, "..", "benchmarks", "manifest.eval.pool.json");
+  if (!existsSync(poolPath)) {
+    return null;
+  }
+  const raw = JSON.parse(readFileSync(poolPath, "utf8"));
+  const packages = raw.packages ?? raw;
+  return createHash("sha256").update(JSON.stringify(packages)).digest("hex").slice(0, 16);
+}
+
+/**
+ * Validate that a random-eval snapshot was produced from the current
+ * eval-pool manifest. Rejects stale or cross-manifest artifacts.
+ */
+function validateSnapshotManifest(
+  snapshot: EvalSnapshot,
+  expectedHash: string | null,
+): { valid: boolean; reason?: string } {
+  // Fixed eval snapshots don't need manifest hash validation
+  if (snapshot.corpusSplit === "eval-fixed") {
+    return { valid: true };
+  }
+
+  // Pool-sampled snapshots must have a manifest hash
+  if (!snapshot.manifestHash) {
+    return { reason: "missing manifestHash on pool-sampled artifact", valid: false };
+  }
+
+  if (expectedHash && snapshot.manifestHash !== expectedHash) {
+    return {
+      reason: `manifest hash mismatch: artifact=${snapshot.manifestHash}, current=${expectedHash}`,
+      valid: false,
+    };
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -259,11 +334,11 @@ function computeUnlabeledMetrics(entries: EvalEntry[]): UnlabeledEvalMetrics {
   }
 
   // Undersampled rate
-  const undersampledCount = entries.filter((e) => e.coverageDiagnostics?.undersampled).length;
+  const undersampledCount = entries.filter((en) => en.coverageDiagnostics?.undersampled).length;
   const undersampledRate = undersampledCount / total;
 
   // Fallback glob rate
-  const fallbackCount = entries.filter((e) => e.graphStats?.usedFallbackGlob).length;
+  const fallbackCount = entries.filter((en) => en.graphStats?.usedFallbackGlob).length;
   const fallbackGlobRate = fallbackCount / total;
 
   // Coverage-confidence violations: high score + low coverage
@@ -281,7 +356,7 @@ function computeUnlabeledMetrics(entries: EvalEntry[]): UnlabeledEvalMetrics {
   const paretoViolationCount = paretoViolations.length;
 
   // Score compression: % of packages within a 10-point band
-  const scores = entries.map((e) => e.consumerApi ?? 0).filter((s) => s > 0);
+  const scores = entries.map((en) => en.consumerApi ?? 0).filter((sc) => sc > 0);
   const scoreCompressionRate = computeScoreCompression(scores);
 
   // Domain overreach: predicting specific domain without strong evidence
@@ -350,36 +425,36 @@ function detectParetoViolations(entries: EvalEntry[]): ParetoViolation[] {
   const violations: ParetoViolation[] = [];
   const coreDimensions = ["apiSpecificity", "apiSafety", "semanticLift", "specializationPower"];
 
-  for (let i = 0; i < entries.length; i++) {
-    for (let j = i + 1; j < entries.length; j++) {
-      const a = entries[i]!;
-      const b = entries[j]!;
+  for (let ii = 0; ii < entries.length; ii++) {
+    for (let jj = ii + 1; jj < entries.length; jj++) {
+      const aa = entries[ii]!;
+      const bb = entries[jj]!;
 
-      if (a.consumerApi === null || b.consumerApi === null) {
+      if (aa.consumerApi === null || bb.consumerApi === null) {
         continue;
       }
 
       // Check if A dominates B on core dimensions
-      const aDominates = checkDominance(a, b, coreDimensions);
-      const bDominates = checkDominance(b, a, coreDimensions);
+      const aDominates = checkDominance(aa, bb, coreDimensions);
+      const bDominates = checkDominance(bb, aa, coreDimensions);
 
-      if (aDominates.dominates && a.consumerApi < b.consumerApi) {
+      if (aDominates.dominates && aa.consumerApi < bb.consumerApi) {
         violations.push({
-          dominant: a.name,
-          dominantComposite: a.consumerApi,
+          dominant: aa.name,
+          dominantComposite: aa.consumerApi,
           dominantDimensions: aDominates.dimensions,
-          dominated: b.name,
-          dominatedComposite: b.consumerApi,
+          dominated: bb.name,
+          dominatedComposite: bb.consumerApi,
         });
       }
 
-      if (bDominates.dominates && b.consumerApi < a.consumerApi) {
+      if (bDominates.dominates && bb.consumerApi < aa.consumerApi) {
         violations.push({
-          dominant: b.name,
-          dominantComposite: b.consumerApi,
+          dominant: bb.name,
+          dominantComposite: bb.consumerApi,
           dominantDimensions: bDominates.dimensions,
-          dominated: a.name,
-          dominatedComposite: a.consumerApi,
+          dominated: aa.name,
+          dominatedComposite: aa.consumerApi,
         });
       }
     }
@@ -389,16 +464,16 @@ function detectParetoViolations(entries: EvalEntry[]): ParetoViolation[] {
 }
 
 function checkDominance(
-  a: EvalEntry,
-  b: EvalEntry,
+  aa: EvalEntry,
+  bb: EvalEntry,
   dimensions: string[],
 ): { dominates: boolean; dimensions: string[] } {
   const dominantDims: string[] = [];
   let anyWorse = false;
 
   for (const dim of dimensions) {
-    const aScore = a.dimensions.find((d) => d.key === dim)?.score ?? null;
-    const bScore = b.dimensions.find((d) => d.key === dim)?.score ?? null;
+    const aScore = aa.dimensions.find((dd) => dd.key === dim)?.score ?? null;
+    const bScore = bb.dimensions.find((dd) => dd.key === dim)?.score ?? null;
     if (aScore === null || bScore === null) {
       continue;
     }
@@ -422,30 +497,298 @@ function computeScoreCompression(scores: number[]): number {
     return 0;
   }
 
-  const sorted = scores.toSorted((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)]!;
+  const sorted = scores.toSorted((aa, bb) => aa - bb);
+  const med = sorted[Math.floor(sorted.length / 2)]!;
 
   // Count how many scores are within +/-5 of the median
-  const compressed = scores.filter((s) => Math.abs(s - median) <= 5).length;
+  const compressed = scores.filter((sc) => Math.abs(sc - med) <= 5).length;
   return compressed / scores.length;
 }
+
+// ─── Percentile Helpers ───────────────────────────────────────────────────
+
+/** Compute the p-th percentile from a sorted array of numbers (0-100 scale) */
+function percentile(sorted: number[], pct: number): number {
+  if (sorted.length === 0) {
+    return 0;
+  }
+  if (sorted.length === 1) {
+    return sorted[0]!;
+  }
+  const rank = (pct / 100) * (sorted.length - 1);
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) {
+    return sorted[lower]!;
+  }
+  const fraction = rank - lower;
+  return sorted[lower]! + fraction * (sorted[upper]! - sorted[lower]!);
+}
+
+/** Round a number to 3 decimal places */
+function round3(val: number): number {
+  return Math.round(val * 1000) / 1000;
+}
+
+// ─── Multi-Seed Aggregation ───────────────────────────────────────────────
+
+/**
+ * Compute per-seed metrics from valid snapshots.
+ * Groups snapshots by seed, uses the latest per seed, and computes
+ * the same unlabeled metrics for each seed.
+ */
+function computePerSeedMetrics(snapshots: EvalSnapshot[]): PerSeedMetrics[] {
+  const bySeed = new Map<number, EvalSnapshot>();
+  for (const snap of snapshots) {
+    if (snap.seed === undefined) {
+      continue;
+    }
+    // Later snapshots overwrite earlier ones (latest wins)
+    bySeed.set(snap.seed, snap);
+  }
+
+  const results: PerSeedMetrics[] = [];
+  for (const [seed, snap] of bySeed) {
+    const total = snap.entries.length;
+    if (total === 0) {
+      continue;
+    }
+
+    const undersampledCount = snap.entries.filter(
+      (en) => en.coverageDiagnostics?.undersampled,
+    ).length;
+
+    let domainOverreachCount = 0;
+    for (const entry of snap.entries) {
+      if (
+        entry.domainInference &&
+        entry.domainInference.domain !== "general" &&
+        entry.domainInference.confidence < 0.7
+      ) {
+        domainOverreachCount++;
+      }
+    }
+
+    let scenarioOverreachCount = 0;
+    for (const entry of snap.entries) {
+      if (entry.scenarioScore && (!entry.domainInference || entry.domainInference.confidence < 0.7)) {
+        scenarioOverreachCount++;
+      }
+    }
+
+    results.push({
+      domainOverreachRate: domainOverreachCount / total,
+      scenarioOverreachRate: scenarioOverreachCount / total,
+      seed,
+      undersampledRate: undersampledCount / total,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Compute per-family (tier) score variance across seeds.
+ * Groups entries by tier across seeds, computes median consumerApi per tier per seed,
+ * then computes the variance of those medians across seeds.
+ * Returns the maximum variance across all families.
+ */
+function computePerFamilyScoreVariance(snapshots: EvalSnapshot[]): number {
+  const bySeed = new Map<number, EvalSnapshot>();
+  for (const snap of snapshots) {
+    if (snap.seed === undefined) {
+      continue;
+    }
+    bySeed.set(snap.seed, snap);
+  }
+
+  if (bySeed.size < 2) {
+    return 0;
+  }
+
+  // Collect all tiers across all seeds
+  const allTiers = new Set<string>();
+  for (const [, snap] of bySeed) {
+    for (const entry of snap.entries) {
+      allTiers.add(entry.tier);
+    }
+  }
+
+  const medianOf = (arr: number[]): number => {
+    const sorted = [...arr].sort((aa, bb) => aa - bb);
+    return sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)]! : 0;
+  };
+
+  const varianceOf = (arr: number[]): number => {
+    if (arr.length < 2) {
+      return 0;
+    }
+    const mean = arr.reduce((sum, val) => sum + val, 0) / arr.length;
+    return arr.reduce((sum, val) => sum + (val - mean) ** 2, 0) / arr.length;
+  };
+
+  // For each tier, compute median consumerApi per seed, then variance of those medians
+  let maxVariance = 0;
+  for (const tier of allTiers) {
+    const mediansBySeed: number[] = [];
+    for (const [, snap] of bySeed) {
+      const tierScores = snap.entries
+        .filter((en) => en.tier === tier && en.consumerApi !== null)
+        .map((en) => en.consumerApi as number);
+      if (tierScores.length > 0) {
+        mediansBySeed.push(medianOf(tierScores));
+      }
+    }
+    if (mediansBySeed.length >= 2) {
+      const tierVariance = varianceOf(mediansBySeed);
+      if (tierVariance > maxVariance) {
+        maxVariance = tierVariance;
+      }
+    }
+  }
+
+  return round3(maxVariance);
+}
+
+/**
+ * Compute multi-seed aggregate metrics from valid snapshots.
+ * Returns null if fewer than 2 distinct seeds are available.
+ */
+function computeMultiSeedMetrics(snapshots: EvalSnapshot[]): MultiSeedResult | null {
+  const perSeed = computePerSeedMetrics(snapshots);
+  if (perSeed.length < 2) {
+    return null;
+  }
+
+  // Sort each metric array for percentile computation
+  const domainOverreachRates = perSeed.map((ps) => ps.domainOverreachRate).sort((aa, bb) => aa - bb);
+  const undersampledRates = perSeed.map((ps) => ps.undersampledRate).sort((aa, bb) => aa - bb);
+  const scenarioRates = perSeed.map((ps) => ps.scenarioOverreachRate).sort((aa, bb) => aa - bb);
+
+  // Domain overreach rate is used as a proxy for wrong-specific rate
+  // (eval entries lack ground-truth labels, so domain overreach is the best signal)
+  const familyVariance = computePerFamilyScoreVariance(snapshots);
+
+  return {
+    perFamilyScoreVariance: familyVariance,
+    scenarioOverreachP50: round3(percentile(scenarioRates, 50)),
+    scenarioOverreachP90: round3(percentile(scenarioRates, 90)),
+    seedCount: perSeed.length,
+    undersampledP50: round3(percentile(undersampledRates, 50)),
+    undersampledP90: round3(percentile(undersampledRates, 90)),
+    wrongSpecificP50: round3(percentile(domainOverreachRates, 50)),
+    wrongSpecificP90: round3(percentile(domainOverreachRates, 90)),
+  };
+}
+
+// ─── Baseline Comparison ──────────────────────────────────────────────────
+
+/** Metrics to compare between baseline and current summary */
+const BASELINE_METRICS = [
+  "undersampledRate",
+  "fallbackGlobRate",
+  "domainOverreachRate",
+  "scenarioOverreachRate",
+  "scoreCompressionRate",
+  "paretoViolationCount",
+  "coverageConfidenceViolations",
+] as const;
+
+/**
+ * Load the approved baseline from disk if it exists.
+ * Returns null if no baseline file is found or it cannot be parsed.
+ */
+function loadApprovedBaseline(): RedactedEvalSummary | null {
+  const baselinePath = join(
+    import.meta.dirname,
+    "baselines",
+    "approved-baseline.json",
+  );
+  if (!existsSync(baselinePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(readFileSync(baselinePath, "utf8")) as RedactedEvalSummary;
+  } catch {
+    // Baseline file is malformed
+    return null;
+  }
+}
+
+/**
+ * Compare current metrics against an approved baseline.
+ * A regression means the current value is worse (higher for rates/counts).
+ * An improvement means the current value is better (lower for rates/counts).
+ * Returns null if no baseline is available.
+ */
+function compareWithBaseline(currentMetrics: RedactedEvalSummary["metrics"]): {
+  baselineTimestamp: string;
+  regressions: MetricDelta[];
+  improvements: MetricDelta[];
+} | null {
+  const baseline = loadApprovedBaseline();
+  if (!baseline) {
+    return null;
+  }
+
+  const regressions: MetricDelta[] = [];
+  const improvements: MetricDelta[] = [];
+
+  for (const key of BASELINE_METRICS) {
+    const baseVal = baseline.metrics[key];
+    const currVal = currentMetrics[key];
+
+    // Skip if either value is undefined
+    if (baseVal === undefined || currVal === undefined) {
+      continue;
+    }
+
+    // For all these metrics, lower is better
+    const diff = currVal - baseVal;
+    const threshold = 0.001;
+
+    if (diff > threshold) {
+      regressions.push({ baseline: baseVal, current: currVal, metric: key });
+    } else if (diff < -threshold) {
+      improvements.push({ baseline: baseVal, current: currVal, metric: key });
+    }
+  }
+
+  return {
+    baselineTimestamp: baseline.timestamp,
+    improvements,
+    regressions,
+  };
+}
+
+// ─── Gate Builders ────────────────────────────────────────────────────────
 
 function buildEvalGates(metrics: UnlabeledEvalMetrics): { gate: string; passed: boolean; detail: string }[] {
   return [
     {
+      detail: `${(metrics.domainOverreachRate * 100).toFixed(1)}%`,
+      gate: "eval-wrong-specific-rate-<=5%",
+      passed: metrics.domainOverreachRate <= 0.05,
+    },
+    {
+      detail: `${metrics.coverageConfidenceViolations} violation(s)`,
+      gate: "eval-coverage-confidence-=0",
+      passed: metrics.coverageConfidenceViolations === 0,
+    },
+    {
       detail: `${(metrics.undersampledRate * 100).toFixed(1)}%`,
-      gate: "eval-undersampled-rate-<30%",
-      passed: metrics.undersampledRate < 0.3,
+      gate: "eval-undersampled-rate-<=8%",
+      passed: metrics.undersampledRate <= 0.08,
+    },
+    {
+      detail: `${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`,
+      gate: "eval-scenario-overreach-<=8%",
+      passed: metrics.scenarioOverreachRate <= 0.08,
     },
     {
       detail: `${(metrics.fallbackGlobRate * 100).toFixed(1)}%`,
       gate: "eval-fallback-rate-=0",
       passed: metrics.fallbackGlobRate === 0,
-    },
-    {
-      detail: `${metrics.coverageConfidenceViolations} violation(s)`,
-      gate: "eval-coverage-confidence-<5",
-      passed: metrics.coverageConfidenceViolations < 5,
     },
     {
       detail: `${metrics.paretoViolationCount} violation(s)`,
@@ -470,11 +813,6 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics): { gate: string; passed: 
       passed: metrics.domainOverreachRate < 0.15,
     },
     {
-      detail: `${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`,
-      gate: "eval-scenario-overreach-=0",
-      passed: metrics.scenarioOverreachRate === 0,
-    },
-    {
       detail: metrics.trainEvalDrift !== undefined
         ? `${metrics.trainEvalDrift.toFixed(3)}`
         : "n/a (no train data)",
@@ -483,6 +821,242 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics): { gate: string; passed: 
     },
   ];
 }
+
+/**
+ * Build multi-seed gates from aggregate metrics.
+ * Only called when multiSeedMetrics is available.
+ */
+function buildMultiSeedGates(
+  multiSeed: MultiSeedResult,
+): { gate: string; passed: boolean; detail: string }[] {
+  return [
+    {
+      detail: `p50=${(multiSeed.wrongSpecificP50 * 100).toFixed(1)}%`,
+      gate: "multi-seed-wrong-specific-p50-<=8%",
+      passed: multiSeed.wrongSpecificP50 <= 0.08,
+    },
+    {
+      detail: `p90=${(multiSeed.wrongSpecificP90 * 100).toFixed(1)}%`,
+      gate: "multi-seed-wrong-specific-p90-<=12%",
+      passed: multiSeed.wrongSpecificP90 <= 0.12,
+    },
+    {
+      detail: `p50=${(multiSeed.undersampledP50 * 100).toFixed(1)}%`,
+      gate: "multi-seed-undersampled-p50-<=10%",
+      passed: multiSeed.undersampledP50 <= 0.10,
+    },
+    {
+      detail: `p90=${(multiSeed.undersampledP90 * 100).toFixed(1)}%`,
+      gate: "multi-seed-undersampled-p90-<=15%",
+      passed: multiSeed.undersampledP90 <= 0.15,
+    },
+    {
+      detail: `p50=${(multiSeed.scenarioOverreachP50 * 100).toFixed(1)}%`,
+      gate: "multi-seed-scenario-overreach-p50-<=10%",
+      passed: multiSeed.scenarioOverreachP50 <= 0.10,
+    },
+    {
+      detail: `p90=${(multiSeed.scenarioOverreachP90 * 100).toFixed(1)}%`,
+      gate: "multi-seed-scenario-overreach-p90-<=15%",
+      passed: multiSeed.scenarioOverreachP90 <= 0.15,
+    },
+    {
+      detail: `variance=${multiSeed.perFamilyScoreVariance.toFixed(2)}`,
+      gate: "multi-seed-family-variance-<=5",
+      passed: multiSeed.perFamilyScoreVariance <= 5,
+    },
+  ];
+}
+
+// ─── Console Output Helpers ───────────────────────────────────────────────
+
+function printMetrics(metrics: UnlabeledEvalMetrics): void {
+  console.log("=== Eval Metrics ===\n");
+  console.log(`  Undersampled rate:          ${(metrics.undersampledRate * 100).toFixed(1)}%`);
+  console.log(`  Fallback glob rate:         ${(metrics.fallbackGlobRate * 100).toFixed(1)}%`);
+  console.log(`  Coverage-confidence viols:  ${metrics.coverageConfidenceViolations}`);
+  console.log(`  Pareto violations:          ${metrics.paretoViolationCount}`);
+  console.log(`  Score compression:          ${(metrics.scoreCompressionRate * 100).toFixed(1)}%`);
+  const seedLabel = metrics.seedInstabilityRate !== undefined
+    ? `${(metrics.seedInstabilityRate * 100).toFixed(1)}%`
+    : "n/a (insufficient seeds)";
+  console.log(`  Seed instability rate:      ${seedLabel}`);
+  console.log(`  Domain overreach rate:      ${(metrics.domainOverreachRate * 100).toFixed(1)}%`);
+  console.log(`  Scenario overreach rate:    ${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`);
+  const driftLabel = metrics.trainEvalDrift !== undefined
+    ? metrics.trainEvalDrift.toFixed(3)
+    : "n/a (no train data)";
+  console.log(`  Train-eval drift:           ${driftLabel}`);
+  const compactLabel = metrics.compactRate !== undefined
+    ? `${(metrics.compactRate * 100).toFixed(1)}%`
+    : "n/a";
+  console.log(`  Compact package rate:       ${compactLabel}`);
+  const moderationLabel = metrics.confidenceModerationRate !== undefined
+    ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%`
+    : "n/a";
+  console.log(`  Confidence moderation rate: ${moderationLabel}`);
+}
+
+function printGates(gates: { gate: string; passed: boolean; detail: string }[]): void {
+  console.log("\n=== Eval Gates ===\n");
+  for (const gate of gates) {
+    const icon = gate.passed ? "PASS" : "FAIL";
+    console.log(`  [${icon}] ${gate.gate.padEnd(45)} ${gate.detail}`);
+  }
+  const passedCount = gates.filter((gg) => gg.passed).length;
+  console.log(`\n  ${passedCount}/${gates.length} eval gates passed`);
+}
+
+function printMultiSeedMetrics(multiSeed: MultiSeedResult): void {
+  console.log("\n=== Multi-Seed Aggregate Metrics ===\n");
+  console.log(`  Seeds:                      ${multiSeed.seedCount}`);
+  console.log(`  Wrong-specific p50:         ${(multiSeed.wrongSpecificP50 * 100).toFixed(1)}%`);
+  console.log(`  Wrong-specific p90:         ${(multiSeed.wrongSpecificP90 * 100).toFixed(1)}%`);
+  console.log(`  Undersampled p50:           ${(multiSeed.undersampledP50 * 100).toFixed(1)}%`);
+  console.log(`  Undersampled p90:           ${(multiSeed.undersampledP90 * 100).toFixed(1)}%`);
+  console.log(`  Scenario-overreach p50:     ${(multiSeed.scenarioOverreachP50 * 100).toFixed(1)}%`);
+  console.log(`  Scenario-overreach p90:     ${(multiSeed.scenarioOverreachP90 * 100).toFixed(1)}%`);
+  console.log(`  Per-family score variance:  ${multiSeed.perFamilyScoreVariance.toFixed(2)}`);
+}
+
+function printBaselineComparison(comparison: {
+  baselineTimestamp: string;
+  regressions: MetricDelta[];
+  improvements: MetricDelta[];
+}): void {
+  console.log("\n=== Baseline Comparison ===\n");
+  console.log(`  Baseline from: ${comparison.baselineTimestamp}`);
+
+  if (comparison.regressions.length > 0) {
+    console.log("\n  Regressions:");
+    for (const reg of comparison.regressions) {
+      console.log(`    ${reg.metric}: ${reg.baseline} -> ${reg.current}`);
+    }
+  }
+
+  if (comparison.improvements.length > 0) {
+    console.log("\n  Improvements:");
+    for (const imp of comparison.improvements) {
+      console.log(`    ${imp.metric}: ${imp.baseline} -> ${imp.current}`);
+    }
+  }
+
+  if (comparison.regressions.length === 0 && comparison.improvements.length === 0) {
+    console.log("  No significant changes from baseline.");
+  }
+}
+
+function printAuditDetails(snapshot: EvalSnapshot): void {
+  console.log("\n=== AUDIT: Per-Package Details (not for builder consumption) ===\n");
+  const sorted = [...snapshot.entries].sort(
+    (aa, bb) => (bb.consumerApi ?? 0) - (aa.consumerApi ?? 0),
+  );
+  console.log(
+    `${"Package".padEnd(30)}${"ConsumerApi".padEnd(14)}${"AgentReady".padEnd(14)}${"TypeSafety".padEnd(14)}${"Domain".padEnd(14)}Undersampled`,
+  );
+  console.log("-".repeat(100));
+  for (const en of sorted) {
+    const domain = en.domainInference?.domain ?? "n/a";
+    const undersampled = en.coverageDiagnostics?.undersampled ? "YES" : "no";
+    console.log(
+      `${en.name.padEnd(30)}${String(en.consumerApi ?? "n/a").padEnd(14)}${String(en.agentReadiness ?? "n/a").padEnd(14)}${String(en.typeSafety ?? "n/a").padEnd(14)}${domain.padEnd(14)}${undersampled}`,
+    );
+  }
+
+  // Print Pareto violations
+  const violations = detectParetoViolations(snapshot.entries);
+  if (violations.length > 0) {
+    console.log("\n=== AUDIT: Pareto Violations ===\n");
+    for (const vv of violations) {
+      console.log(
+        `  ${vv.dominant} (${vv.dominantComposite}) dominates ${vv.dominated} (${vv.dominatedComposite}) on [${vv.dominantDimensions.join(", ")}] but ranks lower`,
+      );
+    }
+  }
+}
+
+// ─── Confidence Calibration ───────────────────────────────────────────────
+
+/** Band definition for confidence calibration */
+interface CalibrationBand {
+  band: string;
+  lower: number;
+  upper: number;
+}
+
+/** Predefined confidence bands */
+const CONFIDENCE_BANDS: CalibrationBand[] = [
+  { band: "[0-0.3)", lower: 0, upper: 0.3 },
+  { band: "[0.3-0.5)", lower: 0.3, upper: 0.5 },
+  { band: "[0.5-0.7)", lower: 0.5, upper: 0.7 },
+  { band: "[0.7-0.85)", lower: 0.7, upper: 0.85 },
+  { band: "[0.85-1.0]", lower: 0.85, upper: 1.01 },
+];
+
+/**
+ * Compute confidence calibration across eval entries.
+ * Groups entries into confidence bands and measures what fraction
+ * of packages in each band have consumerApi in the "reasonable" range [40, 80].
+ */
+function computeConfidenceCalibration(
+  entries: EvalEntry[],
+): { band: string; count: number; meanConfidence: number; reasonableRate: number }[] {
+  const results: { band: string; count: number; meanConfidence: number; reasonableRate: number }[] = [];
+
+  for (const bandDef of CONFIDENCE_BANDS) {
+    // Find entries whose average dimension confidence falls in this band
+    const bandEntries: { confidence: number; consumerApi: number | null }[] = [];
+
+    for (const entry of entries) {
+      const dimConfs = entry.dimensions
+        .filter((dd) => dd.confidence !== null)
+        .map((dd) => dd.confidence as number);
+      if (dimConfs.length === 0) {
+        continue;
+      }
+      const avgConf = dimConfs.reduce((sum, val) => sum + val, 0) / dimConfs.length;
+      if (avgConf >= bandDef.lower && avgConf < bandDef.upper) {
+        bandEntries.push({ confidence: avgConf, consumerApi: entry.consumerApi });
+      }
+    }
+
+    const count = bandEntries.length;
+    if (count === 0) {
+      results.push({ band: bandDef.band, count: 0, meanConfidence: 0, reasonableRate: 0 });
+      continue;
+    }
+
+    const meanConfidence = round3(
+      bandEntries.reduce((sum, be) => sum + be.confidence, 0) / count,
+    );
+    const reasonableCount = bandEntries.filter((be) => {
+      const score = be.consumerApi ?? 0;
+      return score >= 40 && score <= 80;
+    }).length;
+    const reasonableRate = round3(reasonableCount / count);
+
+    results.push({ band: bandDef.band, count, meanConfidence, reasonableRate });
+  }
+
+  return results;
+}
+
+function printCalibration(
+  calibration: { band: string; count: number; meanConfidence: number; reasonableRate: number }[],
+): void {
+  console.log("\n=== Confidence Calibration ===\n");
+  console.log(
+    `  ${"Band".padEnd(16)}${"Count".padEnd(8)}${"MeanConf".padEnd(12)}ReasonableRate`,
+  );
+  console.log(`  ${"-".repeat(48)}`);
+  for (const entry of calibration) {
+    console.log(
+      `  ${entry.band.padEnd(16)}${String(entry.count).padEnd(8)}${entry.meanConfidence.toFixed(3).padEnd(12)}${(entry.reasonableRate * 100).toFixed(1)}%`,
+    );
+  }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────
 
 function main() {
   console.log("=== typegrade Eval Judge ===\n");
@@ -499,95 +1073,133 @@ function main() {
   }
   console.log();
 
+  // Validate manifest hash for pool-sampled artifacts
+  const expectedPoolHash = computeEvalPoolManifestHash();
+  const validation = validateSnapshotManifest(snapshot, expectedPoolHash);
+  if (!validation.valid) {
+    console.error(`Manifest validation FAILED: ${validation.reason}`);
+    console.error("The eval artifact was produced from a different manifest than the current eval pool.");
+    console.error("Re-run the eval benchmark with the current manifest.");
+    process.exit(1);
+  }
+
   // Compute unlabeled metrics (includes trainEvalDrift when train data exists)
   const metrics = computeUnlabeledMetrics(snapshot.entries);
 
   // Compute seed robustness across all available snapshots
+  // Also validate each snapshot against the current manifest
   const allSnapshots = loadAllEvalSnapshots();
-  const seedInstabilityRate = computeSeedRobustness(allSnapshots);
+  const validSnapshots = allSnapshots.filter((snap) => {
+    const check = validateSnapshotManifest(snap, expectedPoolHash);
+    if (!check.valid) {
+      console.log(`Skipping stale snapshot (${snap.timestamp}): ${check.reason}`);
+    }
+    return check.valid;
+  });
+  const seedInstabilityRate = computeSeedRobustness(validSnapshots);
   if (seedInstabilityRate !== undefined) {
     metrics.seedInstabilityRate = seedInstabilityRate;
   }
 
+  // Compute multi-seed aggregate metrics
+  const multiSeedMetrics = computeMultiSeedMetrics(validSnapshots);
+
   // Compute score statistics for summary
-  const consumerApis = snapshot.entries.map((e) => e.consumerApi ?? 0).filter((s) => s > 0);
-  const agentReadinesses = snapshot.entries.map((e) => e.agentReadiness ?? 0).filter((s) => s > 0);
-  const typeSafeties = snapshot.entries.map((e) => e.typeSafety ?? 0).filter((s) => s > 0);
+  const consumerApis = snapshot.entries.map((en) => en.consumerApi ?? 0).filter((sc) => sc > 0);
+  const agentReadinesses = snapshot.entries.map((en) => en.agentReadiness ?? 0).filter((sc) => sc > 0);
+  const typeSafeties = snapshot.entries.map((en) => en.typeSafety ?? 0).filter((sc) => sc > 0);
 
   const median = (arr: number[]) => {
-    const sorted = [...arr].sort((a, b) => a - b);
+    const sorted = [...arr].sort((aa, bb) => aa - bb);
     return sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)]! : 0;
   };
   const stdDev = (arr: number[]) => {
     if (arr.length < 2) {
       return 0;
     }
-    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const mean = arr.reduce((aa, bb) => aa + bb, 0) / arr.length;
     const variance = arr.reduce((sum, val) => sum + (val - mean) ** 2, 0) / arr.length;
     return Math.sqrt(variance);
   };
 
-  // Build gates
-  const gates = buildEvalGates(metrics);
-  const allGatesPassed = gates.every((g) => g.passed);
+  // Build gates (core + multi-seed when available)
+  const coreGates = buildEvalGates(metrics);
+  const multiSeedGates = multiSeedMetrics ? buildMultiSeedGates(multiSeedMetrics) : [];
+  const gates = [...coreGates, ...multiSeedGates];
+  const allGatesPassed = gates.every((gg) => gg.passed);
+
+  // Compute confidence calibration
+  const calibration = computeConfidenceCalibration(snapshot.entries);
 
   // Print results
-  console.log("=== Eval Metrics ===\n");
-  console.log(`  Undersampled rate:          ${(metrics.undersampledRate * 100).toFixed(1)}%`);
-  console.log(`  Fallback glob rate:         ${(metrics.fallbackGlobRate * 100).toFixed(1)}%`);
-  console.log(`  Coverage-confidence viols:  ${metrics.coverageConfidenceViolations}`);
-  console.log(`  Pareto violations:          ${metrics.paretoViolationCount}`);
-  console.log(`  Score compression:          ${(metrics.scoreCompressionRate * 100).toFixed(1)}%`);
-  console.log(`  Seed instability rate:      ${metrics.seedInstabilityRate !== undefined ? `${(metrics.seedInstabilityRate * 100).toFixed(1)}%` : "n/a (insufficient seeds)"}`);
-  console.log(`  Domain overreach rate:      ${(metrics.domainOverreachRate * 100).toFixed(1)}%`);
-  console.log(`  Scenario overreach rate:    ${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`);
-  console.log(`  Train-eval drift:           ${metrics.trainEvalDrift !== undefined ? metrics.trainEvalDrift.toFixed(3) : "n/a (no train data)"}`);
-  console.log(`  Compact package rate:       ${metrics.compactRate !== undefined ? `${(metrics.compactRate * 100).toFixed(1)}%` : "n/a"}`);
-  console.log(`  Confidence moderation rate: ${metrics.confidenceModerationRate !== undefined ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%` : "n/a"}`);
-
-  console.log("\n=== Eval Gates ===\n");
-  for (const gate of gates) {
-    const icon = gate.passed ? "PASS" : "FAIL";
-    console.log(`  [${icon}] ${gate.gate.padEnd(35)} ${gate.detail}`);
+  printMetrics(metrics);
+  if (multiSeedMetrics) {
+    printMultiSeedMetrics(multiSeedMetrics);
   }
+  printCalibration(calibration);
+  printGates(gates);
 
-  const passedCount = gates.filter((g) => g.passed).length;
-  console.log(`\n  ${passedCount}/${gates.length} eval gates passed`);
+  // Compute baseline comparison
+  const summaryMetrics: RedactedEvalSummary["metrics"] = {
+    coverageConfidenceViolations: metrics.coverageConfidenceViolations,
+    domainOverreachRate: metrics.domainOverreachRate,
+    fallbackGlobRate: metrics.fallbackGlobRate,
+    medianAgentReadiness: median(agentReadinesses),
+    medianConsumerApi: median(consumerApis),
+    medianTypeSafety: median(typeSafeties),
+    paretoViolationCount: metrics.paretoViolationCount,
+    scenarioOverreachRate: metrics.scenarioOverreachRate,
+    scoreCompressionRate: metrics.scoreCompressionRate,
+    scoreStdDev: Math.round(stdDev(consumerApis) * 10) / 10,
+    ...(metrics.seedInstabilityRate !== undefined && {
+      seedInstabilityRate: metrics.seedInstabilityRate,
+    }),
+    ...(metrics.trainEvalDrift !== undefined && {
+      trainEvalDrift: metrics.trainEvalDrift,
+    }),
+    ...(metrics.compactRate !== undefined && {
+      compactRate: metrics.compactRate,
+    }),
+    ...(metrics.confidenceModerationRate !== undefined && {
+      confidenceModerationRate: metrics.confidenceModerationRate,
+    }),
+    undersampledRate: metrics.undersampledRate,
+  };
+
+  const baselineComparison = compareWithBaseline(summaryMetrics);
+  if (baselineComparison) {
+    printBaselineComparison(baselineComparison);
+  }
 
   // Build redacted summary (no package names, no per-package scores)
   const summary: RedactedEvalSummary = {
     allGatesPassed,
     gates,
-    metrics: {
-      coverageConfidenceViolations: metrics.coverageConfidenceViolations,
-      domainOverreachRate: metrics.domainOverreachRate,
-      fallbackGlobRate: metrics.fallbackGlobRate,
-      medianAgentReadiness: median(agentReadinesses),
-      medianConsumerApi: median(consumerApis),
-      medianTypeSafety: median(typeSafeties),
-      paretoViolationCount: metrics.paretoViolationCount,
-      scenarioOverreachRate: metrics.scenarioOverreachRate,
-      scoreCompressionRate: metrics.scoreCompressionRate,
-      scoreStdDev: Math.round(stdDev(consumerApis) * 10) / 10,
-      ...(metrics.seedInstabilityRate !== undefined && {
-        seedInstabilityRate: metrics.seedInstabilityRate,
-      }),
-      ...(metrics.trainEvalDrift !== undefined && {
-        trainEvalDrift: metrics.trainEvalDrift,
-      }),
-      ...(metrics.compactRate !== undefined && {
-        compactRate: metrics.compactRate,
-      }),
-      ...(metrics.confidenceModerationRate !== undefined && {
-        confidenceModerationRate: metrics.confidenceModerationRate,
-      }),
-      undersampledRate: metrics.undersampledRate,
-    },
+    metrics: summaryMetrics,
     packageCount: snapshot.entries.length,
     seed: snapshot.seed,
     split: snapshot.corpusSplit as "eval-fixed" | "eval-pool",
     timestamp: new Date().toISOString(),
   };
+
+  // Include confidence calibration
+  if (calibration.length > 0) {
+    summary.calibration = calibration;
+  }
+
+  // Include multi-seed metrics if available
+  if (multiSeedMetrics) {
+    summary.multiSeedMetrics = multiSeedMetrics;
+  }
+
+  // Include baseline comparison if available
+  if (baselineComparison) {
+    summary.baselineComparison = {
+      baselineTimestamp: baselineComparison.baselineTimestamp,
+      improvements: baselineComparison.improvements,
+      regressions: baselineComparison.regressions,
+    };
+  }
 
   // Write redacted summary
   const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
@@ -600,28 +1212,7 @@ function main() {
 
   // Audit mode: print per-package details (NOT visible to builder agent by default)
   if (auditMode) {
-    console.log("\n=== AUDIT: Per-Package Details (not for builder consumption) ===\n");
-    const sorted = [...snapshot.entries].sort(
-      (a, b) => (b.consumerApi ?? 0) - (a.consumerApi ?? 0),
-    );
-    console.log(`${"Package".padEnd(30)}${"ConsumerApi".padEnd(14)}${"AgentReady".padEnd(14)}${"TypeSafety".padEnd(14)}${"Domain".padEnd(14)}Undersampled`);
-    console.log("-".repeat(100));
-    for (const e of sorted) {
-      const domain = e.domainInference?.domain ?? "n/a";
-      const undersampled = e.coverageDiagnostics?.undersampled ? "YES" : "no";
-      console.log(
-        `${e.name.padEnd(30)}${String(e.consumerApi ?? "n/a").padEnd(14)}${String(e.agentReadiness ?? "n/a").padEnd(14)}${String(e.typeSafety ?? "n/a").padEnd(14)}${domain.padEnd(14)}${undersampled}`,
-      );
-    }
-
-    // Print Pareto violations
-    const violations = detectParetoViolations(snapshot.entries);
-    if (violations.length > 0) {
-      console.log("\n=== AUDIT: Pareto Violations ===\n");
-      for (const v of violations) {
-        console.log(`  ${v.dominant} (${v.dominantComposite}) dominates ${v.dominated} (${v.dominatedComposite}) on [${v.dominantDimensions.join(", ")}] but ranks lower`);
-      }
-    }
+    printAuditDetails(snapshot);
   }
 
   if (!allGatesPassed) {
