@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { AnalysisResult, PackageAnalysisContext } from "./types.js";
 import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
+import { loadProject } from "./utils/project-loader.js";
 
 function parsePackageSpec(spec: string): { name: string; version: string } {
   // Handle scoped packages: @scope/pkg@1.0.0
@@ -100,18 +102,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       : pkgDir;
     const effectivePkgName = typesPackageName ?? packageName;
 
-    // Resolve declaration entrypoints from package.json
-    const entrypoints = resolveDeclarationEntrypoints(effectivePkgDir);
-    let includePaths: string[];
-
-    if (entrypoints.length > 0) {
-      // Use resolved entrypoints — more accurate than globbing everything
-      includePaths = entrypoints.map((ep) => `node_modules/${effectivePkgName}/${ep}`);
-    } else {
-      // Fallback: glob only .d.ts to avoid ESM/CJS twin double-counting
-      includePaths = [`node_modules/${effectivePkgName}/**/*.d.ts`];
-    }
-
+    // Write a broad tsconfig so ts-morph can resolve all imports within the package
     writeFileSync(
       join(tmpDir, "tsconfig.json"),
       JSON.stringify({
@@ -122,20 +113,47 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
           strict: true,
           target: "ES2022",
         },
-        include: includePaths,
+        include: [
+          `node_modules/${effectivePkgName}/**/*.d.ts`,
+          `node_modules/${effectivePkgName}/**/*.d.mts`,
+          `node_modules/${effectivePkgName}/**/*.d.cts`,
+        ],
       }),
     );
 
-    // Build package context for correct metadata resolution
+    // Build declaration graph: resolve entrypoints → walk imports → deduplicate
+    const graphProject = loadProject(tmpDir);
+    const graph = buildDeclarationGraph(effectivePkgDir, graphProject);
+
+    // Determine files to analyze
+    let fileFilter: Set<string> | undefined;
+    let graphUsed = false;
+
+    if (graph.filesToAnalyze.length > 0) {
+      fileFilter = new Set(graph.filesToAnalyze);
+      graphUsed = true;
+    } else if (graph.stats.usedFallbackGlob || graph.entrypoints.length === 0) {
+      // No entrypoints found — fall back to analyzing all declaration files
+      // (fileFilter remains undefined, so all files from tsconfig are analyzed)
+    }
+
+    // Resolve first entrypoint for context
+    const entrypoints = resolveEntrypoints(effectivePkgDir);
+
+    // Build package context
     const targetPkgJsonPath = join(effectivePkgDir, "package.json");
     const packageContext: PackageAnalysisContext = {
+      graphStats: graphUsed ? graph.stats : undefined,
       packageJsonPath: targetPkgJsonPath,
       packageName,
       packageRoot: effectivePkgDir,
-      typesEntrypoint: entrypoints[0] ?? null,
+      typesEntrypoint: entrypoints[0]?.filePath
+        ? entrypoints[0].filePath.replace(effectivePkgDir + "/", "")
+        : null,
     };
 
     return analyzeProject(tmpDir, {
+      fileFilter,
       mode: "package",
       packageContext,
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
@@ -147,68 +165,4 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       // Ignore cleanup errors
     }
   }
-}
-
-function resolveDeclarationEntrypoints(pkgDir: string): string[] {
-  const pkgJsonPath = join(pkgDir, "package.json");
-  if (!existsSync(pkgJsonPath)) {return [];}
-
-  let pkg: Record<string, unknown>;
-  try {
-    pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
-  } catch {
-    return [];
-  }
-
-  const entrypoints: string[] = [];
-
-  // Check types/typings top-level field
-  const typesField = (pkg.types ?? pkg.typings) as string | undefined;
-  if (typesField && existsSync(join(pkgDir, typesField))) {
-    entrypoints.push(typesField);
-  }
-
-  // Check exports conditional types
-  const exports = pkg.exports as Record<string, unknown> | undefined;
-  if (exports && typeof exports === "object") {
-    collectExportTypes(exports, pkgDir, entrypoints);
-  }
-
-  // Deduplicate by stem to avoid ESM/CJS twins
-  return deduplicateByDtsStem(entrypoints);
-}
-
-function collectExportTypes(
-  exports: Record<string, unknown>,
-  pkgDir: string,
-  entrypoints: string[],
-): void {
-  for (const [key, value] of Object.entries(exports)) {
-    if (key === "types" && typeof value === "string") {
-      if (existsSync(join(pkgDir, value))) {
-        entrypoints.push(value);
-      }
-    } else if (value && typeof value === "object" && !Array.isArray(value)) {
-      collectExportTypes(value as Record<string, unknown>, pkgDir, entrypoints);
-    }
-  }
-}
-
-function deduplicateByDtsStem(paths: string[]): string[] {
-  const seen = new Map<string, string>();
-  for (const p of paths) {
-    const stem = p.replace(/\.d\.[mc]?ts$/, "");
-    if (!seen.has(stem)) {
-      seen.set(stem, p);
-    } else {
-      // Prefer .d.ts over .d.mts/.d.cts
-      const existing = seen.get(stem)!;
-      if (existing.endsWith(".d.mts") || existing.endsWith(".d.cts")) {
-        if (p.endsWith(".d.ts")) {
-          seen.set(stem, p);
-        }
-      }
-    }
-  }
-  return [...seen.values()];
 }

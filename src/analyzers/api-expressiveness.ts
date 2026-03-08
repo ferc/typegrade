@@ -1,22 +1,22 @@
 import type { DimensionResult, Issue } from "../types.js";
-import { Node, type ParameterDeclaration, type SourceFile, type TypeParameterDeclaration } from "ts-morph";
+import { Node, type TypeNode } from "ts-morph";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { PublicSurface, SurfaceMethod, SurfaceTypeParam } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiExpressiveness")!;
 
 function countGenericCorrelation(
-  typeParams: TypeParameterDeclaration[],
-  params: ParameterDeclaration[],
-  returnTypeNode: { getText(): string } | undefined,
+  typeParams: SurfaceTypeParam[],
+  paramTypeNodes: Array<{ name: string; typeNode: TypeNode | undefined }>,
+  returnTypeNode: TypeNode | undefined,
 ): number {
   if (typeParams.length === 0 || !returnTypeNode) {return 0;}
   let count = 0;
-  const paramNames = new Set(typeParams.map((tp) => tp.getName()));
+  const paramNames = new Set(typeParams.map((tp) => tp.name));
   const returnText = returnTypeNode.getText();
   for (const name of paramNames) {
-    const usedInParams = params.some((param) => {
-      const typeNode = param.getTypeNode();
-      return typeNode && typeNode.getText().includes(name);
+    const usedInParams = paramTypeNodes.some((p) => {
+      return p.typeNode && p.typeNode.getText().includes(name);
     });
     if (usedInParams && returnText.includes(name)) {
       count++;
@@ -39,7 +39,7 @@ interface FeatureCounts {
   totalDeclarations: number;
 }
 
-export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionResult {
+export function analyzeApiExpressiveness(surface: PublicSurface): DimensionResult {
   const issues: Issue[] = [];
   const positives: string[] = [];
   const negatives: string[] = [];
@@ -58,137 +58,81 @@ export function analyzeApiExpressiveness(sourceFiles: SourceFile[]): DimensionRe
     tuples: 0,
   };
 
-  for (const sf of sourceFiles) {
-    // Exported functions
-    for (const fn of sf.getFunctions()) {
-      if (!fn.isExported()) {continue;}
-      counts.totalDeclarations++;
+  for (const decl of surface.declarations) {
+    // Variables are not counted in expressiveness
+    if (decl.kind === "variable") {continue;}
 
-      const typeParams = fn.getTypeParameters();
-      for (const tp of typeParams) {
-        const constraint = tp.getConstraint();
-        if (constraint) {
-          counts.constrainedGenerics++;
-        }
-      }
+    counts.totalDeclarations++;
 
-      // Generic correlation: same type param in params and return
-      counts.genericCorrelation += countGenericCorrelation(
-        typeParams,
-        fn.getParameters(),
-        fn.getReturnTypeNode(),
-      );
-
-      // Overloads
-      const overloads = fn.getOverloads();
-      if (overloads.length > 0) {
-        counts.overloads += overloads.length;
-      }
+    // Count constrained type parameters
+    for (const tp of decl.typeParameters) {
+      if (tp.hasConstraint) {counts.constrainedGenerics++;}
     }
 
-    // Exported interfaces
-    for (const iface of sf.getInterfaces()) {
-      if (!iface.isExported()) {continue;}
-      counts.totalDeclarations++;
-
-      const typeParams = iface.getTypeParameters();
-      for (const tp of typeParams) {
-        if (tp.getConstraint()) {counts.constrainedGenerics++;}
-      }
-
-      // Check methods for generic correlation
-      for (const method of iface.getMethods()) {
+    switch (decl.kind) {
+      case "function": {
+        // Generic correlation
         counts.genericCorrelation += countGenericCorrelation(
-          method.getTypeParameters(),
-          method.getParameters(),
-          method.getReturnTypeNode(),
+          decl.typeParameters,
+          decl.paramTypeNodes ?? [],
+          decl.returnTypeNode,
         );
-      }
-    }
-
-    // Exported classes
-    for (const cls of sf.getClasses()) {
-      if (!cls.isExported()) {continue;}
-      counts.totalDeclarations++;
-
-      const typeParams = cls.getTypeParameters();
-      for (const tp of typeParams) {
-        if (tp.getConstraint()) {counts.constrainedGenerics++;}
-      }
-
-      // Check methods for generic correlation and overloads
-      for (const method of cls.getMethods()) {
-        if (!method.getScope || method.getScope() === "private") {continue;}
-        counts.genericCorrelation += countGenericCorrelation(
-          method.getTypeParameters(),
-          method.getParameters(),
-          method.getReturnTypeNode(),
-        );
-
-        const overloads = method.getOverloads();
-        if (overloads.length > 0) {counts.overloads += overloads.length;}
-      }
-    }
-
-    // Exported enums
-    for (const en of sf.getEnums()) {
-      if (!en.isExported()) {continue;}
-      counts.totalDeclarations++;
-    }
-
-    // Exported type aliases
-    for (const alias of sf.getTypeAliases()) {
-      if (!alias.isExported()) {continue;}
-      counts.totalDeclarations++;
-
-      const typeParams = alias.getTypeParameters();
-      for (const tp of typeParams) {
-        if (tp.getConstraint()) {counts.constrainedGenerics++;}
-      }
-
-      // Walk type node for advanced features
-      const typeNode = alias.getTypeNode();
-      if (typeNode) {
-        walkTypeNode(typeNode, counts);
-      }
-    }
-
-    // Walk all exported declarations for advanced type nodes
-    for (const fn of sf.getFunctions()) {
-      if (!fn.isExported()) {continue;}
-      for (const param of fn.getParameters()) {
-        const typeNode = param.getTypeNode();
-        if (typeNode) {walkTypeNode(typeNode, counts);}
-      }
-      const returnTypeNode = fn.getReturnTypeNode();
-      if (returnTypeNode) {walkTypeNode(returnTypeNode, counts);}
-    }
-
-    for (const iface of sf.getInterfaces()) {
-      if (!iface.isExported()) {continue;}
-      for (const prop of iface.getProperties()) {
-        const typeNode = prop.getTypeNode();
-        if (typeNode) {walkTypeNode(typeNode, counts);}
-      }
-    }
-
-    // Walk class members for advanced type nodes
-    for (const cls of sf.getClasses()) {
-      if (!cls.isExported()) {continue;}
-      for (const method of cls.getMethods()) {
-        if (!method.getScope || method.getScope() === "private") {continue;}
-        for (const param of method.getParameters()) {
-          const typeNode = param.getTypeNode();
-          if (typeNode) {walkTypeNode(typeNode, counts);}
+        // Overloads
+        if ((decl.overloadCount ?? 0) > 0) {
+          counts.overloads += decl.overloadCount!;
         }
-        const returnTypeNode = method.getReturnTypeNode();
-        if (returnTypeNode) {walkTypeNode(returnTypeNode, counts);}
+        // Walk param + return type nodes
+        for (const pos of decl.positions) {
+          if (pos.typeNode) {walkTypeNode(pos.typeNode, counts);}
+        }
+        break;
       }
-      for (const prop of cls.getProperties()) {
-        if (prop.getScope() === "private") {continue;}
-        const typeNode = prop.getTypeNode();
-        if (typeNode) {walkTypeNode(typeNode, counts);}
+      case "interface": {
+        // Method generic correlation
+        for (const method of decl.methods ?? []) {
+          counts.genericCorrelation += countGenericCorrelation(
+            method.typeParameters,
+            method.paramTypeNodes,
+            method.returnTypeNode,
+          );
+        }
+        // Walk property type nodes only (not methods — matches original behavior)
+        for (const pos of decl.positions) {
+          if (pos.typeNode) {walkTypeNode(pos.typeNode, counts);}
+        }
+        break;
       }
+      case "class": {
+        // Method generic correlation + overloads
+        for (const method of decl.methods ?? []) {
+          counts.genericCorrelation += countGenericCorrelation(
+            method.typeParameters,
+            method.paramTypeNodes,
+            method.returnTypeNode,
+          );
+          if (method.overloadCount > 0) {counts.overloads += method.overloadCount;}
+        }
+        // Walk method type nodes + property type nodes
+        for (const method of decl.methods ?? []) {
+          for (const pos of method.positions) {
+            if (pos.typeNode) {walkTypeNode(pos.typeNode, counts);}
+          }
+        }
+        for (const pos of decl.positions) {
+          if (pos.role === "property" && pos.typeNode) {
+            walkTypeNode(pos.typeNode, counts);
+          }
+        }
+        break;
+      }
+      case "type-alias": {
+        // Walk body type node
+        if (decl.bodyTypeNode) {
+          walkTypeNode(decl.bodyTypeNode, counts);
+        }
+        break;
+      }
+      // enum: just counted as declaration, no feature analysis
     }
   }
 
@@ -280,4 +224,3 @@ function walkTypeNode(node: Node, counts: FeatureCounts): void {
     }
   });
 }
-

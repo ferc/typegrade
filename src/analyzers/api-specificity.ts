@@ -1,9 +1,10 @@
 import type { DimensionResult, Issue } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
-import type { SourceFile } from "ts-morph";
+import type { PublicSurface, SurfaceDeclaration, SurfacePosition } from "../surface/index.js";
 import { analyzePrecision } from "../utils/type-utils.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSpecificity")!;
+const MAX_SAMPLES_PER_GROUP = 12;
 
 interface WeightedSample {
   score: number;
@@ -12,172 +13,32 @@ interface WeightedSample {
   containsAny: boolean;
 }
 
-export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResult {
+export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
   const issues: Issue[] = [];
   const samples: WeightedSample[] = [];
   const positives: string[] = [];
   const negatives: string[] = [];
 
-  for (const sf of sourceFiles) {
-    const filePath = sf.getFilePath();
-
-    // Exported functions
-    for (const fn of sf.getFunctions()) {
-      if (!fn.isExported()) {continue;}
-      const fnName = fn.getName() ?? "<anonymous>";
-      let samplesFromDecl = 0;
-
-      // Score parameters (weight 1.0)
-      for (const param of fn.getParameters()) {
-        if (samplesFromDecl >= 12) {break;}
-        const type = param.getType();
-        const result = analyzePrecision(type);
-        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
-        samplesFromDecl++;
-
-        if (result.score <= 20) {
-          issues.push({
-            column: param.getStart() - param.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: param.getStartLineNumber(),
-            message: `parameter '${param.getName()}' in ${fnName}() has low specificity (${result.score}/100)`,
-            severity: result.score === 0 ? "error" : "warning",
-          });
-        }
-      }
-
-      // Score return type (weight 1.25)
-      if (samplesFromDecl < 12) {
-        const returnType = fn.getReturnType();
-        const result = analyzePrecision(returnType);
-        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1.25 });
-        samplesFromDecl++;
-
-        if (result.score <= 20) {
-          issues.push({
-            column: fn.getStart() - fn.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: fn.getStartLineNumber(),
-            message: `${fnName}() has low return type specificity (${result.score}/100)`,
-            severity: result.score === 0 ? "error" : "warning",
-          });
-        }
-      }
-    }
-
-    // Exported interfaces (weight 0.75)
-    for (const iface of sf.getInterfaces()) {
-      if (!iface.isExported()) {continue;}
-      let samplesFromDecl = 0;
-      for (const prop of iface.getProperties()) {
-        if (samplesFromDecl >= 12) {break;}
-        const type = prop.getType();
-        const result = analyzePrecision(type);
-        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
-        samplesFromDecl++;
-      }
-    }
-
-    // Exported type aliases (weight 0.75)
-    for (const alias of sf.getTypeAliases()) {
-      if (!alias.isExported()) {continue;}
-      const type = alias.getType();
-      const result = analyzePrecision(type);
-      samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
-    }
-
-    // Exported classes
-    for (const cls of sf.getClasses()) {
-      if (!cls.isExported()) {continue;}
-
-      // Constructor params (weight 1.0)
-      for (const ctor of cls.getConstructors()) {
-        let samplesFromDecl = 0;
-        for (const param of ctor.getParameters()) {
-          if (samplesFromDecl >= 12) {break;}
-          const type = param.getType();
-          const result = analyzePrecision(type);
-          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
-          samplesFromDecl++;
-        }
-      }
-
-      // Methods
-      for (const method of cls.getMethods()) {
-        if (!method.getScope || method.getScope() === "private") {continue;}
-        let samplesFromDecl = 0;
-
-        // Method params (weight 1.0)
-        for (const param of method.getParameters()) {
-          if (samplesFromDecl >= 12) {break;}
-          const type = param.getType();
-          const result = analyzePrecision(type);
-          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
-          samplesFromDecl++;
-        }
-
-        // Method return type (weight 1.25)
-        if (samplesFromDecl < 12) {
-          const returnType = method.getReturnType();
-          const result = analyzePrecision(returnType);
-          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1.25 });
-        }
-      }
-
-      // Properties (weight 0.75)
-      for (const prop of cls.getProperties()) {
-        if (prop.getScope() === "private") {continue;}
-        const type = prop.getType();
-        const result = analyzePrecision(type);
-        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 0.75 });
-      }
-
-      // Getters (return type weight 1.0)
-      for (const getter of cls.getGetAccessors()) {
-        if (getter.getScope() === "private") {continue;}
-        const returnType = getter.getReturnType();
-        const result = analyzePrecision(returnType);
-        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
-      }
-
-      // Setters (param weight 1.0)
-      for (const setter of cls.getSetAccessors()) {
-        if (setter.getScope() === "private") {continue;}
-        for (const param of setter.getParameters()) {
-          const type = param.getType();
-          const result = analyzePrecision(type);
-          samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
-        }
-      }
-    }
-
-    // Exported enums (weight 0.75, score 85 — inherently specific)
-    for (const en of sf.getEnums()) {
-      if (!en.isExported()) {continue;}
-      samples.push({ containsAny: false, features: [], score: 85, weight: 0.75 });
-    }
-
-    // Exported variables (weight 1.0)
-    for (const varStmt of sf.getVariableStatements()) {
-      if (!varStmt.isExported()) {continue;}
-      for (const decl of varStmt.getDeclarations()) {
-        const type = decl.getType();
-        const result = analyzePrecision(type);
-        samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: 1 });
-
-        if (result.score <= 20) {
-          issues.push({
-            column: decl.getStart() - decl.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: decl.getStartLineNumber(),
-            message: `exported '${decl.getName()}' has low specificity (${result.score}/100)`,
-            severity: result.score === 0 ? "error" : "warning",
-          });
-        }
-      }
+  for (const decl of surface.declarations) {
+    switch (decl.kind) {
+      case "function":
+        collectFunctionSamples(decl, samples, issues);
+        break;
+      case "interface":
+        collectCappedPositionSamples(decl.positions, samples);
+        break;
+      case "type-alias":
+        collectAllPositionSamples(decl.positions, samples);
+        break;
+      case "class":
+        collectClassSamples(decl, samples);
+        break;
+      case "enum":
+        samples.push({ containsAny: false, features: [], score: 85, weight: 0.75 });
+        break;
+      case "variable":
+        collectVariableSamples(decl, samples, issues);
+        break;
     }
   }
 
@@ -239,6 +100,84 @@ export function analyzeApiSpecificity(sourceFiles: SourceFile[]): DimensionResul
     score,
     weights: CONFIG.weights,
   };
+}
+
+// --- Collectors ---
+
+function collectFunctionSamples(decl: SurfaceDeclaration, samples: WeightedSample[], issues: Issue[]): void {
+  let samplesFromDecl = 0;
+  for (const pos of decl.positions) {
+    if (samplesFromDecl >= MAX_SAMPLES_PER_GROUP) {break;}
+    const result = analyzePrecision(pos.type);
+    samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: pos.weight });
+    samplesFromDecl++;
+
+    if (result.score <= 20) {
+      const message = pos.role === "return"
+        ? `${decl.name}() has low return type specificity (${result.score}/100)`
+        : `parameter '${pos.name}' in ${decl.name}() has low specificity (${result.score}/100)`;
+      issues.push({
+        column: pos.column,
+        dimension: CONFIG.label,
+        file: pos.filePath,
+        line: pos.line,
+        message,
+        severity: result.score === 0 ? "error" : "warning",
+      });
+    }
+  }
+}
+
+function collectCappedPositionSamples(positions: SurfacePosition[], samples: WeightedSample[]): void {
+  let samplesFromDecl = 0;
+  for (const pos of positions) {
+    if (samplesFromDecl >= MAX_SAMPLES_PER_GROUP) {break;}
+    const result = analyzePrecision(pos.type);
+    samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: pos.weight });
+    samplesFromDecl++;
+  }
+}
+
+function collectAllPositionSamples(positions: SurfacePosition[], samples: WeightedSample[]): void {
+  for (const pos of positions) {
+    const result = analyzePrecision(pos.type);
+    samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: pos.weight });
+  }
+}
+
+function collectClassSamples(decl: SurfaceDeclaration, samples: WeightedSample[]): void {
+  // Constructor params (capped per constructor group)
+  const ctorPositions = decl.positions.filter((p) => p.role === "ctor-param");
+  collectCappedPositionSamples(ctorPositions, samples);
+
+  // Method params + returns (capped per method)
+  for (const method of decl.methods ?? []) {
+    collectCappedPositionSamples(method.positions, samples);
+  }
+
+  // Properties, getters, setters (no cap)
+  const otherPositions = decl.positions.filter(
+    (p) => p.role === "property" || p.role === "getter" || p.role === "setter-param",
+  );
+  collectAllPositionSamples(otherPositions, samples);
+}
+
+function collectVariableSamples(decl: SurfaceDeclaration, samples: WeightedSample[], issues: Issue[]): void {
+  for (const pos of decl.positions) {
+    const result = analyzePrecision(pos.type);
+    samples.push({ containsAny: result.containsAny, features: result.features, score: result.score, weight: pos.weight });
+
+    if (result.score <= 20) {
+      issues.push({
+        column: pos.column,
+        dimension: CONFIG.label,
+        file: pos.filePath,
+        line: pos.line,
+        message: `exported '${pos.name}' has low specificity (${result.score}/100)`,
+        severity: result.score === 0 ? "error" : "warning",
+      });
+    }
+  }
 }
 
 function countFeatures(features: string[]): Record<string, number> {

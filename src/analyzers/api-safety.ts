@@ -1,11 +1,11 @@
 import type { DimensionResult, Issue } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
-import type { SourceFile } from "ts-morph";
+import type { PublicSurface, SurfacePosition } from "../surface/index.js";
 import { analyzePrecision } from "../utils/type-utils.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSafety")!;
 
-export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
+export function analyzeApiSafety(surface: PublicSurface): DimensionResult {
   const issues: Issue[] = [];
   const positives: string[] = [];
   const negatives: string[] = [];
@@ -14,199 +14,20 @@ export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
   let anyPositions = 0;
   let unknownPositions = 0;
 
-  for (const sf of sourceFiles) {
-    const filePath = sf.getFilePath();
+  for (const decl of surface.declarations) {
+    // Enums have no positions and are not safety-checked
+    if (decl.kind === "enum") {continue;}
 
-    // Exported functions
-    for (const fn of sf.getFunctions()) {
-      if (!fn.isExported()) {continue;}
-      const fnName = fn.getName() ?? "<anonymous>";
-
-      for (const param of fn.getParameters()) {
-        totalPositions++;
-        const result = analyzePrecision(param.getType());
-        if (result.containsAny) {
-          anyPositions++;
-          issues.push({
-            column: param.getStart() - param.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: param.getStartLineNumber(),
-            message: `parameter '${param.getName()}' in ${fnName}() leaks 'any'`,
-            severity: "error",
-          });
-        } else if (result.containsUnknown) {
-          unknownPositions++;
-          issues.push({
-            column: param.getStart() - param.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: param.getStartLineNumber(),
-            message: `parameter '${param.getName()}' in ${fnName}() contains 'unknown'`,
-            severity: "warning",
-          });
-        }
-      }
-
-      // Return type
+    for (const pos of decl.positions) {
       totalPositions++;
-      const returnResult = analyzePrecision(fn.getReturnType());
-      if (returnResult.containsAny) {
-        anyPositions++;
-        issues.push({
-          column: fn.getStart() - fn.getStartLinePos() + 1,
-          dimension: CONFIG.label,
-          file: filePath,
-          line: fn.getStartLineNumber(),
-          message: `${fnName}() return type leaks 'any'`,
-          severity: "error",
-        });
-      } else if (returnResult.containsUnknown) {
-        unknownPositions++;
-      }
-    }
+      const result = analyzePrecision(pos.type);
 
-    // Exported interfaces
-    for (const iface of sf.getInterfaces()) {
-      if (!iface.isExported()) {continue;}
-      for (const prop of iface.getProperties()) {
-        totalPositions++;
-        const result = analyzePrecision(prop.getType());
-        if (result.containsAny) {
-          anyPositions++;
-          issues.push({
-            column: prop.getStart() - prop.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: prop.getStartLineNumber(),
-            message: `property '${prop.getName()}' in ${iface.getName()} leaks 'any'`,
-            severity: "error",
-          });
-        } else if (result.containsUnknown) {
-          unknownPositions++;
-        }
-      }
-    }
-
-    // Exported type aliases
-    for (const alias of sf.getTypeAliases()) {
-      if (!alias.isExported()) {continue;}
-      totalPositions++;
-      const result = analyzePrecision(alias.getType());
       if (result.containsAny) {
         anyPositions++;
-        issues.push({
-          column: alias.getStart() - alias.getStartLinePos() + 1,
-          dimension: CONFIG.label,
-          file: filePath,
-          line: alias.getStartLineNumber(),
-          message: `type '${alias.getName()}' leaks 'any'`,
-          severity: "error",
-        });
+        pushAnyIssue(pos, issues);
       } else if (result.containsUnknown) {
         unknownPositions++;
-      }
-    }
-
-    // Exported classes
-    for (const cls of sf.getClasses()) {
-      if (!cls.isExported()) {continue;}
-
-      // Constructor params
-      for (const ctor of cls.getConstructors()) {
-        for (const param of ctor.getParameters()) {
-          totalPositions++;
-          const result = analyzePrecision(param.getType());
-          if (result.containsAny) {
-            anyPositions++;
-          } else if (result.containsUnknown) {
-            unknownPositions++;
-          }
-        }
-      }
-
-      // Methods
-      for (const method of cls.getMethods()) {
-        if (!method.getScope || method.getScope() === "private") {continue;}
-
-        for (const param of method.getParameters()) {
-          totalPositions++;
-          const result = analyzePrecision(param.getType());
-          if (result.containsAny) {
-            anyPositions++;
-          } else if (result.containsUnknown) {
-            unknownPositions++;
-          }
-        }
-
-        // Return type
-        totalPositions++;
-        const returnResult = analyzePrecision(method.getReturnType());
-        if (returnResult.containsAny) {
-          anyPositions++;
-        } else if (returnResult.containsUnknown) {
-          unknownPositions++;
-        }
-      }
-
-      // Properties
-      for (const prop of cls.getProperties()) {
-        if (prop.getScope() === "private") {continue;}
-        totalPositions++;
-        const result = analyzePrecision(prop.getType());
-        if (result.containsAny) {
-          anyPositions++;
-        } else if (result.containsUnknown) {
-          unknownPositions++;
-        }
-      }
-
-      // Getters
-      for (const getter of cls.getGetAccessors()) {
-        if (getter.getScope() === "private") {continue;}
-        totalPositions++;
-        const result = analyzePrecision(getter.getReturnType());
-        if (result.containsAny) {
-          anyPositions++;
-        } else if (result.containsUnknown) {
-          unknownPositions++;
-        }
-      }
-
-      // Setters
-      for (const setter of cls.getSetAccessors()) {
-        if (setter.getScope() === "private") {continue;}
-        for (const param of setter.getParameters()) {
-          totalPositions++;
-          const result = analyzePrecision(param.getType());
-          if (result.containsAny) {
-            anyPositions++;
-          } else if (result.containsUnknown) {
-            unknownPositions++;
-          }
-        }
-      }
-    }
-
-    // Exported variables
-    for (const varStmt of sf.getVariableStatements()) {
-      if (!varStmt.isExported()) {continue;}
-      for (const decl of varStmt.getDeclarations()) {
-        totalPositions++;
-        const result = analyzePrecision(decl.getType());
-        if (result.containsAny) {
-          anyPositions++;
-          issues.push({
-            column: decl.getStart() - decl.getStartLinePos() + 1,
-            dimension: CONFIG.label,
-            file: filePath,
-            line: decl.getStartLineNumber(),
-            message: `exported '${decl.getName()}' leaks 'any'`,
-            severity: "error",
-          });
-        } else if (result.containsUnknown) {
-          unknownPositions++;
-        }
+        pushUnknownIssue(pos, issues);
       }
     }
   }
@@ -245,4 +66,54 @@ export function analyzeApiSafety(sourceFiles: SourceFile[]): DimensionResult {
     score,
     weights: CONFIG.weights,
   };
+}
+
+/**
+ * Issue generation matches original behavior per declaration kind:
+ * - Function params: any → error, unknown → warning
+ * - Function returns: any → error only
+ * - Interface/type-alias/variable: any → error only
+ * - Class positions: no issues (just counted)
+ */
+function pushAnyIssue(pos: SurfacePosition, issues: Issue[]): void {
+  // Class positions don't generate issues
+  if (pos.declarationKind === "class") {return;}
+
+  let message: string;
+  if (pos.role === "param" && pos.declarationKind === "function") {
+    message = `parameter '${pos.name}' in ${pos.declarationName}() leaks 'any'`;
+  } else if (pos.role === "return") {
+    message = `${pos.declarationName}() return type leaks 'any'`;
+  } else if (pos.role === "property") {
+    message = `property '${pos.name}' in ${pos.declarationName} leaks 'any'`;
+  } else if (pos.role === "type-body") {
+    message = `type '${pos.declarationName}' leaks 'any'`;
+  } else if (pos.role === "variable") {
+    message = `exported '${pos.name}' leaks 'any'`;
+  } else {
+    return;
+  }
+
+  issues.push({
+    column: pos.column,
+    dimension: CONFIG.label,
+    file: pos.filePath,
+    line: pos.line,
+    message,
+    severity: "error",
+  });
+}
+
+function pushUnknownIssue(pos: SurfacePosition, issues: Issue[]): void {
+  // Only function params generate unknown warnings
+  if (pos.role === "param" && pos.declarationKind === "function") {
+    issues.push({
+      column: pos.column,
+      dimension: CONFIG.label,
+      file: pos.filePath,
+      line: pos.line,
+      message: `parameter '${pos.name}' in ${pos.declarationName}() contains 'unknown'`,
+      severity: "warning",
+    });
+  }
 }

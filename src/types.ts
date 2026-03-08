@@ -57,4 +57,5 @@ export interface PackageAnalysisContext {
   packageRoot: string;
   packageJsonPath: string;
   typesEntrypoint: string | null;
+  graphStats?: import("./graph/types.js").GraphStats;
 }

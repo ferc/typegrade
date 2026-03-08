@@ -1,13 +1,14 @@
 import type { DimensionResult, Issue, PackageAnalysisContext } from "../types.js";
-import { type Project, type SourceFile } from "ts-morph";
+import type { Project } from "ts-morph";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { PublicSurface } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "publishQuality")!;
 
 export function analyzePublishQuality(
-  sourceFiles: SourceFile[],
+  surface: PublicSurface,
   project: Project,
   packageContext?: PackageAnalysisContext,
 ): DimensionResult {
@@ -22,85 +23,48 @@ export function analyzePublishQuality(
   let totalExportedDecls = 0;
   let overloadCount = 0;
 
-  for (const sf of sourceFiles) {
-    const filePath = sf.getFilePath();
+  for (const decl of surface.declarations) {
+    totalExportedDecls++;
+    if (decl.hasJSDoc) {exportedWithJSDoc++;}
 
-    for (const fn of sf.getFunctions()) {
-      if (!fn.isExported()) {continue;}
-      totalExportedFns++;
-      totalExportedDecls++;
-
-      if (fn.getReturnTypeNode()) {
-        fnsWithExplicitReturn++;
-      } else {
-        issues.push({
-          column: fn.getStart() - fn.getStartLinePos() + 1,
-          dimension: CONFIG.label,
-          file: filePath,
-          line: fn.getStartLineNumber(),
-          message: `exported ${fn.getName() ?? "function"}() has no explicit return type`,
-          severity: "warning",
-        });
-      }
-
-      const allParamsTyped = fn.getParameters().every((param) => param.getTypeNode());
-      if (allParamsTyped) {fnsWithFullyTypedParams++;}
-
-      if (fn.getJsDocs().length > 0) {exportedWithJSDoc++;}
-
-      const overloads = fn.getOverloads();
-      if (overloads.length > 0) {overloadCount += overloads.length;}
-    }
-
-    for (const iface of sf.getInterfaces()) {
-      if (!iface.isExported()) {continue;}
-      totalExportedDecls++;
-      if (iface.getJsDocs().length > 0) {exportedWithJSDoc++;}
-    }
-
-    for (const alias of sf.getTypeAliases()) {
-      if (!alias.isExported()) {continue;}
-      totalExportedDecls++;
-      if (alias.getJsDocs().length > 0) {exportedWithJSDoc++;}
-    }
-
-    for (const varStmt of sf.getVariableStatements()) {
-      if (!varStmt.isExported()) {continue;}
-      totalExportedDecls += varStmt.getDeclarations().length;
-      if (varStmt.getJsDocs().length > 0) {
-        exportedWithJSDoc += varStmt.getDeclarations().length;
-      }
-    }
-
-    // Exported classes
-    for (const cls of sf.getClasses()) {
-      if (!cls.isExported()) {continue;}
-      totalExportedDecls++;
-      if (cls.getJsDocs().length > 0) {exportedWithJSDoc++;}
-
-      for (const method of cls.getMethods()) {
-        if (!method.getScope || method.getScope() === "private") {continue;}
+    switch (decl.kind) {
+      case "function": {
         totalExportedFns++;
-
-        if (method.getReturnTypeNode()) {
+        if (decl.hasExplicitReturnType) {
           fnsWithExplicitReturn++;
+        } else {
+          issues.push({
+            column: decl.positions[0]?.column ?? 1,
+            dimension: CONFIG.label,
+            file: decl.filePath,
+            line: decl.line,
+            message: `exported ${decl.name}() has no explicit return type`,
+            severity: "warning",
+          });
         }
-
-        const allParamsTyped = method.getParameters().every((param) => param.getTypeNode());
-        if (allParamsTyped) {fnsWithFullyTypedParams++;}
-
-        if (method.getJsDocs().length > 0) {exportedWithJSDoc++;}
-
-        const overloads = method.getOverloads();
-        if (overloads.length > 0) {overloadCount += overloads.length;}
+        if (decl.allParamsTyped) {fnsWithFullyTypedParams++;}
+        if ((decl.overloadCount ?? 0) > 0) {overloadCount += decl.overloadCount!;}
+        break;
       }
-    }
-
-    // Exported enums
-    for (const en of sf.getEnums()) {
-      if (!en.isExported()) {continue;}
-      totalExportedDecls++;
-      if (en.getJsDocs().length > 0) {exportedWithJSDoc++;}
+      case "class": {
+        // Class methods count as exported functions
+        for (const method of decl.methods ?? []) {
+          totalExportedFns++;
+          if (method.hasJSDoc) {exportedWithJSDoc++;}
+          if (method.hasExplicitReturnType) {fnsWithExplicitReturn++;}
+          if (method.allParamsTyped) {fnsWithFullyTypedParams++;}
+          if (method.overloadCount > 0) {overloadCount += method.overloadCount;}
+        }
+        break;
+      }
+      case "variable": {
+        // Variable declarations inherit JSDoc from the statement.
+        // Already counted above via decl.hasJSDoc.
+        // But variables can have multiple declarations per statement that all
+        // share JSDoc — already handled by sampler (each decl gets stmt JSDoc).
+        break;
+      }
+      // interface, type-alias, enum: just counted + JSDoc above
     }
   }
 
@@ -129,7 +93,6 @@ export function analyzePublishQuality(
   }
 
   // +15 for types field in package.json
-  // Use packageContext when available (fixes package mode reading temp wrapper's package.json)
   let pkgJsonResolved = false;
   if (packageContext) {
     try {

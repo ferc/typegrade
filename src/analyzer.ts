@@ -11,11 +11,14 @@ import { analyzeDeclarationFidelity } from "./analyzers/declaration-fidelity.js"
 import { analyzeImplementationSoundness } from "./analyzers/implementation-soundness.js";
 import { analyzePublishQuality } from "./analyzers/publish-quality.js";
 import { computeComposites } from "./scorer.js";
+import { extractPublicSurface } from "./surface/index.js";
 
 export interface AnalyzeOptions {
   sourceFilesOptions?: GetSourceFilesOptions;
   mode?: AnalysisMode;
   packageContext?: PackageAnalysisContext;
+  /** If provided, only analyze files in this set (post-graph filtering) */
+  fileFilter?: Set<string>;
 }
 
 export function analyzeProject(projectPath: string, options?: AnalyzeOptions): AnalysisResult {
@@ -27,7 +30,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const mode: AnalysisMode = isPackageMode ? "package" : "source";
 
   const project = loadProject(absolutePath);
-  const sourceFiles = getSourceFiles(project, sourceFilesOptions);
+  let sourceFiles = getSourceFiles(project, sourceFilesOptions);
+  if (options?.fileFilter) {
+    sourceFiles = sourceFiles.filter((sf) => options.fileFilter!.has(sf.getFilePath()));
+  }
   const filesAnalyzed = sourceFiles.length;
 
   // No source files -> score 0
@@ -87,12 +93,15 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     }
   }
 
-  // Run consumer-facing dimensions (1-4) against consumer view
+  // Extract public surface once, shared by all consumer-facing analyzers
+  const consumerSurface = extractPublicSurface(consumerFiles);
+
+  // Run consumer-facing dimensions (1-4) against the shared surface
   const dimensions: DimensionResult[] = [
-    analyzeApiSpecificity(consumerFiles),
-    analyzeApiSafety(consumerFiles),
-    analyzeApiExpressiveness(consumerFiles),
-    analyzePublishQuality(consumerFiles, project, options?.packageContext),
+    analyzeApiSpecificity(consumerSurface),
+    analyzeApiSafety(consumerSurface),
+    analyzeApiExpressiveness(consumerSurface),
+    analyzePublishQuality(consumerSurface, project, options?.packageContext),
   ];
 
   // Source-only dimensions (5-8)
