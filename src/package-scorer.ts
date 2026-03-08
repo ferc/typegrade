@@ -1,12 +1,12 @@
+import type { AnalysisResult, PackageAnalysisContext } from "./types.js";
+import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AnalysisResult, PackageAnalysisContext } from "./types.js";
+import type { GraphStats } from "./graph/types.js";
 import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
-import { tmpdir } from "node:os";
-import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
-import type { GraphStats } from "./graph/types.js";
 import { loadProject } from "./utils/project-loader.js";
+import { tmpdir } from "node:os";
 
 function makeFallbackGraphStats(): GraphStats {
   return {
@@ -50,7 +50,7 @@ function scoreLocalPackage(
   const graphProject = loadProject(localPath);
   const graph = buildDeclarationGraph(localPath, graphProject);
 
-  let fileFilter: Set<string> | undefined;
+  let fileFilter: Set<string> | undefined = undefined;
 
   if (graph.filesToAnalyze.length > 0) {
     fileFilter = new Set(graph.filesToAnalyze);
@@ -63,7 +63,7 @@ function scoreLocalPackage(
     packageName,
     packageRoot: localPath,
     typesEntrypoint: entrypoints[0]?.filePath
-      ? entrypoints[0].filePath.replace(localPath + "/", "")
+      ? entrypoints[0].filePath.replace(`${localPath}/`, "")
       : null,
   };
 
@@ -157,7 +157,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     });
 
     const pkgDir = join(tmpDir, "node_modules", packageName);
-    let typesPackageName: string | undefined;
+    let typesPackageName: string | undefined = undefined;
 
     if (existsSync(pkgDir)) {
       const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
@@ -212,7 +212,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     const graph = buildDeclarationGraph(effectivePkgDir, graphProject);
 
     // Determine files to analyze
-    let fileFilter: Set<string> | undefined;
+    let fileFilter: Set<string> | undefined = undefined;
 
     if (graph.filesToAnalyze.length > 0) {
       fileFilter = new Set(graph.filesToAnalyze);
@@ -229,7 +229,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       packageName,
       packageRoot: effectivePkgDir,
       typesEntrypoint: entrypoints[0]?.filePath
-        ? entrypoints[0].filePath.replace(effectivePkgDir + "/", "")
+        ? entrypoints[0].filePath.replace(`${effectivePkgDir}/`, "")
         : null,
     };
 

@@ -1,5 +1,5 @@
-import { extractPublicSurface } from "../src/surface/index.js";
 import { Project } from "ts-morph";
+import { extractPublicSurface } from "../src/surface/index.js";
 import { resolve } from "node:path";
 
 const fixturesDir = resolve(import.meta.dirname, "fixtures");
@@ -28,7 +28,7 @@ describe(extractPublicSurface, () => {
           [key: string]: string;
         }
       `);
-      const indexPositions = surface.positions.filter((p) => p.role === "index-sig");
+      const indexPositions = surface.positions.filter((pos) => pos.role === "index-sig");
       expect(indexPositions).toHaveLength(1);
       expect(indexPositions[0]!.name).toBe("[index]");
       expect(indexPositions[0]!.weight).toBe(0.75);
@@ -41,8 +41,8 @@ describe(extractPublicSurface, () => {
           [key: string]: string;
         }
       `);
-      const props = surface.positions.filter((p) => p.role === "property");
-      const indexSigs = surface.positions.filter((p) => p.role === "index-sig");
+      const props = surface.positions.filter((pos) => pos.role === "property");
+      const indexSigs = surface.positions.filter((pos) => pos.role === "index-sig");
       expect(props).toHaveLength(1);
       expect(indexSigs).toHaveLength(1);
     });
@@ -50,7 +50,7 @@ describe(extractPublicSurface, () => {
     it("extracts from index-signatures fixture", () => {
       const sourceFiles = getSourceFiles("index-signatures");
       const surface = extractPublicSurface(sourceFiles);
-      const indexPositions = surface.positions.filter((p) => p.role === "index-sig");
+      const indexPositions = surface.positions.filter((pos) => pos.role === "index-sig");
       // StringMap(1) + Config(1) + Complex(1) = 3
       expect(indexPositions).toHaveLength(3);
     });
@@ -63,10 +63,10 @@ describe(extractPublicSurface, () => {
           (arg: string): number;
         }
       `);
-      const callSigPositions = surface.positions.filter((p) => p.role === "call-sig");
+      const callSigPositions = surface.positions.filter((pos) => pos.role === "call-sig");
       expect(callSigPositions).toHaveLength(1);
       // Params from call signature
-      const paramPositions = surface.positions.filter((p) => p.role === "param");
+      const paramPositions = surface.positions.filter((pos) => pos.role === "param");
       expect(paramPositions).toHaveLength(1);
       expect(paramPositions[0]!.name).toBe("arg");
     });
@@ -74,7 +74,7 @@ describe(extractPublicSurface, () => {
     it("extracts from index-signatures fixture (Complex has call sig)", () => {
       const sourceFiles = getSourceFiles("index-signatures");
       const surface = extractPublicSurface(sourceFiles);
-      const callSigPositions = surface.positions.filter((p) => p.role === "call-sig");
+      const callSigPositions = surface.positions.filter((pos) => pos.role === "call-sig");
       // Callable(1) + Complex(1) = 2
       expect(callSigPositions).toHaveLength(2);
     });
@@ -87,14 +87,14 @@ describe(extractPublicSurface, () => {
           new (name: string): { name: string };
         }
       `);
-      const ctorSigPositions = surface.positions.filter((p) => p.role === "construct-sig");
+      const ctorSigPositions = surface.positions.filter((pos) => pos.role === "construct-sig");
       expect(ctorSigPositions).toHaveLength(1);
     });
 
     it("extracts from index-signatures fixture (Complex + Constructable)", () => {
       const sourceFiles = getSourceFiles("index-signatures");
       const surface = extractPublicSurface(sourceFiles);
-      const ctorSigPositions = surface.positions.filter((p) => p.role === "construct-sig");
+      const ctorSigPositions = surface.positions.filter((pos) => pos.role === "construct-sig");
       // Constructable(1) + Complex(1) = 2
       expect(ctorSigPositions).toHaveLength(2);
     });
@@ -104,12 +104,12 @@ describe(extractPublicSurface, () => {
     it("extracts declarations from exported namespaces", () => {
       const sourceFiles = getSourceFiles("namespace-export");
       const surface = extractPublicSurface(sourceFiles);
-      const nsDecls = surface.declarations.filter((d) => d.name.startsWith("Utils."));
+      const nsDecls = surface.declarations.filter((decl) => decl.name.startsWith("Utils."));
       expect(nsDecls.length).toBeGreaterThanOrEqual(2);
-      const fnDecl = nsDecls.find((d) => d.name === "Utils.parse");
+      const fnDecl = nsDecls.find((decl) => decl.name === "Utils.parse");
       expect(fnDecl).toBeDefined();
       expect(fnDecl!.kind).toBe("function");
-      const ifaceDecl = nsDecls.find((d) => d.name === "Utils.Options");
+      const ifaceDecl = nsDecls.find((decl) => decl.name === "Utils.Options");
       expect(ifaceDecl).toBeDefined();
       expect(ifaceDecl!.kind).toBe("interface");
     });
@@ -117,7 +117,7 @@ describe(extractPublicSurface, () => {
     it("extracts namespace type aliases", () => {
       const sourceFiles = getSourceFiles("namespace-export");
       const surface = extractPublicSurface(sourceFiles);
-      const resultDecl = surface.declarations.find((d) => d.name === "Utils.Result");
+      const resultDecl = surface.declarations.find((decl) => decl.name === "Utils.Result");
       expect(resultDecl).toBeDefined();
       expect(resultDecl!.kind).toBe("type-alias");
     });
@@ -143,7 +143,7 @@ describe(extractPublicSurface, () => {
       );
       const surface = extractPublicSurface(project.getSourceFiles());
       // Should merge into a single declaration
-      const sharedDecls = surface.declarations.filter((d) => d.name === "Shared");
+      const sharedDecls = surface.declarations.filter((decl) => decl.name === "Shared");
       expect(sharedDecls).toHaveLength(1);
       // Should have positions from both
       expect(sharedDecls[0]!.positions).toHaveLength(2);

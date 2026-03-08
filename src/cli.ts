@@ -121,9 +121,9 @@ export function run() {
       const resultB = scorePackage(pkgB, { domain });
 
       if (opts.json) {
-        console.log(JSON.stringify({ comparison: { a: resultA, b: resultB } }, null, 2));
+        console.log(JSON.stringify({ comparison: { first: resultA, second: resultB } }, null, 2));
       } else {
-        console.log(renderComparison(pkgA, resultA, pkgB, resultB));
+        console.log(renderComparison({ nameA: pkgA, nameB: pkgB, resultA, resultB }));
       }
     });
 
@@ -138,12 +138,15 @@ function parseDomainOption(value: string): "auto" | "off" | string {
   process.exit(1);
 }
 
-function renderComparison(
-  nameA: string,
-  a: AnalysisResult,
-  nameB: string,
-  b: AnalysisResult,
-): string {
+interface ComparisonOpts {
+  nameA: string;
+  resultA: AnalysisResult;
+  nameB: string;
+  resultB: AnalysisResult;
+}
+
+function renderComparison(opts: ComparisonOpts): string {
+  const { nameA, resultA, nameB, resultB } = opts;
   const lines: string[] = [
     "",
     pc.bold("  typegrade comparison"),
@@ -160,21 +163,26 @@ function renderComparison(
   };
 
   for (const key of compositeKeys) {
-    const scoreA = a.composites.find((c) => c.key === key)?.score ?? 0;
-    const scoreB = b.composites.find((c) => c.key === key)?.score ?? 0;
+    const scoreA = resultA.composites.find((comp) => comp.key === key)?.score ?? 0;
+    const scoreB = resultB.composites.find((comp) => comp.key === key)?.score ?? 0;
     const delta = scoreA - scoreB;
-    const deltaStr = delta > 0 ? pc.green(`+${delta}`) : (delta < 0 ? pc.red(`${delta}`) : "0");
+    let deltaStr = "0";
+    if (delta > 0) {
+      deltaStr = pc.green(`+${delta}`);
+    } else if (delta < 0) {
+      deltaStr = pc.red(`${delta}`);
+    }
     const label = (labels[key] ?? key).padEnd(22);
     lines.push(`  ${label}${String(scoreA).padEnd(16)}${String(scoreB).padEnd(16)}${deltaStr}`);
   }
 
   // Domain scores if available
-  if (a.domainScore || b.domainScore) {
+  if (resultA.domainScore || resultB.domainScore) {
     lines.push("");
-    const domA = a.domainScore?.score ?? "n/a";
-    const domB = b.domainScore?.score ?? "n/a";
+    const domA = resultA.domainScore?.score ?? "n/a";
+    const domB = resultB.domainScore?.score ?? "n/a";
     const domainLabel =
-      `Domain Fit (${a.domainScore?.domain ?? b.domainScore?.domain ?? "?"})`.padEnd(22);
+      `Domain Fit (${resultA.domainScore?.domain ?? resultB.domainScore?.domain ?? "?"})`.padEnd(22);
     lines.push(`  ${domainLabel}${String(domA).padEnd(16)}${String(domB).padEnd(16)}`);
   }
 

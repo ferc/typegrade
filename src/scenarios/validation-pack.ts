@@ -2,8 +2,15 @@ import type { ScenarioPack, ScenarioTest } from "./types.js";
 import type { PublicSurface } from "../surface/index.js";
 import type { ScenarioResult } from "../types.js";
 
-function makeResult(name: string, passed: boolean, score: number, reason: string): ScenarioResult {
-  return { name, passed, reason, score };
+interface MakeResultOpts {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+function makeResult(opts: MakeResultOpts): ScenarioResult {
+  return { name: opts.name, passed: opts.passed, reason: opts.reason, score: opts.score };
 }
 
 /** Scenario: unknown input to validated output */
@@ -35,17 +42,17 @@ const unknownToValidated: ScenarioTest = {
 
       validationFns++;
       const hasUnknownInput = decl.positions.some(
-        (p) => p.role === "param" && (p.type.getFlags() & 2) !== 0,
+        (pos) => pos.role === "param" && (pos.type.getFlags() & 2) !== 0,
       );
       if (hasUnknownInput) {
         unknownInputFns++;
       }
 
-      const hasTypedOutput = decl.positions.some((p) => {
-        if (p.role !== "return") {
+      const hasTypedOutput = decl.positions.some((pos) => {
+        if (pos.role !== "return") {
           return false;
         }
-        const typeText = p.type.getText();
+        const typeText = pos.type.getText();
         return typeText !== "any" && typeText !== "unknown" && typeText !== "void";
       });
       if (hasTypedOutput) {
@@ -54,7 +61,7 @@ const unknownToValidated: ScenarioTest = {
     }
 
     if (validationFns === 0) {
-      return makeResult("unknownToValidated", false, 20, "No validation functions found");
+      return makeResult({ name: "unknownToValidated", passed: false, reason: "No validation functions found", score: 20 });
     }
 
     if (unknownInputFns > 0) {
@@ -69,14 +76,9 @@ const unknownToValidated: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "unknownToValidated",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "unknownToValidated", passed: passed, reason: passed
         ? `${unknownInputFns} accept unknown, ${typedOutputFns} return typed output`
-        : "Validation pipeline lacks unknown→typed flow",
-    );
+        : "Validation pipeline lacks unknown→typed flow", score: score });
   },
   name: "unknownToValidated",
 };
@@ -107,7 +109,7 @@ const refinementPipeline: ScenarioTest = {
     }
 
     if (pipelineFns === 0) {
-      return makeResult("refinementPipeline", false, 25, "No pipeline/transform functions found");
+      return makeResult({ name: "refinementPipeline", passed: false, reason: "No pipeline/transform functions found", score: 25 });
     }
 
     if (genericPipelines > 0) {
@@ -119,14 +121,9 @@ const refinementPipeline: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "refinementPipeline",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "refinementPipeline", passed: passed, reason: passed
         ? `${genericPipelines}/${pipelineFns} pipelines preserve types`
-        : "Pipeline functions lack generic type preservation",
-    );
+        : "Pipeline functions lack generic type preservation", score: score });
   },
   name: "refinementPipeline",
 };
@@ -169,14 +166,9 @@ const discriminatedComposition: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "discriminatedComposition",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "discriminatedComposition", passed: passed, reason: passed
         ? `${discriminatedUnions} discriminated unions, ${unionDecls} union constructors`
-        : "Limited discriminated union support",
-    );
+        : "Limited discriminated union support", score: score });
   },
   name: "discriminatedComposition",
 };
@@ -213,14 +205,9 @@ const parseGuardErgonomics: ScenarioTest = {
     score = Math.min(100, patterns.size * 20);
 
     const passed = score >= 40;
-    return makeResult(
-      "parseGuardErgonomics",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "parseGuardErgonomics", passed: passed, reason: passed
         ? `${patterns.size} validation patterns: ${[...patterns].join(", ")}`
-        : `Only ${patterns.size} validation pattern(s) found`,
-    );
+        : `Only ${patterns.size} validation pattern(s) found`, score: score });
   },
   name: "parseGuardErgonomics",
 };

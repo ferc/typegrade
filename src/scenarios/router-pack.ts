@@ -10,8 +10,15 @@ import type { ScenarioResult } from "../types.js";
  * loader results, and navigation helpers.
  */
 
-function makeResult(name: string, passed: boolean, score: number, reason: string): ScenarioResult {
-  return { name, passed, reason, score };
+interface MakeResultOpts {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+function makeResult(opts: MakeResultOpts): ScenarioResult {
+  return { name: opts.name, passed: opts.passed, reason: opts.reason, score: opts.score };
 }
 
 /** Scenario: Route tree path-param inference */
@@ -55,7 +62,7 @@ const pathParamInference: ScenarioTest = {
     }
 
     if (routeDeclarations === 0) {
-      return makeResult("pathParamInference", false, 0, "No route-related declarations found");
+      return makeResult({ name: "pathParamInference", passed: false, reason: "No route-related declarations found", score: 0 });
     }
 
     if (templateLiteralRoutes > 0) {
@@ -70,14 +77,9 @@ const pathParamInference: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "pathParamInference",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "pathParamInference", passed: passed, reason: passed
         ? `${templateLiteralRoutes} template literal routes, ${constrainedRouteParams} constrained params`
-        : "Limited path parameter type inference",
-    );
+        : "Limited path parameter type inference", score: score });
   },
   name: "pathParamInference",
 };
@@ -119,12 +121,7 @@ const searchParamInference: ScenarioTest = {
 
     if (searchParamDecls === 0) {
       // Not every router needs search params; give partial credit if they have route params
-      return makeResult(
-        "searchParamInference",
-        false,
-        20,
-        "No search parameter declarations found",
-      );
+      return makeResult({ name: "searchParamInference", passed: false, reason: "No search parameter declarations found", score: 20 });
     }
 
     if (typedSearchParams > 0) {
@@ -136,14 +133,9 @@ const searchParamInference: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "searchParamInference",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "searchParamInference", passed: passed, reason: passed
         ? `${typedSearchParams}/${searchParamDecls} search params are typed`
-        : "Search params lack type inference",
-    );
+        : "Search params lack type inference", score: score });
   },
   name: "searchParamInference",
 };
@@ -168,16 +160,8 @@ const loaderResultPropagation: ScenarioTest = {
         loaderDecls++;
 
         // Check for generic return type propagation
-        if (decl.typeParameters.length > 0) {
-          const returnPositions = decl.positions.filter((p) => p.role === "return");
-          for (const pos of returnPositions) {
-            const typeText = pos.type.getText();
-            // Return type references a generic = good propagation
-            if (decl.typeParameters.some((tp) => typeText.includes(tp.name))) {
-              typedLoaders++;
-              break;
-            }
-          }
+        if (decl.typeParameters.length > 0 && hasGenericReturnPropagation(decl)) {
+          typedLoaders++;
         }
 
         // Also check for explicit result types
@@ -196,12 +180,7 @@ const loaderResultPropagation: ScenarioTest = {
     }
 
     if (loaderDecls === 0) {
-      return makeResult(
-        "loaderResultPropagation",
-        false,
-        30,
-        "No loader/action/handler declarations found",
-      );
+      return makeResult({ name: "loaderResultPropagation", passed: false, reason: "No loader/action/handler declarations found", score: 30 });
     }
 
     const ratio = typedLoaders / loaderDecls;
@@ -209,14 +188,9 @@ const loaderResultPropagation: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "loaderResultPropagation",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "loaderResultPropagation", passed: passed, reason: passed
         ? `${typedLoaders}/${loaderDecls} loaders/actions have typed results`
-        : "Loader/action results lack type propagation",
-    );
+        : "Loader/action results lack type propagation", score: score });
   },
   name: "loaderResultPropagation",
 };
@@ -240,15 +214,15 @@ const routeNarrowing: ScenarioTest = {
         navigationDecls++;
 
         // Check if route/path parameter is constrained (not just string)
-        for (const pos of decl.positions) {
-          if (pos.role === "param") {
-            const typeText = pos.type.getText();
-            // Good: literal unions, template literals, or constrained generics
-            if (typeText.includes("|") || typeText.includes("`") || typeText.includes("extends")) {
-              constrainedNavigation++;
-              break;
-            }
+        const hasConstrainedParam = decl.positions.some((pos) => {
+          if (pos.role !== "param") {
+            return false;
           }
+          const typeText = pos.type.getText();
+          return typeText.includes("|") || typeText.includes("`") || typeText.includes("extends");
+        });
+        if (hasConstrainedParam) {
+          constrainedNavigation++;
         }
 
         // Check for generic constraints on navigation
@@ -262,7 +236,7 @@ const routeNarrowing: ScenarioTest = {
     }
 
     if (navigationDecls === 0) {
-      return makeResult("routeNarrowing", false, 20, "No navigation helper declarations found");
+      return makeResult({ name: "routeNarrowing", passed: false, reason: "No navigation helper declarations found", score: 20 });
     }
 
     if (constrainedNavigation > 0) {
@@ -274,14 +248,9 @@ const routeNarrowing: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "routeNarrowing",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "routeNarrowing", passed: passed, reason: passed
         ? `${constrainedNavigation}/${navigationDecls} navigation helpers constrain routes`
-        : "Navigation helpers accept unconstrained routes",
-    );
+        : "Navigation helpers accept unconstrained routes", score: score });
   },
   name: "routeNarrowing",
 };
@@ -311,17 +280,15 @@ const nestedRouteContext: ScenarioTest = {
         // Check for nested generic structure
         for (const pos of decl.positions) {
           const typeText = pos.type.getText();
-          if (typeText.includes("children") || typeText.includes("outlet")) {
-            if (decl.typeParameters.length > 0) {
-              genericContexts++;
-            }
+          if ((typeText.includes("children") || typeText.includes("outlet")) && decl.typeParameters.length > 0) {
+            genericContexts++;
           }
         }
       }
     }
 
     if (contextDecls === 0) {
-      return makeResult("nestedRouteContext", false, 25, "No context/outlet declarations found");
+      return makeResult({ name: "nestedRouteContext", passed: false, reason: "No context/outlet declarations found", score: 25 });
     }
 
     if (genericContexts > 0) {
@@ -333,14 +300,9 @@ const nestedRouteContext: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "nestedRouteContext",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "nestedRouteContext", passed: passed, reason: passed
         ? `${genericContexts} generic context propagation patterns`
-        : "Limited context propagation for nested routes",
-    );
+        : "Limited context propagation for nested routes", score: score });
   },
   name: "nestedRouteContext",
 };
@@ -361,30 +323,22 @@ const linkTargetCorrectness: ScenarioTest = {
         // Check if the "to" or "href" property is constrained
         for (const pos of decl.positions) {
           const typeText = pos.type.getText();
+          const posName = pos.name?.toLowerCase();
           // Type-safe link: constrained string type, not just string
-          if (pos.name?.toLowerCase() === "to" || pos.name?.toLowerCase() === "href") {
-            if (typeText !== "string" && typeText !== "string | undefined") {
-              typeSafeLinks++;
-            }
+          if ((posName === "to" || posName === "href") && typeText !== "string" && typeText !== "string | undefined") {
+            typeSafeLinks++;
           }
         }
 
         // Check interface properties
         if (decl.kind === "interface") {
-          for (const pos of decl.positions) {
-            if (pos.role === "property" && (pos.name === "to" || pos.name === "href")) {
-              const typeText = pos.type.getText();
-              if (typeText !== "string") {
-                typeSafeLinks++;
-              }
-            }
-          }
+          typeSafeLinks += countTypeSafeInterfaceLinks(decl);
         }
       }
     }
 
     if (linkDecls === 0) {
-      return makeResult("linkTargetCorrectness", false, 30, "No link declarations found");
+      return makeResult({ name: "linkTargetCorrectness", passed: false, reason: "No link declarations found", score: 30 });
     }
 
     if (typeSafeLinks > 0) {
@@ -396,17 +350,33 @@ const linkTargetCorrectness: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "linkTargetCorrectness",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "linkTargetCorrectness", passed: passed, reason: passed
         ? `${typeSafeLinks}/${linkDecls} link declarations have type-safe targets`
-        : "Link targets accept any string",
-    );
+        : "Link targets accept any string", score: score });
   },
   name: "linkTargetCorrectness",
 };
+
+function countTypeSafeInterfaceLinks(decl: { positions: { role: string; name?: string; type: { getText(): string } }[] }): number {
+  let count = 0;
+  for (const pos of decl.positions) {
+    if (pos.role === "property" && (pos.name === "to" || pos.name === "href") && pos.type.getText() !== "string") {
+      count++;
+    }
+  }
+  return count;
+}
+
+function hasGenericReturnPropagation(decl: { typeParameters: { name: string }[]; positions: { role: string; type: { getText(): string } }[] }): boolean {
+  const returnPositions = decl.positions.filter((pos) => pos.role === "return");
+  for (const pos of returnPositions) {
+    const typeText = pos.type.getText();
+    if (decl.typeParameters.some((tp) => typeText.includes(tp.name))) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export const ROUTER_PACK: ScenarioPack = {
   description:

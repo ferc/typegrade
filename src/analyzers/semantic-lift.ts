@@ -1,9 +1,8 @@
 import type { ConfidenceSignal, DimensionResult, Issue } from "../types.js";
+import type { PublicSurface, SurfacePosition, SurfaceTypeParam } from "../surface/index.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
-import type { PublicSurface, SurfacePosition } from "../surface/index.js";
-import { analyzePrecision } from "../utils/type-utils.js";
 import type { TypeNode } from "ts-morph";
-import type { SurfaceTypeParam } from "../surface/index.js";
+import { analyzePrecision } from "../utils/type-utils.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "semanticLift")!;
 
@@ -25,18 +24,23 @@ const ADVANCED_FEATURES = new Set([
 
 /** Per-feature widened baselines — what the score would be without the feature */
 const FEATURE_BASELINES: Record<string, number> = {
-  branded: 40, // Unbranded primitive
+  // Unbranded primitive
+  branded: 40,
   "conditional-type": 40,
-  "constrained-generic": 35, // Unconstrained generic equivalent
+  // Unconstrained generic equivalent
+  "constrained-generic": 35,
   "constraint-basic": 35,
   "constraint-strong": 35,
   "constraint-structural": 35,
-  "discriminated-union": 40, // Avg-of-members-without-discriminant approx
+  // Avg-of-members-without-discriminant approx
+  "discriminated-union": 40,
   "indexed-access": 40,
   infer: 40,
-  "literal-union": 40, // Wide primitive equivalent
+  // Wide primitive equivalent
+  "literal-union": 40,
   "mapped-type": 40,
-  "template-literal": 40, // Wide string equivalent
+  // Wide string equivalent
+  "template-literal": 40,
   tuple: 40,
 };
 
@@ -44,17 +48,25 @@ const DEFAULT_BASELINE = 40;
 
 /** Per-feature scaling — how much actual semantic benefit each feature provides */
 const FEATURE_LIFT_SCALE: Record<string, number> = {
-  branded: 1.2, // High: fully eliminates type confusion
-  "conditional-type": 0.9, // Medium: can be opaque
-  "constrained-generic": 1, // Standard
-  "constraint-basic": 0.7, // Low: minimal narrowing
-  "constraint-strong": 1.1, // Above standard
+  // High: fully eliminates type confusion
+  branded: 1.2,
+  // Medium: can be opaque
+  "conditional-type": 0.9,
+  // Standard
+  "constrained-generic": 1,
+  // Low: minimal narrowing
+  "constraint-basic": 0.7,
+  // Above standard
+  "constraint-strong": 1.1,
   "constraint-structural": 0.9,
-  "discriminated-union": 1.3, // High: enables exhaustive matching
+  // High: enables exhaustive matching
+  "discriminated-union": 1.3,
   "indexed-access": 0.8,
   infer: 1,
-  "literal-union": 1.1, // High: very specific
-  "mapped-type": 0.8, // Medium: can be complex without benefit
+  // High: very specific
+  "literal-union": 1.1,
+  // Medium: can be complex without benefit
+  "mapped-type": 0.8,
   "template-literal": 0.9,
   tuple: 0.9,
 };
@@ -69,16 +81,17 @@ function computeWidenedBaseline(features: string[]): number {
   let maxBaseline = 0;
   let hasAdvanced = false;
 
-  for (const f of features) {
-    if (ADVANCED_FEATURES.has(f)) {
+  for (const feat of features) {
+    if (ADVANCED_FEATURES.has(feat)) {
       hasAdvanced = true;
-      const baseline = FEATURE_BASELINES[f] ?? DEFAULT_BASELINE;
+      const baseline = FEATURE_BASELINES[feat] ?? DEFAULT_BASELINE;
       maxBaseline = Math.max(maxBaseline, baseline);
     }
   }
 
   if (!hasAdvanced) {
-    return -1; // Signals no advanced features — position has no lift
+    // Signals no advanced features — position has no lift
+    return -1;
   }
 
   return maxBaseline;
@@ -86,16 +99,16 @@ function computeWidenedBaseline(features: string[]): number {
 
 /** Identify the primary advanced feature for a position (highest-scaling one) */
 function getPrimaryFeature(features: string[]): string | undefined {
-  let best: string | undefined;
+  let best: string | undefined = undefined;
   let bestScale = -1;
-  for (const f of features) {
-    if (!ADVANCED_FEATURES.has(f)) {
+  for (const feat of features) {
+    if (!ADVANCED_FEATURES.has(feat)) {
       continue;
     }
-    const scale = FEATURE_LIFT_SCALE[f] ?? 1;
+    const scale = FEATURE_LIFT_SCALE[feat] ?? 1;
     if (scale > bestScale) {
       bestScale = scale;
-      best = f;
+      best = feat;
     }
   }
   return best;
@@ -114,7 +127,7 @@ function countGenericCorrelation(
   const returnText = returnTypeNode.getText();
   for (const name of paramNames) {
     const usedInParams = paramTypeNodes.some(
-      (p) => p.typeNode && p.typeNode.getText().includes(name),
+      (pt) => pt.typeNode && pt.typeNode.getText().includes(name),
     );
     if (usedInParams && returnText.includes(name)) {
       count++;
@@ -166,18 +179,19 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
       const scaledLift = rawLift * scale;
       totalScaledLift += scaledLift;
 
-      for (const f of result.features) {
-        if (ADVANCED_FEATURES.has(f)) {
-          featuresSeen.add(f);
-          if (f === primaryFeature) {
-            const existing = perFeatureLift.get(f);
-            if (existing) {
-              existing.count++;
-              existing.totalLift += scaledLift;
-              existing.avgLift = existing.totalLift / existing.count;
-            } else {
-              perFeatureLift.set(f, { avgLift: scaledLift, count: 1, totalLift: scaledLift });
-            }
+      for (const feat of result.features) {
+        if (!ADVANCED_FEATURES.has(feat)) {
+          continue;
+        }
+        featuresSeen.add(feat);
+        if (feat === primaryFeature) {
+          const existing = perFeatureLift.get(feat);
+          if (existing) {
+            existing.count++;
+            existing.totalLift += scaledLift;
+            existing.avgLift = existing.totalLift / existing.count;
+          } else {
+            perFeatureLift.set(feat, { avgLift: scaledLift, count: 1, totalLift: scaledLift });
           }
         }
       }
@@ -260,7 +274,7 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
 
   // Build positives/negatives — include top features by lift contribution
   const sortedFeatures = [...perFeatureLift.entries()].toSorted(
-    (a, b) => b[1].totalLift - a[1].totalLift,
+    (lhs, rhs) => rhs[1].totalLift - lhs[1].totalLift,
   );
 
   if (sortedFeatures.length > 0) {
@@ -365,11 +379,11 @@ function computeInstantiatedBaseline(pos: SurfacePosition, features: string[]): 
   // For constrained generics, the instantiated version would typically score
   // At the constraint's precision level
   const hasConstraint = features.some(
-    (f) =>
-      f === "constraint-basic" ||
-      f === "constraint-strong" ||
-      f === "constraint-structural" ||
-      f === "constrained-generic",
+    (feat) =>
+      feat === "constraint-basic" ||
+      feat === "constraint-strong" ||
+      feat === "constraint-structural" ||
+      feat === "constrained-generic",
   );
 
   if (hasConstraint) {

@@ -1,8 +1,8 @@
 import type { ConfidenceSignal, DimensionResult, Issue, PackageAnalysisContext } from "../types.js";
-import type { Project } from "ts-morph";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { Project } from "ts-morph";
 import type { PublicSurface } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "publishQuality")!;
@@ -139,34 +139,24 @@ export function analyzePublishQuality(
     }
   }
   if (!pkgJsonResolved) {
-    const tsconfigPath = project.getCompilerOptions()["configFilePath"];
-    if (typeof tsconfigPath === "string") {
-      const pkgPath = join(dirname(tsconfigPath), "package.json");
-      if (existsSync(pkgPath)) {
-        try {
-          const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-          pkgJsonResolved = true;
-          confidenceSignals.push({
-            reason: "package.json resolved via tsconfig",
-            source: "metadata-availability",
-            value: 0.9,
-          });
-          if (pkg.types || pkg.typings) {
-            score += 15;
-            positives.push("package.json has types/typings field");
-          } else {
-            negatives.push("package.json missing types/typings field");
-          }
-          if (pkg.exports) {
-            hasExportsWithTypes = checkExportsHaveTypes(pkg.exports);
-            if (hasExportsWithTypes) {
-              score += 10;
-              positives.push("package.json exports field has types conditions (+10)");
-            }
-          }
-        } catch {
-          // Ignore
-        }
+    const tsconfigResult = tryResolvePkgJsonFromTsconfig(project);
+    if (tsconfigResult) {
+      pkgJsonResolved = true;
+      confidenceSignals.push({
+        reason: "package.json resolved via tsconfig",
+        source: "metadata-availability",
+        value: 0.9,
+      });
+      if (tsconfigResult.hasTypesField) {
+        score += 15;
+        positives.push("package.json has types/typings field");
+      } else {
+        negatives.push("package.json missing types/typings field");
+      }
+      if (tsconfigResult.hasExportsWithTypes) {
+        hasExportsWithTypes = true;
+        score += 10;
+        positives.push("package.json exports field has types conditions (+10)");
       }
     }
     if (!pkgJsonResolved) {
@@ -187,7 +177,7 @@ export function analyzePublishQuality(
     // Docs density bonus: >80% JSDoc on exported functions
     if (totalExportedFns > 0) {
       const fnJsDocCount = surface.declarations.filter(
-        (d) => d.kind === "function" && d.hasJSDoc,
+        (decl) => decl.kind === "function" && decl.hasJSDoc,
       ).length;
       const fnJsDocRatio = fnJsDocCount / totalExportedFns;
       if (fnJsDocRatio >= 0.8) {
@@ -222,6 +212,31 @@ export function analyzePublishQuality(
     score,
     weights: CONFIG.weights,
   };
+}
+
+interface TsconfigPkgResult {
+  hasTypesField: boolean;
+  hasExportsWithTypes: boolean;
+}
+
+function tryResolvePkgJsonFromTsconfig(project: Project): TsconfigPkgResult | undefined {
+  const tsconfigPath = project.getCompilerOptions()["configFilePath"];
+  if (typeof tsconfigPath !== "string") {
+    return undefined;
+  }
+  const pkgPath = join(dirname(tsconfigPath), "package.json");
+  if (!existsSync(pkgPath)) {
+    return undefined;
+  }
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    return {
+      hasExportsWithTypes: pkg.exports ? checkExportsHaveTypes(pkg.exports) : false,
+      hasTypesField: Boolean(pkg.types || pkg.typings),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function checkExportsHaveTypes(exports: unknown): boolean {

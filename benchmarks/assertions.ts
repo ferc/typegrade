@@ -1,6 +1,6 @@
 // Pairwise ranking assertions for composite scores
 // These encode known ground-truth: libraries with richer type systems
-// should score higher than those with loose/broad types.
+// Should score higher than those with loose/broad types.
 
 export interface PairwiseAssertion {
   higher: string;
@@ -17,16 +17,16 @@ export interface PairwiseAssertion {
 
 export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   // Tier boundary assertions (must-pass): elite/solid > loose
-  { class: "must-pass", composite: "consumerApi", higher: "zod", lower: "express", minDelta: 3, reason: "Validation library with rich branded types vs loosely-typed middleware framework", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "zod", lower: "lodash", minDelta: 3, reason: "Branded output types and discriminated unions vs utility with broad @types definitions", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "valibot", lower: "express", minDelta: 3, reason: "Tree-shakeable validation with narrow types vs loosely-typed middleware", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "valibot", lower: "lodash", minDelta: 3, reason: "Tree-shakeable validation with narrow types vs utility with broad @types definitions", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "ts-pattern", lower: "express", minDelta: 3, reason: "Exhaustive pattern matching with discriminated unions vs loosely-typed middleware", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "date-fns", lower: "lodash", minDelta: 3, reason: "Well-typed date utilities with overloaded signatures vs broad @types definitions", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "arktype", lower: "express", minDelta: 3, reason: "Elite validation with deep type inference vs loosely-typed middleware", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "arktype", lower: "lodash", minDelta: 3, reason: "Elite validation with branded/constrained types vs broad @types definitions", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "effect", lower: "express", minDelta: 3, reason: "Effect system with branded/tagged types vs loosely-typed middleware", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "effect", lower: "lodash", minDelta: 3, reason: "Effect system with branded/tagged types vs broad @types definitions", introducedAt: "v0.4.0" },
+  { class: "must-pass", composite: "consumerApi", higher: "zod", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Validation library with rich branded types vs loosely-typed middleware framework" },
+  { class: "must-pass", composite: "consumerApi", higher: "zod", introducedAt: "v0.4.0", lower: "lodash", minDelta: 3, reason: "Branded output types and discriminated unions vs utility with broad @types definitions" },
+  { class: "must-pass", composite: "consumerApi", higher: "valibot", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Tree-shakeable validation with narrow types vs loosely-typed middleware" },
+  { class: "must-pass", composite: "consumerApi", higher: "valibot", introducedAt: "v0.4.0", lower: "lodash", minDelta: 3, reason: "Tree-shakeable validation with narrow types vs utility with broad @types definitions" },
+  { class: "must-pass", composite: "consumerApi", higher: "ts-pattern", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Exhaustive pattern matching with discriminated unions vs loosely-typed middleware" },
+  { class: "must-pass", composite: "consumerApi", higher: "date-fns", introducedAt: "v0.4.0", lower: "lodash", minDelta: 3, reason: "Well-typed date utilities with overloaded signatures vs broad @types definitions" },
+  { class: "must-pass", composite: "consumerApi", higher: "arktype", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Elite validation with deep type inference vs loosely-typed middleware" },
+  { class: "must-pass", composite: "consumerApi", higher: "arktype", introducedAt: "v0.4.0", lower: "lodash", minDelta: 3, reason: "Elite validation with branded/constrained types vs broad @types definitions" },
+  { class: "must-pass", composite: "consumerApi", higher: "effect", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Effect system with branded/tagged types vs loosely-typed middleware" },
+  { class: "must-pass", composite: "consumerApi", higher: "effect", introducedAt: "v0.4.0", lower: "lodash", minDelta: 3, reason: "Effect system with branded/tagged types vs broad @types definitions" },
 
   // Intra-tier and cross-tier (diagnostic)
   { class: "diagnostic", composite: "consumerApi", higher: "valibot", lower: "zod" },
@@ -39,8 +39,8 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "diagnostic", composite: "consumerApi", higher: "neverthrow", lower: "axios" },
 
   // Elite tier vs loose (must-pass)
-  { class: "must-pass", composite: "consumerApi", higher: "arktype", lower: "axios", minDelta: 5, reason: "Elite validation library vs loosely-typed HTTP client", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "effect", lower: "axios", minDelta: 5, reason: "Elite effect system vs loosely-typed HTTP client", introducedAt: "v0.4.0" },
+  { class: "must-pass", composite: "consumerApi", higher: "arktype", introducedAt: "v0.4.0", lower: "axios", minDelta: 5, reason: "Elite validation library vs loosely-typed HTTP client" },
+  { class: "must-pass", composite: "consumerApi", higher: "effect", introducedAt: "v0.4.0", lower: "axios", minDelta: 5, reason: "Elite effect system vs loosely-typed HTTP client" },
 
   // Elite vs solid (diagnostic)
   { class: "diagnostic", composite: "consumerApi", higher: "valibot", lower: "type-fest" },
@@ -67,10 +67,10 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "diagnostic", composite: "consumerApi", higher: "remeda", lower: "moment" },
 
   // Coverage assertions: ensure every package appears in at least one must-pass
-  { class: "must-pass", composite: "consumerApi", higher: "remeda", lower: "express", minDelta: 3, reason: "Typed functional utility vs loosely-typed middleware", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "neverthrow", lower: "moment", minDelta: 2, reason: "Result monad with discriminated types vs legacy date library", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "type-fest", lower: "axios", minDelta: 3, reason: "Advanced type utilities vs loosely-typed HTTP client", introducedAt: "v0.4.0" },
-  { class: "must-pass", composite: "consumerApi", higher: "date-fns", lower: "uuid", minDelta: 3, reason: "Well-typed date utilities with overloaded signatures vs simple UUID generator", introducedAt: "v0.4.0" },
+  { class: "must-pass", composite: "consumerApi", higher: "remeda", introducedAt: "v0.4.0", lower: "express", minDelta: 3, reason: "Typed functional utility vs loosely-typed middleware" },
+  { class: "must-pass", composite: "consumerApi", higher: "neverthrow", introducedAt: "v0.4.0", lower: "moment", minDelta: 2, reason: "Result monad with discriminated types vs legacy date library" },
+  { class: "must-pass", composite: "consumerApi", higher: "type-fest", introducedAt: "v0.4.0", lower: "axios", minDelta: 3, reason: "Advanced type utilities vs loosely-typed HTTP client" },
+  { class: "must-pass", composite: "consumerApi", higher: "date-fns", introducedAt: "v0.4.0", lower: "uuid", minDelta: 3, reason: "Well-typed date utilities with overloaded signatures vs simple UUID generator" },
 
   // Stretch package diagnostic assertions
   { class: "diagnostic", composite: "consumerApi", higher: "fp-ts", lower: "express" },
@@ -79,15 +79,15 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "diagnostic", composite: "consumerApi", higher: "hono", lower: "express" },
 
   // --- Agent readiness assertions (new) ---
-  // fp-ts and io-ts: high sophistication but moderated agentReadiness
-  { class: "hard-diagnostic", composite: "agentReadiness", higher: "zod", lower: "fp-ts", reason: "Zod is more agent-friendly than fp-ts despite lower sophistication", introducedAt: "v0.5.0" },
-  { class: "hard-diagnostic", composite: "agentReadiness", higher: "valibot", lower: "io-ts", reason: "Valibot is more agent-friendly than io-ts", introducedAt: "v0.5.0" },
+  // Fp-ts and io-ts: high sophistication but moderated agentReadiness
+  { class: "hard-diagnostic", composite: "agentReadiness", higher: "zod", introducedAt: "v0.5.0", lower: "fp-ts", reason: "Zod is more agent-friendly than fp-ts despite lower sophistication" },
+  { class: "hard-diagnostic", composite: "agentReadiness", higher: "valibot", introducedAt: "v0.5.0", lower: "io-ts", reason: "Valibot is more agent-friendly than io-ts" },
   { class: "diagnostic", composite: "agentReadiness", higher: "date-fns", lower: "fp-ts", reason: "date-fns is easier for AI agents than fp-ts" },
   { class: "diagnostic", composite: "agentReadiness", higher: "remeda", lower: "io-ts", reason: "remeda has simpler API for AI agents" },
 
   // --- Type safety assertions (new) ---
-  { class: "hard-diagnostic", composite: "typeSafety", higher: "zod", lower: "express", reason: "Validation library must score higher on type safety", introducedAt: "v0.5.0" },
-  { class: "hard-diagnostic", composite: "typeSafety", higher: "valibot", lower: "lodash", reason: "Validation library vs broad @types", introducedAt: "v0.5.0" },
+  { class: "hard-diagnostic", composite: "typeSafety", higher: "zod", introducedAt: "v0.5.0", lower: "express", reason: "Validation library must score higher on type safety" },
+  { class: "hard-diagnostic", composite: "typeSafety", higher: "valibot", introducedAt: "v0.5.0", lower: "lodash", reason: "Validation library vs broad @types" },
   { class: "diagnostic", composite: "typeSafety", higher: "arktype", lower: "axios" },
   { class: "diagnostic", composite: "typeSafety", higher: "effect", lower: "moment" },
 
@@ -98,5 +98,5 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { class: "diagnostic", composite: "consumerApi", higher: "xstate", lower: "moment" },
 
   // --- Regression watch ---
-  { class: "regression-watch", composite: "consumerApi", higher: "drizzle-orm", lower: "express", reason: "drizzle-orm should not cluster with loose-tier", introducedAt: "v0.5.0" },
+  { class: "regression-watch", composite: "consumerApi", higher: "drizzle-orm", introducedAt: "v0.5.0", lower: "express", reason: "drizzle-orm should not cluster with loose-tier" },
 ];

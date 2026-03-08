@@ -2,8 +2,15 @@ import type { ScenarioPack, ScenarioTest } from "./types.js";
 import type { PublicSurface } from "../surface/index.js";
 import type { ScenarioResult } from "../types.js";
 
-function makeResult(name: string, passed: boolean, score: number, reason: string): ScenarioResult {
-  return { name, passed, reason, score };
+interface MakeResultOpts {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+function makeResult(opts: MakeResultOpts): ScenarioResult {
+  return { name: opts.name, passed: opts.passed, reason: opts.reason, score: opts.score };
 }
 
 const pipeOperatorInference: ScenarioTest = {
@@ -21,21 +28,22 @@ const pipeOperatorInference: ScenarioTest = {
           genericPipes++;
         }
       }
-      if (decl.methods) {
-        for (const method of decl.methods) {
-          const mName = method.name.toLowerCase();
-          if (mName === "pipe" || mName === "subscribe" || mName === "next") {
-            pipeDecls++;
-            if (method.typeParameters.length > 0) {
-              genericPipes++;
-            }
+      if (!decl.methods) {
+        continue;
+      }
+      for (const method of decl.methods) {
+        const mName = method.name.toLowerCase();
+        if (mName === "pipe" || mName === "subscribe" || mName === "next") {
+          pipeDecls++;
+          if (method.typeParameters.length > 0) {
+            genericPipes++;
           }
         }
       }
     }
 
     if (pipeDecls === 0) {
-      return makeResult("pipeOperatorInference", false, 25, "No pipe/operator declarations found");
+      return makeResult({ name: "pipeOperatorInference", passed: false, reason: "No pipe/operator declarations found", score: 25 });
     }
     if (genericPipes > 0) {
       score += 50;
@@ -46,14 +54,9 @@ const pipeOperatorInference: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "pipeOperatorInference",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "pipeOperatorInference", passed: passed, reason: passed
         ? `${genericPipes}/${pipeDecls} pipe patterns preserve types`
-        : "Pipe operators lack type preservation",
-    );
+        : "Pipe operators lack type preservation", score: score });
   },
   name: "pipeOperatorInference",
 };
@@ -82,7 +85,7 @@ const valueErrorChannels: ScenarioTest = {
     }
 
     if (streamDecls === 0) {
-      return makeResult("valueErrorChannels", false, 25, "No stream type declarations found");
+      return makeResult({ name: "valueErrorChannels", passed: false, reason: "No stream type declarations found", score: 25 });
     }
     if (multiChannelDecls > 0) {
       score += 50;
@@ -93,14 +96,9 @@ const valueErrorChannels: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "valueErrorChannels",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "valueErrorChannels", passed: passed, reason: passed
         ? `${multiChannelDecls}/${streamDecls} stream types with typed channels`
-        : "Stream types lack channel separation",
-    );
+        : "Stream types lack channel separation", score: score });
   },
   name: "valueErrorChannels",
 };
@@ -129,7 +127,7 @@ const compositionPatterns: ScenarioTest = {
     }
 
     if (compositionFns === 0) {
-      return makeResult("compositionPatterns", false, 25, "No composition patterns found");
+      return makeResult({ name: "compositionPatterns", passed: false, reason: "No composition patterns found", score: 25 });
     }
     if (compositionFns >= 3) {
       score += 25;
@@ -137,14 +135,9 @@ const compositionPatterns: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "compositionPatterns",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "compositionPatterns", passed: passed, reason: passed
         ? `${compositionFns} typed composition patterns`
-        : "Limited stream composition support",
-    );
+        : "Limited stream composition support", score: score });
   },
   name: "compositionPatterns",
 };

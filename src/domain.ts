@@ -1,5 +1,5 @@
-import type { PublicSurface } from "./surface/index.js";
 import { DOMAIN_PATTERNS } from "./constants.js";
+import type { PublicSurface } from "./surface/index.js";
 
 export type DomainType =
   | "validation"
@@ -120,7 +120,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   let routerMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
-    if (routerNames.some((r) => lowerName.includes(r))) {
+    if (routerNames.some((nm) => lowerName.includes(nm))) {
       routerMatchCount++;
     }
   }
@@ -139,7 +139,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   let ormMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
-    if (ormNames.some((o) => lowerName.includes(o))) {
+    if (ormNames.some((nm) => lowerName.includes(nm))) {
       ormMatchCount++;
     }
   }
@@ -162,7 +162,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   let streamMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
-    if (streamNames.some((s) => lowerName.includes(s))) {
+    if (streamNames.some((nm) => lowerName.includes(nm))) {
       streamMatchCount++;
     }
   }
@@ -177,7 +177,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
 
   // Rule 7: Generic structure — schema/utility detection
-  const typeAliases = surface.declarations.filter((d) => d.kind === "type-alias").length;
+  const typeAliases = surface.declarations.filter((decl) => decl.kind === "type-alias").length;
   const totalDecls = surface.declarations.length;
   if (totalDecls > 0 && typeAliases / totalDecls > 0.6) {
     addRule("schema", { category: "generic-structure", name: "type-alias-density", score: 0.3 });
@@ -252,7 +252,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
 
   // Compute false positive risk based on rule diversity and competing domains
   const bestRules = rulesByDomain[bestDomain] ?? [];
-  const ruleCategories = new Set(bestRules.map((r) => r.category));
+  const ruleCategories = new Set(bestRules.map((rule) => rule.category));
   let falsePositiveRisk = 0;
 
   // Single-category evidence is riskier
@@ -266,7 +266,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
 
   // No package name match increases risk
-  if (!matchedRules.some((r) => r.includes("pkg-name"))) {
+  if (!matchedRules.some((rule) => rule.includes("pkg-name"))) {
     falsePositiveRisk += 0.1;
   }
 

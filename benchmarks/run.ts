@@ -1,10 +1,9 @@
 #!/usr/bin/env tsx
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { AnalysisResult, DomainKey, ScenarioScore } from "../src/types.js";
+import { PAIRWISE_ASSERTIONS } from "./assertions.js";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
-import type { AnalysisResult, ScenarioScore } from "../src/types.js";
-import { PAIRWISE_ASSERTIONS } from "./assertions.js";
-import type { DomainKey } from "../src/types.js";
 
 const manifestPath = join(import.meta.dirname, "manifest.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -15,14 +14,14 @@ interface ManifestEntry {
 }
 
 interface BenchmarkEntry {
-  name: string;
-  tier: string;
-  result: AnalysisResult;
-  consumerApi: number | null;
   agentReadiness: number | null;
-  typeSafety: number | null;
+  consumerApi: number | null;
   domainFitScore: number | null;
+  name: string;
+  result: AnalysisResult;
   scenarioScore: ScenarioScore | null;
+  tier: string;
+  typeSafety: number | null;
 }
 
 function parseManifestEntry(entry: string | { spec: string; typesVersion?: string }): ManifestEntry {
@@ -33,16 +32,16 @@ function parseManifestEntry(entry: string | { spec: string; typesVersion?: strin
 }
 
 function getCompositeScore(result: AnalysisResult, key: string): number | null {
-  return result.composites.find((c) => c.key === key)?.score ?? null;
+  return result.composites.find((comp) => comp.key === key)?.score ?? null;
 }
 
-async function main() {
+function main() {
   const entries: BenchmarkEntry[] = [];
 
   for (const [tier, packages] of Object.entries(manifest.packages) as [string, (string | { spec: string; typesVersion?: string })[]][]) {
     for (const pkg of packages) {
       const { spec, typesVersion } = parseManifestEntry(pkg);
-      const name = spec.replace(/@[\d.]+$/, "");
+      const name = spec.replaceAll(/@[\d.]+$/g, "");
       console.log(`Scoring ${spec}...`);
       try {
         const result = scorePackage(spec, typesVersion ? { typesVersion } : undefined);
@@ -63,30 +62,24 @@ async function main() {
         });
         const domainStr = domainFitScore !== null ? ` | domainFit: ${domainFitScore}` : "";
         console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}`);
-      } catch (err) {
-        console.error(`  FAILED: ${err}`);
+      } catch (error) {
+        console.error(`  FAILED: ${error}`);
       }
     }
   }
 
   // Print ranking table
   console.log("\n=== Benchmark Results ===\n");
-  console.log("Package".padEnd(25) + "Tier".padEnd(12) + "ConsumerAPI".padEnd(14) + "AgentReady".padEnd(14) + "TypeSafety".padEnd(14) + "DomainFit".padEnd(14) + "Scenario");
+  console.log(`${"Package".padEnd(25)}${"Tier".padEnd(12)}${"ConsumerAPI".padEnd(14)}${"AgentReady".padEnd(14)}${"TypeSafety".padEnd(14)}${"DomainFit".padEnd(14)}Scenario`);
   console.log("-".repeat(107));
 
-  const sorted = entries.toSorted((a, b) => (b.consumerApi ?? 0) - (a.consumerApi ?? 0));
+  const sorted = entries.toSorted((lhs, rhs) => (rhs.consumerApi ?? 0) - (lhs.consumerApi ?? 0));
   for (const entry of sorted) {
     const scenarioStr = entry.scenarioScore
       ? `${entry.scenarioScore.score} (${entry.scenarioScore.passedScenarios}/${entry.scenarioScore.totalScenarios})`
       : "n/a";
     console.log(
-      entry.name.padEnd(25) +
-      entry.tier.padEnd(12) +
-      String(entry.consumerApi ?? "n/a").padEnd(14) +
-      String(entry.agentReadiness ?? "n/a").padEnd(14) +
-      String(entry.typeSafety ?? "n/a").padEnd(14) +
-      String(entry.domainFitScore ?? "n/a").padEnd(14) +
-      scenarioStr,
+      `${entry.name.padEnd(25)}${entry.tier.padEnd(12)}${String(entry.consumerApi ?? "n/a").padEnd(14)}${String(entry.agentReadiness ?? "n/a").padEnd(14)}${String(entry.typeSafety ?? "n/a").padEnd(14)}${String(entry.domainFitScore ?? "n/a").padEnd(14)}${scenarioStr}`,
     );
   }
 
@@ -102,16 +95,16 @@ async function main() {
   const assertionResults: {
     assertion: string;
     class: string;
-    result: "pass" | "fail" | "skip";
+    delta?: number | null;
     higherScore?: number | null;
     lowerScore?: number | null;
-    delta?: number | null;
     minDelta?: number;
+    result: "pass" | "fail" | "skip";
   }[] = [];
 
   for (const assertion of PAIRWISE_ASSERTIONS) {
-    const higher = entries.find((e) => e.name === assertion.higher);
-    const lower = entries.find((e) => e.name === assertion.lower);
+    const higher = entries.find((en) => en.name === assertion.higher);
+    const lower = entries.find((en) => en.name === assertion.lower);
 
     if (!higher || !lower) {
       console.log(`SKIP: ${assertion.higher} > ${assertion.lower} (missing data)`);
@@ -119,8 +112,8 @@ async function main() {
       continue;
     }
 
-    let higherScore: number | null;
-    let lowerScore: number | null;
+    let higherScore: number | null = undefined as unknown as number | null;
+    let lowerScore: number | null = undefined as unknown as number | null;
 
     if (assertion.composite === "consumerApi") {
       higherScore = higher.consumerApi;
@@ -138,23 +131,44 @@ async function main() {
     const passes = higherScore !== null && lowerScore !== null && higherScore > lowerScore && meetsMinDelta;
 
     if (passes) {
-      const label = assertion.class === "must-pass" ? "PASS" : assertion.class === "hard-diagnostic" ? "PASS (hard)" : `PASS (${assertion.class})`;
+      let label = `PASS (${assertion.class})`;
+      if (assertion.class === "must-pass") {
+        label = "PASS";
+      } else if (assertion.class === "hard-diagnostic") {
+        label = "PASS (hard)";
+      }
       console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
-      if (assertion.class === "must-pass") {mustPassPassed++;}
-      else if (assertion.class === "hard-diagnostic") {hardDiagPassed++;}
-      else {diagnosticPassed++;}
+      if (assertion.class === "must-pass") {
+        mustPassPassed++;
+      } else if (assertion.class === "hard-diagnostic") {
+        hardDiagPassed++;
+      } else {
+        diagnosticPassed++;
+      }
       assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "pass" });
     } else {
-      if (!meetsMinDelta && higherScore !== null && lowerScore !== null && higherScore > lowerScore) {
-        const label = assertion.class === "must-pass" ? "MARGIN" : `MARGIN (${assertion.class})`;
-        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta} [${assertion.composite}]`);
-      } else {
-        const label = assertion.class === "must-pass" ? "FAIL" : assertion.class === "hard-diagnostic" ? "FAIL (hard)" : `WARN (${assertion.class})`;
+      if (meetsMinDelta || higherScore === null || lowerScore === null || higherScore <= lowerScore) {
+        let label = `WARN (${assertion.class})`;
+        if (assertion.class === "must-pass") {
+          label = "FAIL";
+        } else if (assertion.class === "hard-diagnostic") {
+          label = "FAIL (hard)";
+        }
         console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
+      } else {
+        let label = `MARGIN (${assertion.class})`;
+        if (assertion.class === "must-pass") {
+          label = "MARGIN";
+        }
+        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta} [${assertion.composite}]`);
       }
-      if (assertion.class === "must-pass") {mustPassFailed++;}
-      else if (assertion.class === "hard-diagnostic") {hardDiagFailed++;}
-      else {diagnosticFailed++;}
+      if (assertion.class === "must-pass") {
+        mustPassFailed++;
+      } else if (assertion.class === "hard-diagnostic") {
+        hardDiagFailed++;
+      } else {
+        diagnosticFailed++;
+      }
       assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "fail" });
     }
   }
@@ -173,38 +187,38 @@ async function main() {
   }
 
   const snapshot = {
-    timestamp: new Date().toISOString(),
-    entries: entries.map((e) => ({
-      name: e.name,
-      tier: e.tier,
-      consumerApi: e.consumerApi,
-      agentReadiness: e.agentReadiness,
-      typeSafety: e.typeSafety,
-      domainFitScore: e.domainFitScore,
-      domain: e.result.domainInference?.domain ?? null,
-      dimensions: e.result.dimensions.map((d) => ({
-        key: d.key,
-        score: d.score,
-        confidence: d.confidence ?? null,
-        metrics: d.metrics,
-      })),
-      graphStats: e.result.graphStats ?? null,
-      dedupStats: e.result.dedupStats ?? null,
-      domainInference: e.result.domainInference ?? null,
-      topIssues: e.result.topIssues.slice(0, 5),
-      scenarioScore: e.scenarioScore ?? null,
-      explainability: e.result.explainability ?? null,
-      caveats: e.result.caveats,
-    })),
     assertions: assertionResults,
+    entries: entries.map((en) => ({
+      agentReadiness: en.agentReadiness,
+      caveats: en.result.caveats,
+      consumerApi: en.consumerApi,
+      dedupStats: en.result.dedupStats ?? null,
+      dimensions: en.result.dimensions.map((dim) => ({
+        confidence: dim.confidence ?? null,
+        key: dim.key,
+        metrics: dim.metrics,
+        score: dim.score,
+      })),
+      domain: en.result.domainInference?.domain ?? null,
+      domainFitScore: en.domainFitScore,
+      domainInference: en.result.domainInference ?? null,
+      explainability: en.result.explainability ?? null,
+      graphStats: en.result.graphStats ?? null,
+      name: en.name,
+      scenarioScore: en.scenarioScore ?? null,
+      tier: en.tier,
+      topIssues: en.result.topIssues.slice(0, 5),
+      typeSafety: en.typeSafety,
+    })),
     summary: {
-      mustPass: { passed: mustPassPassed, failed: mustPassFailed, total: totalMustPass },
-      hardDiagnostic: { passed: hardDiagPassed, failed: hardDiagFailed, total: totalHardDiag },
-      diagnostic: { passed: diagnosticPassed, failed: diagnosticFailed, total: totalDiagnostic },
+      diagnostic: { failed: diagnosticFailed, passed: diagnosticPassed, total: totalDiagnostic },
+      hardDiagnostic: { failed: hardDiagFailed, passed: hardDiagPassed, total: totalHardDiag },
+      mustPass: { failed: mustPassFailed, passed: mustPassPassed, total: totalMustPass },
     },
+    timestamp: new Date().toISOString(),
   };
 
-  const filename = new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+  const filename = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
   writeFileSync(join(resultsDir, filename), JSON.stringify(snapshot, null, 2));
   console.log(`\nResults saved to benchmarks/results/${filename}`);
 

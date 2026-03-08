@@ -1,6 +1,6 @@
-import { dirname, join, resolve } from "node:path";
-import type { Project, SourceFile } from "ts-morph";
 import type { GraphNode, ResolvedEntrypoint } from "./types.js";
+import type { Project, SourceFile } from "ts-morph";
+import { dirname, resolve } from "node:path";
 
 /**
  * Walk the declaration import graph via BFS from resolved entrypoints.
@@ -31,7 +31,12 @@ export function walkDeclarationGraph(
       continue;
     }
 
-    if (!nodes.has(absPath)) {
+    if (nodes.has(absPath)) {
+      const existing = nodes.get(absPath)!;
+      if (!existing.reachableFrom.includes(ep.subpath)) {
+        existing.reachableFrom.push(ep.subpath);
+      }
+    } else {
       nodes.set(absPath, {
         depth: 0,
         filePath: absPath,
@@ -39,11 +44,6 @@ export function walkDeclarationGraph(
         reachableFrom: [ep.subpath],
       });
       queue.push({ depth: 0, filePath: absPath, subpath: ep.subpath });
-    } else {
-      const existing = nodes.get(absPath)!;
-      if (!existing.reachableFrom.includes(ep.subpath)) {
-        existing.reachableFrom.push(ep.subpath);
-      }
     }
   }
 
@@ -62,15 +62,7 @@ export function walkDeclarationGraph(
     const referencedFiles = collectAllReferences(sf, project, normalizedPkgDir);
 
     for (const refPath of referencedFiles) {
-      if (!nodes.has(refPath)) {
-        nodes.set(refPath, {
-          depth: depth + 1,
-          filePath: refPath,
-          isEntrypoint: false,
-          reachableFrom: [subpath],
-        });
-        queue.push({ depth: depth + 1, filePath: refPath, subpath });
-      } else {
+      if (nodes.has(refPath)) {
         const existing = nodes.get(refPath)!;
         if (!existing.reachableFrom.includes(subpath)) {
           existing.reachableFrom.push(subpath);
@@ -78,6 +70,14 @@ export function walkDeclarationGraph(
         if (depth + 1 < existing.depth) {
           existing.depth = depth + 1;
         }
+      } else {
+        nodes.set(refPath, {
+          depth: depth + 1,
+          filePath: refPath,
+          isEntrypoint: false,
+          reachableFrom: [subpath],
+        });
+        queue.push({ depth: depth + 1, filePath: refPath, subpath });
       }
     }
   }

@@ -1,5 +1,5 @@
-import type { Project } from "ts-morph";
 import type { DedupGroup, GraphNode, ResolvedEntrypoint } from "./types.js";
+import type { Project } from "ts-morph";
 
 /**
  * Multi-level deduplication of declaration files.
@@ -25,7 +25,7 @@ export function deduplicateGraph(
       continue;
     }
     const canonical = pickCanonicalByStem(paths);
-    const duplicates = paths.filter((p) => p !== canonical);
+    const duplicates = paths.filter((fp) => fp !== canonical);
     if (duplicates.length > 0) {
       groups.push({ canonical, duplicates, reason: "stem" });
       for (const dup of duplicates) {
@@ -35,14 +35,14 @@ export function deduplicateGraph(
   }
 
   // Level 2: Symbol-hash dedup (only on files surviving level 1)
-  const surviving = [...nodes.keys()].filter((p) => !filesToRemove.has(p));
+  const surviving = [...nodes.keys()].filter((fp) => !filesToRemove.has(fp));
   const hashGroups = groupBySymbolHash(surviving, project);
   for (const [_hash, paths] of hashGroups) {
     if (paths.length <= 1) {
       continue;
     }
     const canonical = pickCanonicalByDepth(paths, nodes);
-    const duplicates = paths.filter((p) => p !== canonical);
+    const duplicates = paths.filter((fp) => fp !== canonical);
     if (duplicates.length > 0) {
       groups.push({ canonical, duplicates, reason: "symbol-hash" });
       for (const dup of duplicates) {
@@ -57,19 +57,24 @@ export function deduplicateGraph(
     if (eps.length <= 1) {
       continue;
     }
-    // Multiple entrypoints for the same subpath → keep only one graph branch
-    const epPaths = eps.map((ep) => ep.filePath).filter((p) => !filesToRemove.has(p));
+    // Multiple entrypoints for the same subpath -> keep only one graph branch
+    const epPaths = eps.map((ep) => ep.filePath).filter((fp) => !filesToRemove.has(fp));
     if (epPaths.length <= 1) {
       continue;
     }
 
     const canonical = pickCanonicalByDepth(epPaths, nodes);
-    const duplicateEntrypoints = epPaths.filter((p) => p !== canonical);
+    const duplicateEntrypoints = epPaths.filter((fp) => fp !== canonical);
 
     // Remove duplicate entrypoints and files reachable ONLY from them
     for (const dupEp of duplicateEntrypoints) {
       if (!filesToRemove.has(dupEp)) {
-        const reachable = findExclusivelyReachable(dupEp, canonical, nodes, filesToRemove);
+        const reachable = findExclusivelyReachable({
+          alreadyRemoved: filesToRemove,
+          canonicalEntrypoint: canonical,
+          dupEntrypoint: dupEp,
+          nodes,
+        });
         const allDups = [dupEp, ...reachable];
         groups.push({ canonical, duplicates: allDups, reason: "exports-identity" });
         for (const dup of allDups) {
@@ -86,13 +91,13 @@ export function deduplicateGraph(
 
 function groupByStem(paths: string[]): Map<string, string[]> {
   const groups = new Map<string, string[]>();
-  for (const p of paths) {
-    const stem = normalizeStem(p);
+  for (const fp of paths) {
+    const stem = normalizeStem(fp);
     const group = groups.get(stem);
     if (group) {
-      group.push(p);
+      group.push(fp);
     } else {
-      groups.set(stem, [p]);
+      groups.set(stem, [fp]);
     }
   }
   return groups;
@@ -108,20 +113,20 @@ function normalizeStem(path: string): string {
 
 function pickCanonicalByStem(paths: string[]): string {
   // Prefer .d.ts over .d.mts/.d.cts
-  const dts = paths.find((p) => p.endsWith(".d.ts"));
+  const dts = paths.find((fp) => fp.endsWith(".d.ts"));
   if (dts) {
     return dts;
   }
   // Prefer shorter path
-  return paths.toSorted((a, b) => a.length - b.length)[0]!;
+  return paths.toSorted((lhs, rhs) => lhs.length - rhs.length)[0]!;
 }
 
 // --- Level 2: Symbol hash ---
 
 function groupBySymbolHash(paths: string[], project: Project): Map<string, string[]> {
   const groups = new Map<string, string[]>();
-  for (const p of paths) {
-    const sf = project.getSourceFile(p);
+  for (const fp of paths) {
+    const sf = project.getSourceFile(fp);
     if (!sf) {
       continue;
     }
@@ -140,9 +145,9 @@ function groupBySymbolHash(paths: string[], project: Project): Map<string, strin
 
     const group = groups.get(hash);
     if (group) {
-      group.push(p);
+      group.push(fp);
     } else {
-      groups.set(hash, [p]);
+      groups.set(hash, [fp]);
     }
   }
   return groups;
@@ -165,21 +170,24 @@ function groupEntrypointsBySubpath(
   return groups;
 }
 
+interface ExclusivelyReachableOpts {
+  dupEntrypoint: string;
+  canonicalEntrypoint: string;
+  nodes: Map<string, GraphNode>;
+  alreadyRemoved: Set<string>;
+}
+
 /**
  * Find files reachable from dupEntrypoint but NOT from canonicalEntrypoint
  * (and not already removed).
  */
-function findExclusivelyReachable(
-  dupEntrypoint: string,
-  canonicalEntrypoint: string,
-  nodes: Map<string, GraphNode>,
-  alreadyRemoved: Set<string>,
-): string[] {
+function findExclusivelyReachable(opts: ExclusivelyReachableOpts): string[] {
+  const { dupEntrypoint, canonicalEntrypoint, nodes, alreadyRemoved } = opts;
   const exclusive: string[] = [];
 
   // Get canonical entrypoint's reachable subpaths
   const canonicalNode = nodes.get(canonicalEntrypoint);
-  const canonicalSubpaths = new Set(canonicalNode?.reachableFrom ?? []);
+  const canonicalSubpaths = new Set(canonicalNode?.reachableFrom);
 
   for (const [path, node] of nodes) {
     if (path === dupEntrypoint || path === canonicalEntrypoint) {
@@ -197,7 +205,7 @@ function findExclusivelyReachable(
 
     // Also check: is this file ONLY reachable from subpaths that the dup entrypoint serves?
     const dupNode = nodes.get(dupEntrypoint);
-    const dupSubpaths = new Set(dupNode?.reachableFrom ?? []);
+    const dupSubpaths = new Set(dupNode?.reachableFrom);
     const reachableFromDupSubpaths = node.reachableFrom.some((subpath) => dupSubpaths.has(subpath));
 
     if (reachableOnlyFromDup && reachableFromDupSubpaths) {
@@ -212,9 +220,9 @@ function findExclusivelyReachable(
 
 function pickCanonicalByDepth(paths: string[], nodes: Map<string, GraphNode>): string {
   // Prefer entrypoint files, then shallower depth, then .d.ts, then shorter path
-  return paths.toSorted((a, b) => {
-    const nodeA = nodes.get(a);
-    const nodeB = nodes.get(b);
+  return paths.toSorted((lhs, rhs) => {
+    const nodeA = nodes.get(lhs);
+    const nodeB = nodes.get(rhs);
 
     // Entrypoints first
     if (nodeA?.isEntrypoint && !nodeB?.isEntrypoint) {
@@ -232,13 +240,13 @@ function pickCanonicalByDepth(paths: string[], nodes: Map<string, GraphNode>): s
     }
 
     // Prefer .d.ts
-    if (a.endsWith(".d.ts") && !b.endsWith(".d.ts")) {
+    if (lhs.endsWith(".d.ts") && !rhs.endsWith(".d.ts")) {
       return -1;
     }
-    if (!a.endsWith(".d.ts") && b.endsWith(".d.ts")) {
+    if (!lhs.endsWith(".d.ts") && rhs.endsWith(".d.ts")) {
       return 1;
     }
 
-    return a.length - b.length;
+    return lhs.length - rhs.length;
   })[0]!;
 }

@@ -1,7 +1,7 @@
-import { Node, type Type, TypeFlags } from "ts-morph";
 import type { ConfidenceSignal, DimensionResult, Issue } from "../types.js";
-import { DIMENSION_CONFIGS } from "../constants.js";
+import { Node, type Type, TypeFlags } from "ts-morph";
 import type { PublicSurface, SurfaceDeclaration, SurfacePosition } from "../surface/index.js";
+import { DIMENSION_CONFIGS } from "../constants.js";
 import { analyzePrecision } from "../utils/type-utils.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSpecificity")!;
@@ -68,7 +68,7 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
   for (const decl of surface.declarations) {
     switch (decl.kind) {
       case "function": {
-        collectFunctionSamples(decl, samples, issues, overloadStats, relationStats);
+        collectFunctionSamples({ decl, issues, overloadStats, relationStats, samples });
         break;
       }
       case "interface": {
@@ -159,7 +159,7 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
   }
 
   // Penalty: any leakage in containers
-  const anyContainers = samples.filter((s) => s.containsAny).length;
+  const anyContainers = samples.filter((sample) => sample.containsAny).length;
   if (anyContainers > 0) {
     score -= Math.min(anyContainers * 4, 20);
   }
@@ -179,15 +179,24 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
   }
 
   // Penalty: low-return-value
-  const returnSamples = surface.declarations
-    .filter((d) => d.kind === "function" || d.kind === "class")
-    .flatMap((d) => {
-      const returns = d.positions.filter((p) => p.role === "return");
-      const methodReturns = (d.methods ?? []).flatMap((m) =>
-        m.positions.filter((p) => p.role === "return"),
-      );
-      return [...returns, ...methodReturns];
-    });
+  const returnSamples: SurfacePosition[] = [];
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "function" && decl.kind !== "class") {
+      continue;
+    }
+    for (const pos of decl.positions) {
+      if (pos.role === "return") {
+        returnSamples.push(pos);
+      }
+    }
+    for (const mt of decl.methods ?? []) {
+      for (const pos of mt.positions) {
+        if (pos.role === "return") {
+          returnSamples.push(pos);
+        }
+      }
+    }
+  }
   if (returnSamples.length > 0) {
     const voidOrAnyReturns = returnSamples.filter((pos) => {
       const flags = pos.type.getFlags();
@@ -267,9 +276,9 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
   positives.push(`${samples.length} exported type positions analyzed`);
   if (featureDensityRatio > 0.3) {
     const topFeatures = [...featureDensities.entries()]
-      .toSorted((a, b) => b[1] - a[1])
+      .toSorted((lhs, rhs) => rhs[1] - lhs[1])
       .slice(0, 5)
-      .map(([f, c]) => `${f}(${c})`);
+      .map(([feat, cnt]) => `${feat}(${cnt})`);
     positives.push(`Feature density: ${topFeatures.join(", ")}`);
   }
   if (relationStats.correlatedGenericCount > 0) {
@@ -316,13 +325,16 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
 
 // --- Collectors ---
 
-function collectFunctionSamples(
-  decl: SurfaceDeclaration,
-  samples: WeightedSample[],
-  issues: Issue[],
-  overloadStats: OverloadStats,
-  relationStats: RelationStats,
-): void {
+interface CollectFunctionSamplesOpts {
+  decl: SurfaceDeclaration;
+  samples: WeightedSample[];
+  issues: Issue[];
+  overloadStats: OverloadStats;
+  relationStats: RelationStats;
+}
+
+function collectFunctionSamples(opts: CollectFunctionSamplesOpts): void {
+  const { decl, samples, issues, overloadStats, relationStats } = opts;
   const declSamples: WeightedSample[] = [];
   let samplesFromDecl = 0;
   for (const pos of decl.positions) {
@@ -355,54 +367,21 @@ function collectFunctionSamples(
   }
 
   // Escape-hatch overload detection
-  if ((decl.overloadCount ?? 0) > 0) {
-    const fnNode = decl.node;
-    if (Node.isFunctionDeclaration(fnNode)) {
-      const overloads = fnNode.getOverloads();
-      if (overloads.length > 0) {
-        const lastOverload = overloads.at(-1)!;
-        const lastParams = lastOverload.getParameters();
-        const allParamsAny =
-          lastParams.length > 0 && lastParams.every((p) => p.getType().getFlags() & TypeFlags.Any);
-        const returnIsAny = lastOverload.getReturnType().getFlags() & TypeFlags.Any;
-        if (allParamsAny || returnIsAny) {
-          overloadStats.escapeHatchCount++;
-          for (const s of declSamples) {
-            s.score = Math.max(0, s.score - 8);
-          }
-        }
-
-        // Broad fallback overload detection
-        const implParams = fnNode.getParameters();
-        const hasWiderImpl = implParams.some((implP) => {
-          const implFlags = implP.getType().getFlags();
-          return Boolean(implFlags & (TypeFlags.Any | TypeFlags.Unknown));
-        });
-        if (hasWiderImpl && !allParamsAny && !returnIsAny) {
-          overloadStats.broadFallbackCount++;
-          for (const s of declSamples) {
-            s.score = Math.max(0, s.score - 5);
-          }
-        }
-      }
-    }
-  }
+  detectOverloadPenalties(decl, declSamples, overloadStats);
 
   // Correlated generic I/O bonus
   const correlatedBonus = computeCorrelatedGenericBonus(decl);
   if (correlatedBonus > 0) {
     relationStats.correlatedGenericCount++;
-    for (const s of declSamples) {
-      s.score = Math.min(100, s.score + correlatedBonus);
+    for (const ds of declSamples) {
+      ds.score = Math.min(100, ds.score + correlatedBonus);
     }
   }
 
   // Detect catch-all object bag params (Record<string, any> or {[key: string]: any})
   for (const pos of decl.positions) {
-    if (pos.role === "param") {
-      if (isCatchAllObjectBag(pos.type)) {
-        relationStats.catchAllBagCount++;
-      }
+    if (pos.role === "param" && isCatchAllObjectBag(pos.type)) {
+      relationStats.catchAllBagCount++;
     }
   }
 
@@ -451,7 +430,7 @@ function collectClassSamples(
   samples: WeightedSample[],
   relationStats: RelationStats,
 ): void {
-  const ctorPositions = decl.positions.filter((p) => p.role === "ctor-param");
+  const ctorPositions = decl.positions.filter((pos) => pos.role === "ctor-param");
   collectCappedPositionSamples(ctorPositions, samples);
 
   for (const method of decl.methods ?? []) {
@@ -460,7 +439,7 @@ function collectClassSamples(
     // Detect correlated generic I/O in class methods
     if (method.typeParameters.length > 0) {
       const typeParamNames = method.typeParameters.map((tp) => tp.name);
-      const paramTexts = method.paramTypeNodes.map((p) => p.typeNode?.getText() ?? "").join(" ");
+      const paramTexts = method.paramTypeNodes.map((pt) => pt.typeNode?.getText() ?? "").join(" ");
       const returnText = method.returnTypeNode?.getText() ?? "";
 
       const hasCorrelation = typeParamNames.some(
@@ -473,7 +452,7 @@ function collectClassSamples(
   }
 
   const otherPositions = decl.positions.filter(
-    (p) => p.role === "property" || p.role === "getter" || p.role === "setter-param",
+    (pos) => pos.role === "property" || pos.role === "getter" || pos.role === "setter-param",
   );
   collectAllPositionSamples(otherPositions, samples);
 }
@@ -505,6 +484,49 @@ function collectVariableSamples(
   }
 }
 
+function detectOverloadPenalties(
+  decl: SurfaceDeclaration,
+  declSamples: WeightedSample[],
+  overloadStats: OverloadStats,
+): void {
+  if ((decl.overloadCount ?? 0) <= 0) {
+    return;
+  }
+  const fnNode = decl.node;
+  if (!Node.isFunctionDeclaration(fnNode)) {
+    return;
+  }
+  const overloads = fnNode.getOverloads();
+  if (overloads.length === 0) {
+    return;
+  }
+
+  const lastOverload = overloads.at(-1)!;
+  const lastParams = lastOverload.getParameters();
+  const allParamsAny =
+    lastParams.length > 0 && lastParams.every((pm) => pm.getType().getFlags() & TypeFlags.Any);
+  const returnIsAny = lastOverload.getReturnType().getFlags() & TypeFlags.Any;
+  if (allParamsAny || returnIsAny) {
+    overloadStats.escapeHatchCount++;
+    for (const ds of declSamples) {
+      ds.score = Math.max(0, ds.score - 8);
+    }
+  }
+
+  // Broad fallback overload detection
+  const implParams = fnNode.getParameters();
+  const hasWiderImpl = implParams.some((implP) => {
+    const implFlags = implP.getType().getFlags();
+    return Boolean(implFlags & (TypeFlags.Any | TypeFlags.Unknown));
+  });
+  if (hasWiderImpl && !allParamsAny && !returnIsAny) {
+    overloadStats.broadFallbackCount++;
+    for (const ds of declSamples) {
+      ds.score = Math.max(0, ds.score - 5);
+    }
+  }
+}
+
 // --- Relation-aware detection helpers ---
 
 /**
@@ -516,8 +538,8 @@ function computeCorrelatedGenericBonus(decl: SurfaceDeclaration): number {
     return 0;
   }
 
-  const paramPositions = decl.positions.filter((p) => p.role === "param");
-  const returnPositions = decl.positions.filter((p) => p.role === "return");
+  const paramPositions = decl.positions.filter((pos) => pos.role === "param");
+  const returnPositions = decl.positions.filter((pos) => pos.role === "return");
   if (paramPositions.length === 0 || returnPositions.length === 0) {
     return 0;
   }
@@ -525,8 +547,8 @@ function computeCorrelatedGenericBonus(decl: SurfaceDeclaration): number {
   let correlatedCount = 0;
   for (const tp of decl.typeParameters) {
     const tpName = tp.name;
-    const inInput = paramPositions.some((p) => typeTextContainsParam(p.type, tpName));
-    const inOutput = returnPositions.some((p) => typeTextContainsParam(p.type, tpName));
+    const inInput = paramPositions.some((pos) => typeTextContainsParam(pos.type, tpName));
+    const inOutput = returnPositions.some((pos) => typeTextContainsParam(pos.type, tpName));
     if (inInput && inOutput) {
       correlatedCount++;
     }
@@ -566,8 +588,8 @@ function detectPathParamInference(decl: SurfaceDeclaration, stats: RelationStats
     // Template literal constraint like `/${string}` or containing template literal syntax
     if (constraintText.includes("`") || constraintText.includes("template-literal")) {
       // Check if it flows to output
-      const returnPositions = decl.positions.filter((p) => p.role === "return");
-      const inOutput = returnPositions.some((p) => typeTextContainsParam(p.type, tp.name));
+      const returnPositions = decl.positions.filter((pos) => pos.role === "return");
+      const inOutput = returnPositions.some((pos) => typeTextContainsParam(pos.type, tp.name));
       if (inOutput) {
         stats.pathParamInference++;
       }
@@ -575,8 +597,8 @@ function detectPathParamInference(decl: SurfaceDeclaration, stats: RelationStats
   }
 
   // Also detect string template patterns in param type nodes
-  for (const ptNode of decl.paramTypeNodes ?? []) {
-    const text = ptNode.typeNode?.getText() ?? "";
+  for (const paramNode of decl.paramTypeNodes ?? []) {
+    const text = paramNode.typeNode?.getText() ?? "";
     if (text.includes("`") && text.includes("${")) {
       stats.pathParamInference++;
     }
@@ -596,10 +618,8 @@ function detectTypeAliasRelations(decl: SurfaceDeclaration, stats: RelationStats
   }
 
   // Latent discriminants: generic output with discriminant properties (type/kind/tag)
-  if (decl.typeParameters.length > 0 && /\|\s*\{/.test(bodyText)) {
-    if (/["']?(type|kind|tag|_tag|status)["']?\s*:/.test(bodyText)) {
-      stats.latentDiscriminantCount++;
-    }
+  if (decl.typeParameters.length > 0 && /\|\s*\{/.test(bodyText) && /["']?(type|kind|tag|_tag|status)["']?\s*:/.test(bodyText)) {
+    stats.latentDiscriminantCount++;
   }
 
   // Instantiated specificity potential: constrained generics with complex output
@@ -630,7 +650,7 @@ function detectInterfaceRelations(decl: SurfaceDeclaration, stats: RelationStats
   if (decl.typeParameters.length > 0) {
     for (const method of decl.methods ?? []) {
       if (method.typeParameters.length > 0) {
-        const paramTexts = method.paramTypeNodes.map((p) => p.typeNode?.getText() ?? "").join(" ");
+        const paramTexts = method.paramTypeNodes.map((pt) => pt.typeNode?.getText() ?? "").join(" ");
         const returnText = method.returnTypeNode?.getText() ?? "";
         // If method param includes keyof and return preserves the key type
         if (paramTexts.includes("keyof") && returnText.includes("keyof")) {

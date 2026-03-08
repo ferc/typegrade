@@ -166,7 +166,7 @@ describe(computeComposites, () => {
       }),
     ];
     const composites = computeComposites(dims, "package");
-    const keys = composites.map((c) => c.key);
+    const keys = composites.map((comp) => comp.key);
     expect(keys).toContain("consumerApi");
     expect(keys).toContain("agentReadiness");
     expect(keys).toContain("typeSafety");

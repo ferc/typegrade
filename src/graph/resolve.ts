@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ResolvedEntrypoint } from "./types.js";
+import { join } from "node:path";
 
 /**
  * Resolve all declaration entrypoints from a package directory.
@@ -12,7 +12,7 @@ export function resolveEntrypoints(pkgDir: string): ResolvedEntrypoint[] {
     return [];
   }
 
-  let pkg: Record<string, unknown>;
+  let pkg: Record<string, unknown> = undefined as unknown as Record<string, unknown>;
   try {
     pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
   } catch {
@@ -35,18 +35,26 @@ export function resolveEntrypoints(pkgDir: string): ResolvedEntrypoint[] {
   // Check exports field
   const exports = pkg.exports as Record<string, unknown> | undefined;
   if (exports && typeof exports === "object") {
-    collectExportsEntrypoints(exports, pkgDir, entrypoints, ".");
+    collectExportsEntrypoints({
+      currentSubpath: ".",
+      entrypoints,
+      exports,
+      pkgDir,
+    });
   }
 
   return entrypoints;
 }
 
-function collectExportsEntrypoints(
-  exports: Record<string, unknown>,
-  pkgDir: string,
-  entrypoints: ResolvedEntrypoint[],
-  currentSubpath: string,
-): void {
+interface CollectExportsOpts {
+  exports: Record<string, unknown>;
+  pkgDir: string;
+  entrypoints: ResolvedEntrypoint[];
+  currentSubpath: string;
+}
+
+function collectExportsEntrypoints(opts: CollectExportsOpts): void {
+  const { exports, pkgDir, entrypoints, currentSubpath } = opts;
   for (const [key, value] of Object.entries(exports)) {
     if (key === "types" && typeof value === "string") {
       // Direct types condition
@@ -60,7 +68,12 @@ function collectExportsEntrypoints(
       }
     } else if (key.startsWith(".") && value && typeof value === "object" && !Array.isArray(value)) {
       // Subpath export like "./utils" or "."
-      collectExportsEntrypoints(value as Record<string, unknown>, pkgDir, entrypoints, key);
+      collectExportsEntrypoints({
+        currentSubpath: key,
+        entrypoints,
+        exports: value as Record<string, unknown>,
+        pkgDir,
+      });
     } else if (
       !key.startsWith(".") &&
       value &&
@@ -68,12 +81,12 @@ function collectExportsEntrypoints(
       !Array.isArray(value)
     ) {
       // Condition like "import", "require", "default"
-      collectExportsEntrypoints(
-        value as Record<string, unknown>,
-        pkgDir,
-        entrypoints,
+      collectExportsEntrypoints({
         currentSubpath,
-      );
+        entrypoints,
+        exports: value as Record<string, unknown>,
+        pkgDir,
+      });
     }
   }
 }

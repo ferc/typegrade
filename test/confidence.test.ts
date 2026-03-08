@@ -1,5 +1,5 @@
-import { computeComposites } from "../src/scorer.js";
 import type { DimensionResult } from "../src/types.js";
+import { computeComposites } from "../src/scorer.js";
 
 function makeDim(opts: {
   key: string;
@@ -33,7 +33,7 @@ describe("confidence signal propagation", () => {
       makeDim({ confidence: 0.5, key: "b", label: "B", score: 60, weights: { consumerApi: 0.5 } }),
     ];
     const composites = computeComposites(dims, "source");
-    const ca = composites.find((c) => c.key === "consumerApi");
+    const ca = composites.find((comp) => comp.key === "consumerApi");
     // Weighted: 0.6 * min(0.5) + 0.4 * avg(0.75) = 0.3 + 0.3 = 0.6
     expect(ca!.confidence).toBe(0.6);
   });
@@ -44,7 +44,7 @@ describe("confidence signal propagation", () => {
       makeDim({ key: "b", label: "B", score: 60, weights: { consumerApi: 0.5 } }),
     ];
     const composites = computeComposites(dims, "source");
-    const ca = composites.find((c) => c.key === "consumerApi");
+    const ca = composites.find((comp) => comp.key === "consumerApi");
     expect(ca!.confidence).toBe(0.8);
   });
 
@@ -53,7 +53,7 @@ describe("confidence signal propagation", () => {
       makeDim({ confidence: 0.3, key: "a", label: "A", score: 80, weights: { consumerApi: 1 } }),
     ];
     const composites = computeComposites(dims, "source");
-    const ca = composites.find((c) => c.key === "consumerApi");
+    const ca = composites.find((comp) => comp.key === "consumerApi");
     // 0.6 * 0.3 + 0.4 * 0.3 = 0.3
     expect(ca!.confidence).toBe(0.3);
   });
@@ -74,7 +74,7 @@ describe("confidence signal propagation", () => {
 
   it("min confidence is 0 for empty dimensions", () => {
     const composites = computeComposites([], "source");
-    const ca = composites.find((c) => c.key === "consumerApi");
+    const ca = composites.find((comp) => comp.key === "consumerApi");
     expect(ca!.confidence).toBeUndefined();
     expect(ca!.score).toBe(0);
   });
@@ -85,9 +85,9 @@ describe("confidence signal propagation", () => {
       makeDim({ confidence: 0.5, key: "b", label: "B", score: 60, weights: { consumerApi: 0.5 } }),
     ];
     const composites = computeComposites(dims, "source");
-    const ca = composites.find((c) => c.key === "consumerApi");
+    const ca = composites.find((comp) => comp.key === "consumerApi");
     expect(ca!.compositeConfidenceReasons).toBeDefined();
     expect(ca!.compositeConfidenceReasons!.length).toBeGreaterThan(0);
-    expect(ca!.compositeConfidenceReasons!.some((r) => r.includes("Bottleneck"))).toBeTruthy();
+    expect(ca!.compositeConfidenceReasons!.some((reason) => reason.includes("Bottleneck"))).toBeTruthy();
   });
 });

@@ -1,6 +1,6 @@
 import type { DimensionResult, Issue } from "../types.js";
-import { DIMENSION_CONFIGS } from "../constants.js";
 import type { PublicSurface, SurfacePosition } from "../surface/index.js";
+import { DIMENSION_CONFIGS } from "../constants.js";
 import { analyzePrecision } from "../utils/type-utils.js";
 import { detectDomain } from "../domain.js";
 
@@ -97,7 +97,7 @@ function pushAnyIssue(pos: SurfacePosition, issues: Issue[]): void {
     return;
   }
 
-  let message: string;
+  let message: string = undefined as unknown as string;
   if (pos.role === "param" && pos.declarationKind === "function") {
     message = `parameter '${pos.name}' in ${pos.declarationName}() leaks 'any'`;
   } else if (pos.role === "return") {

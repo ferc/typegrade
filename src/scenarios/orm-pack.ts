@@ -2,8 +2,15 @@ import type { ScenarioPack, ScenarioTest } from "./types.js";
 import type { PublicSurface } from "../surface/index.js";
 import type { ScenarioResult } from "../types.js";
 
-function makeResult(name: string, passed: boolean, score: number, reason: string): ScenarioResult {
-  return { name, passed, reason, score };
+interface MakeResultOpts {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+function makeResult(opts: MakeResultOpts): ScenarioResult {
+  return { name: opts.name, passed: opts.passed, reason: opts.reason, score: opts.score };
 }
 
 const schemaToQueryInference: ScenarioTest = {
@@ -49,14 +56,9 @@ const schemaToQueryInference: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "schemaToQueryInference",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "schemaToQueryInference", passed: passed, reason: passed
         ? `${schemaDecls} schema defs, ${genericQueryDecls} generic queries`
-        : "Limited schema-to-query type flow",
-    );
+        : "Limited schema-to-query type flow", score: score });
   },
   name: "schemaToQueryInference",
 };
@@ -83,7 +85,7 @@ const joinPrecision: ScenarioTest = {
     }
 
     if (joinDecls === 0) {
-      return makeResult("joinPrecision", false, 30, "No join declarations found");
+      return makeResult({ name: "joinPrecision", passed: false, reason: "No join declarations found", score: 30 });
     }
     if (genericJoins > 0) {
       score += 50;
@@ -94,14 +96,9 @@ const joinPrecision: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "joinPrecision",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "joinPrecision", passed: passed, reason: passed
         ? `${genericJoins}/${joinDecls} joins preserve types`
-        : "Join results lack type precision",
-    );
+        : "Join results lack type precision", score: score });
   },
   name: "joinPrecision",
 };
@@ -134,7 +131,7 @@ const columnNarrowing: ScenarioTest = {
     }
 
     if (selectDecls === 0) {
-      return makeResult("columnNarrowing", false, 25, "No select/column declarations found");
+      return makeResult({ name: "columnNarrowing", passed: false, reason: "No select/column declarations found", score: 25 });
     }
     if (selectDecls >= 2) {
       score += 15;
@@ -142,14 +139,9 @@ const columnNarrowing: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "columnNarrowing",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "columnNarrowing", passed: passed, reason: passed
         ? `${selectDecls} column selection patterns`
-        : "Select operations lack column narrowing",
-    );
+        : "Select operations lack column narrowing", score: score });
   },
   name: "columnNarrowing",
 };

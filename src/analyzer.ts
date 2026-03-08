@@ -1,16 +1,22 @@
 import type {
   AnalysisMode,
   AnalysisResult,
+  CompositeScore,
   DimensionResult,
+  DomainKey,
   DomainScore,
   ExplainabilityReport,
   GlobalScores,
   Issue,
   PackageAnalysisContext,
+  ScenarioScore,
   ScoreComparability,
 } from "./types.js";
+import { type DomainType, detectDomain } from "./domain.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
+import { computeComposites, computeGrade } from "./scorer.js";
+import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
 import { Project } from "ts-morph";
 import { analyzeAgentUsability } from "./analyzers/agent-usability.js";
 import { analyzeApiSafety } from "./analyzers/api-safety.js";
@@ -23,12 +29,9 @@ import { analyzePublishQuality } from "./analyzers/publish-quality.js";
 import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
-import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
-import { type DomainType, detectDomain } from "./domain.js";
-import { computeComposites, computeGrade } from "./scorer.js";
-import { getScenarioPack } from "./scenarios/index.js";
 import { evaluateScenarioPack } from "./scenarios/types.js";
 import { extractPublicSurface } from "./surface/index.js";
+import { getScenarioPack } from "./scenarios/index.js";
 
 export interface AnalyzeOptions {
   sourceFilesOptions?: GetSourceFilesOptions;
@@ -179,7 +182,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         key,
         label: key
           .replaceAll(/([A-Z])/g, " $1")
-          .replace(/^./, (c) => c.toUpperCase())
+          .replace(/^./, (ch) => ch.toUpperCase())
           .trim(),
         metrics: {},
         negatives: [],
@@ -193,11 +196,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Apply confidence penalty when source-mode consumer analysis fell back to raw source files
   if (usingSourceFallback) {
     for (const dim of dimensions) {
-      if (dim.confidence === undefined) {
-        dim.confidence = 0.6;
-      } else {
-        dim.confidence = Math.min(dim.confidence, 0.6);
-      }
+      dim.confidence = dim.confidence === undefined
+        ? 0.6
+        : Math.min(dim.confidence, 0.6);
       dim.confidenceSignals = dim.confidenceSignals ?? [];
       dim.confidenceSignals.push({
         reason: "Consumer analysis using raw source files instead of declarations",
@@ -217,7 +218,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const globalScores = buildGlobalScores(composites);
 
   // Compute domainFitScore if domain was detected with sufficient confidence
-  let domainScore: DomainScore | undefined;
+  let domainScore: DomainScore | undefined = undefined;
   let scoreComparability: ScoreComparability = "global";
   if (
     domainInference.domain !== "general" &&
@@ -234,13 +235,13 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
 
   // Run scenario pack if domain was detected with sufficient confidence
-  let scenarioScore: import("./types.js").ScenarioScore | undefined;
+  let scenarioScore: ScenarioScore | undefined = undefined;
   if (
     domainInference.domain !== "general" &&
     domainInference.confidence >= 0.5 &&
     domainOpt !== "off"
   ) {
-    const pack = getScenarioPack(domainInference.domain as import("./types.js").DomainKey);
+    const pack = getScenarioPack(domainInference.domain as DomainKey);
     if (pack) {
       scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
     }
@@ -283,17 +284,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     const gs = options.packageContext.graphStats;
     result.dedupStats = {
       filesRemoved: gs.filesDeduped,
-      groups: Object.values(gs.dedupByStrategy).reduce((a, b) => a + b, 0),
+      groups: Object.values(gs.dedupByStrategy).reduce((acc, val) => acc + val, 0),
     };
   }
 
   return result;
 }
 
-function buildGlobalScores(composites: import("./types.js").CompositeScore[]): GlobalScores {
-  const consumerApi = composites.find((c) => c.key === "consumerApi")!;
-  const agentReadiness = composites.find((c) => c.key === "agentReadiness")!;
-  const typeSafety = composites.find((c) => c.key === "typeSafety")!;
+function buildGlobalScores(composites: CompositeScore[]): GlobalScores {
+  const consumerApi = composites.find((comp) => comp.key === "consumerApi")!;
+  const agentReadiness = composites.find((comp) => comp.key === "agentReadiness")!;
+  const typeSafety = composites.find((comp) => comp.key === "typeSafety")!;
   return { agentReadiness, consumerApi, typeSafety };
 }
 
@@ -328,7 +329,7 @@ function computeDomainScore(
     }
 
     // Apply domain-specific weight multiplier
-    const adj = domainAdj.find((a) => a.dimension === dim.key);
+    const adj = domainAdj.find((item) => item.dimension === dim.key);
     const multiplier = adj?.weight ?? 1;
     const adjustedWeight = baseWeight * multiplier;
 
@@ -351,7 +352,7 @@ function computeDomainScore(
   return {
     adjustments,
     confidence: domainConfidence,
-    domain: domain as import("./types.js").DomainKey,
+    domain: domain as DomainKey,
     grade: computeGrade(score),
     score,
   };
@@ -370,46 +371,46 @@ function buildExplainability(
   },
 ): ExplainabilityReport {
   // Lowest specificity: issues from apiSpecificity
-  const specDim = dimensions.find((d) => d.key === "apiSpecificity");
+  const specDim = dimensions.find((dim) => dim.key === "apiSpecificity");
   const lowestSpecificity = (specDim?.issues ?? [])
-    .filter((i) => i.severity === "error" || i.severity === "warning")
+    .filter((iss) => iss.severity === "error" || iss.severity === "warning")
     .slice(0, 10)
-    .map((i) => ({
-      file: i.file,
-      line: i.line,
-      name: i.message,
+    .map((iss) => ({
+      file: iss.file,
+      line: iss.line,
+      name: iss.message,
       score: 0,
     }));
 
   // Highest specificity: from apiSpecificity positives
-  const highestSpecificity = (specDim?.positives ?? []).slice(0, 10).map((p) => ({
-    name: p,
+  const highestSpecificity = (specDim?.positives ?? []).slice(0, 10).map((pos) => ({
+    name: pos,
     score: specDim?.score ?? 0,
   }));
 
   // Highest lift: from semantic lift positives
-  const liftDim = dimensions.find((d) => d.key === "semanticLift");
-  const highestLift = (liftDim?.positives ?? []).slice(0, 10).map((p) => ({
-    name: p,
+  const liftDim = dimensions.find((dim) => dim.key === "semanticLift");
+  const highestLift = (liftDim?.positives ?? []).slice(0, 10).map((pos) => ({
+    name: pos,
     score: liftDim?.score ?? 0,
   }));
 
   // Safety leaks: from apiSafety issues
-  const safetyDim = dimensions.find((d) => d.key === "apiSafety");
+  const safetyDim = dimensions.find((dim) => dim.key === "apiSafety");
   const safetyLeaks = (safetyDim?.issues ?? [])
-    .filter((i) => i.severity === "error")
+    .filter((iss) => iss.severity === "error")
     .slice(0, 10)
-    .map((i) => ({
-      file: i.file,
-      line: i.line,
-      name: i.message,
+    .map((iss) => ({
+      file: iss.file,
+      line: iss.line,
+      name: iss.message,
       score: 0,
     }));
 
   // Lowest usability: from agentUsability negatives
-  const usabilityDim = dimensions.find((d) => d.key === "agentUsability");
-  const lowestUsability = (usabilityDim?.negatives ?? []).slice(0, 10).map((n) => ({
-    name: n,
+  const usabilityDim = dimensions.find((dim) => dim.key === "agentUsability");
+  const lowestUsability = (usabilityDim?.negatives ?? []).slice(0, 10).map((neg) => ({
+    name: neg,
     score: usabilityDim?.score ?? 0,
   }));
 

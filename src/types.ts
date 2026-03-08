@@ -1,3 +1,5 @@
+import type { GraphStats } from "./graph/types.js";
+
 export type AnalysisMode = "source" | "package";
 export type CompositeKey =
   | "consumerApi"
@@ -116,7 +118,7 @@ export interface AnalysisResult {
     matchedRules?: string[];
     adjustments?: { dimension: string; adjustment: string; reason: string }[];
   };
-  graphStats?: import("./graph/types.js").GraphStats;
+  graphStats?: GraphStats;
   dedupStats?: { groups: number; filesRemoved: number };
   explainability?: ExplainabilityReport;
   benchmarkDiagnostics?: {
@@ -165,5 +167,5 @@ export interface PackageAnalysisContext {
   packageRoot: string;
   packageJsonPath: string;
   typesEntrypoint: string | null;
-  graphStats?: import("./graph/types.js").GraphStats;
+  graphStats?: GraphStats;
 }

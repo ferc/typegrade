@@ -1,5 +1,5 @@
-import type { DimensionResult } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { DimensionResult } from "../types.js";
 import type { PublicSurface } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "surfaceConsistency")!;
@@ -43,7 +43,7 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
   for (const decl of surface.declarations) {
     if (decl.kind === "function" && (decl.overloadCount ?? 0) > 1) {
       // Check if last overload is broader than first (good practice = narrow-first)
-      const params = decl.positions.filter((p) => p.role === "param");
+      const params = decl.positions.filter((pos) => pos.role === "param");
       if (params.length >= 2) {
         const firstParamText = params[0]!.type.getText();
         const lastParamText = params.at(-1)!.type.getText();
@@ -93,12 +93,12 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
 
   // --- Consistent casing check ---
   const functionNames = surface.declarations
-    .filter((d) => d.kind === "function")
-    .map((d) => d.name);
+    .filter((decl) => decl.kind === "function")
+    .map((decl) => decl.name);
 
   if (functionNames.length >= 3) {
-    const camelCase = functionNames.filter((n) => /^[a-z]/.test(n)).length;
-    const pascalCase = functionNames.filter((n) => /^[A-Z]/.test(n)).length;
+    const camelCase = functionNames.filter((nm) => /^[a-z]/.test(nm)).length;
+    const pascalCase = functionNames.filter((nm) => /^[A-Z]/.test(nm)).length;
     const total = functionNames.length;
     const dominantRatio = Math.max(camelCase, pascalCase) / total;
 
@@ -147,14 +147,15 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
         descriptiveGenerics++;
       }
     }
-    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
-      for (const method of decl.methods) {
-        for (const tp of method.typeParameters) {
-          if (/^[A-Z]$/.test(tp.name)) {
-            singleLetterGenerics++;
-          } else {
-            descriptiveGenerics++;
-          }
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    for (const method of decl.methods) {
+      for (const tp of method.typeParameters) {
+        if (/^[A-Z]$/.test(tp.name)) {
+          singleLetterGenerics++;
+        } else {
+          descriptiveGenerics++;
         }
       }
     }
@@ -180,22 +181,19 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
   let resultFunctionCount = 0;
 
   for (const decl of surface.declarations) {
-    if (decl.kind === "function") {
-      for (const pos of decl.positions) {
-        if (pos.role === "return") {
-          const typeText = pos.type.getText();
-          if (
-            typeText.includes("Result") ||
-            typeText.includes("Either") ||
-            (typeText.includes("|") && typeText.includes("{"))
-          ) {
-            resultFunctionCount++;
-            for (const prop of KNOWN_DISCRIMINANTS) {
-              if (typeText.includes(prop)) {
-                discriminantProperties.add(prop);
-              }
-            }
-          }
+    if (decl.kind !== "function") {
+      continue;
+    }
+    for (const pos of decl.positions) {
+      if (pos.role !== "return") {
+        continue;
+      }
+      const typeText = pos.type.getText();
+      const isResultLike = typeText.includes("Result") || typeText.includes("Either") || (typeText.includes("|") && typeText.includes("{"));
+      if (isResultLike) {
+        resultFunctionCount++;
+        for (const prop of KNOWN_DISCRIMINANTS.filter((dp) => typeText.includes(dp))) {
+          discriminantProperties.add(prop);
         }
       }
     }

@@ -1,6 +1,7 @@
-import type { DimensionResult } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { DimensionResult } from "../types.js";
 import type { PublicSurface } from "../surface/index.js";
+import type { SurfaceDeclaration } from "../surface/types.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "agentUsability")!;
 
@@ -21,7 +22,8 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   const positives: string[] = [];
   const negatives: string[] = [];
 
-  let score = 50; // Start at midpoint
+  // Start at midpoint
+  let score = 50;
 
   // --- Named exports vs default exports (discoverability) ---
   let namedExports = 0;
@@ -91,18 +93,12 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   let functionsWithExample = 0;
   let totalFunctions = 0;
   for (const decl of surface.declarations) {
-    if (decl.kind === "function") {
-      totalFunctions++;
-      if (decl.hasJSDoc) {
-        const jsDocs = (decl.node as any).getJsDocs?.() ?? [];
-        for (const doc of jsDocs) {
-          const tags = doc.getTags?.() ?? [];
-          if (tags.some((tag: any) => tag.getTagName?.() === "example")) {
-            functionsWithExample++;
-            break;
-          }
-        }
-      }
+    if (decl.kind !== "function") {
+      continue;
+    }
+    totalFunctions++;
+    if (decl.hasJSDoc && hasFunctionExample(decl)) {
+      functionsWithExample++;
     }
   }
 
@@ -139,16 +135,18 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
         ambiguousOverloads++;
       }
     }
-    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
-      for (const method of decl.methods) {
-        if (method.overloadCount > 1) {
-          _totalOverloadedFunctions++;
-          if (method.overloadCount <= 4) {
-            clearOverloads++;
-          } else if (method.overloadCount > 6) {
-            ambiguousOverloads++;
-          }
-        }
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    for (const method of decl.methods) {
+      if (method.overloadCount <= 1) {
+        continue;
+      }
+      _totalOverloadedFunctions++;
+      if (method.overloadCount <= 4) {
+        clearOverloads++;
+      } else if (method.overloadCount > 6) {
+        ambiguousOverloads++;
       }
     }
   }
@@ -194,7 +192,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       functionsWithGenerics++;
       const typeParamNames = decl.typeParameters.map((tp) => tp.name);
       const paramTexts = (decl.paramTypeNodes ?? [])
-        .map((p) => p.typeNode?.getText() ?? "")
+        .map((pt) => pt.typeNode?.getText() ?? "")
         .join(" ");
       const returnText = decl.returnTypeNode?.getText() ?? "";
 
@@ -205,23 +203,25 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
         correlatedGenericFunctions++;
       }
     }
-    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
-      for (const method of decl.methods) {
-        if (method.typeParameters.length > 0) {
-          functionsWithGenerics++;
-          const typeParamNames = method.typeParameters.map((tp) => tp.name);
-          const paramTexts = method.paramTypeNodes
-            .map((p) => p.typeNode?.getText() ?? "")
-            .join(" ");
-          const returnText = method.returnTypeNode?.getText() ?? "";
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    for (const method of decl.methods) {
+      if (method.typeParameters.length === 0) {
+        continue;
+      }
+      functionsWithGenerics++;
+      const typeParamNames = method.typeParameters.map((tp) => tp.name);
+      const paramTexts = method.paramTypeNodes
+        .map((pt) => pt.typeNode?.getText() ?? "")
+        .join(" ");
+      const returnText = method.returnTypeNode?.getText() ?? "";
 
-          const hasCorrelation = typeParamNames.some(
-            (name) => paramTexts.includes(name) && returnText.includes(name),
-          );
-          if (hasCorrelation) {
-            correlatedGenericFunctions++;
-          }
-        }
+      const hasCorrelation = typeParamNames.some(
+        (name) => paramTexts.includes(name) && returnText.includes(name),
+      );
+      if (hasCorrelation) {
+        correlatedGenericFunctions++;
       }
     }
   }
@@ -249,15 +249,17 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
         specificReturnTypes++;
       }
     }
-    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
-      for (const method of decl.methods) {
-        if (method.hasExplicitReturnType) {
-          totalReturnTypeFunctions++;
-          const returnText = method.returnTypeNode?.getText() ?? "";
-          if (!WIDE_RETURN_TYPES.has(returnText)) {
-            specificReturnTypes++;
-          }
-        }
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    for (const method of decl.methods) {
+      if (!method.hasExplicitReturnType) {
+        continue;
+      }
+      totalReturnTypeFunctions++;
+      const returnText = method.returnTypeNode?.getText() ?? "";
+      if (!WIDE_RETURN_TYPES.has(returnText)) {
+        specificReturnTypes++;
       }
     }
   }
@@ -293,23 +295,10 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   let optionBagPenalties = 0;
 
   for (const decl of surface.declarations) {
-    if (decl.kind === "function") {
-      for (const pos of decl.positions) {
-        if (pos.role === "param") {
-          const paramType = pos.type;
-          if (paramType.isObject() && !paramType.isArray()) {
-            const properties = paramType.getProperties();
-            if (properties.length > 5) {
-              const propNames = properties.map((p) => p.getName());
-              const hasDiscriminant = propNames.some((n) => DISCRIMINANT_PROPS.has(n));
-              if (!hasDiscriminant) {
-                optionBagPenalties++;
-              }
-            }
-          }
-        }
-      }
+    if (decl.kind !== "function") {
+      continue;
     }
+    optionBagPenalties += countOptionBagPenalties(decl, DISCRIMINANT_PROPS);
   }
 
   if (optionBagPenalties > 0) {
@@ -347,7 +336,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
-  if (totalTypeAliases >= 3 && totalTypeAliases > 0) {
+  if (totalTypeAliases >= 3) {
     const stableRatio = stableAliases / totalTypeAliases;
     if (stableRatio > 0.7) {
       score += 5;
@@ -392,7 +381,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   for (const decl of surface.declarations) {
     if (decl.kind === "function") {
       const optionalParams = decl.positions.filter(
-        (p) => p.role === "param" && p.type.getText().includes("undefined"),
+        (pos) => pos.role === "param" && pos.type.getText().includes("undefined"),
       );
       if (optionalParams.length > 3) {
         wrongPathCount++;
@@ -468,4 +457,45 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     score,
     weights: CONFIG.weights,
   };
+}
+
+/**
+ * Check whether a function declaration's JSDoc contains an @example tag.
+ */
+function hasFunctionExample(decl: SurfaceDeclaration): boolean {
+  const fn = decl.node as { getJsDocs?: () => { getTags(): { getTagName(): string }[] }[] };
+  if (!fn.getJsDocs) {
+    return false;
+  }
+  for (const doc of fn.getJsDocs()) {
+    for (const tag of doc.getTags()) {
+      if (tag.getTagName() === "example") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Count how many param-position option bags lack a discriminant property
+ * (type, kind, mode, variant, action).
+ */
+function countOptionBagPenalties(decl: SurfaceDeclaration, discriminants: Set<string>): number {
+  let penalties = 0;
+  for (const pos of decl.positions) {
+    if (pos.role !== "param") {
+      continue;
+    }
+    const typeText = pos.type.getText();
+    // Only penalize object-like param types with 4+ properties
+    if (!typeText.includes("{") || typeText.length < 30) {
+      continue;
+    }
+    const hasDiscriminant = [...discriminants].some((prop) => typeText.includes(prop));
+    if (!hasDiscriminant) {
+      penalties++;
+    }
+  }
+  return penalties;
 }

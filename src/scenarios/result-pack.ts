@@ -2,8 +2,15 @@ import type { ScenarioPack, ScenarioTest } from "./types.js";
 import type { PublicSurface } from "../surface/index.js";
 import type { ScenarioResult } from "../types.js";
 
-function makeResult(name: string, passed: boolean, score: number, reason: string): ScenarioResult {
-  return { name, passed, reason, score };
+interface MakeResultOpts {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+function makeResult(opts: MakeResultOpts): ScenarioResult {
+  return { name: opts.name, passed: opts.passed, reason: opts.reason, score: opts.score };
 }
 
 const errorChannelPropagation: ScenarioTest = {
@@ -37,14 +44,9 @@ const errorChannelPropagation: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "errorChannelPropagation",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "errorChannelPropagation", passed: passed, reason: passed
         ? `${errorGenericDecls} result types with error channel generics`
-        : "Limited error channel propagation",
-    );
+        : "Limited error channel propagation", score: score });
   },
   name: "errorChannelPropagation",
 };
@@ -74,27 +76,28 @@ const mapFlatMapPrecision: ScenarioTest = {
         }
       }
       // Also check methods
-      if (decl.methods) {
-        for (const method of decl.methods) {
-          const mName = method.name.toLowerCase();
-          if (
-            mName === "map" ||
-            mName === "flatmap" ||
-            mName === "chain" ||
-            mName === "match" ||
-            mName === "fold"
-          ) {
-            transformFns++;
-            if (method.typeParameters.length > 0) {
-              genericTransforms++;
-            }
+      if (!decl.methods) {
+        continue;
+      }
+      for (const method of decl.methods) {
+        const mName = method.name.toLowerCase();
+        if (
+          mName === "map" ||
+          mName === "flatmap" ||
+          mName === "chain" ||
+          mName === "match" ||
+          mName === "fold"
+        ) {
+          transformFns++;
+          if (method.typeParameters.length > 0) {
+            genericTransforms++;
           }
         }
       }
     }
 
     if (transformFns === 0) {
-      return makeResult("mapFlatMapPrecision", false, 20, "No map/flatMap functions found");
+      return makeResult({ name: "mapFlatMapPrecision", passed: false, reason: "No map/flatMap functions found", score: 20 });
     }
     if (genericTransforms > 0) {
       score += 50;
@@ -105,14 +108,9 @@ const mapFlatMapPrecision: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "mapFlatMapPrecision",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "mapFlatMapPrecision", passed: passed, reason: passed
         ? `${genericTransforms}/${transformFns} transforms preserve types`
-        : "Transform functions lack type precision",
-    );
+        : "Transform functions lack type precision", score: score });
   },
   name: "mapFlatMapPrecision",
 };
@@ -125,17 +123,15 @@ const asyncComposition: ScenarioTest = {
 
     for (const decl of surface.declarations) {
       for (const pos of decl.positions) {
-        if (pos.role === "return") {
-          const typeText = pos.type.getText();
-          if (
-            typeText.includes("Promise") ||
-            typeText.includes("Task") ||
-            typeText.includes("Effect")
-          ) {
-            asyncDecls++;
-            if (decl.typeParameters.length > 0) {
-              score += 15;
-            }
+        if (pos.role !== "return") {
+          continue;
+        }
+        const typeText = pos.type.getText();
+        const isAsync = typeText.includes("Promise") || typeText.includes("Task") || typeText.includes("Effect");
+        if (isAsync) {
+          asyncDecls++;
+          if (decl.typeParameters.length > 0) {
+            score += 15;
           }
         }
       }
@@ -150,12 +146,7 @@ const asyncComposition: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "asyncComposition",
-      passed,
-      score,
-      passed ? `${asyncDecls} async compositions detected` : "Limited async composition support",
-    );
+    return makeResult({ name: "asyncComposition", passed: passed, reason: passed ? `${asyncDecls} async compositions detected` : "Limited async composition support", score: score });
   },
   name: "asyncComposition",
 };

@@ -2,8 +2,15 @@ import type { ScenarioPack, ScenarioTest } from "./types.js";
 import type { PublicSurface } from "../surface/index.js";
 import type { ScenarioResult } from "../types.js";
 
-function makeResult(name: string, passed: boolean, score: number, reason: string): ScenarioResult {
-  return { name, passed, reason, score };
+interface MakeResultOpts {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+function makeResult(opts: MakeResultOpts): ScenarioResult {
+  return { name: opts.name, passed: opts.passed, reason: opts.reason, score: opts.score };
 }
 
 const keyPreservingTransforms: ScenarioTest = {
@@ -37,14 +44,9 @@ const keyPreservingTransforms: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "keyPreservingTransforms",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "keyPreservingTransforms", passed: passed, reason: passed
         ? `${keyofUsage} key-preserving patterns, ${mappedTypes} mapped types`
-        : "Limited key-preserving transforms",
-    );
+        : "Limited key-preserving transforms", score: score });
   },
   name: "keyPreservingTransforms",
 };
@@ -87,14 +89,9 @@ const deepTransforms: ScenarioTest = {
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "deepTransforms",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "deepTransforms", passed: passed, reason: passed
         ? `${deepTypes} deep types, ${recursiveTypes} recursive`
-        : "Limited deep/recursive type support",
-    );
+        : "Limited deep/recursive type support", score: score });
   },
   name: "deepTransforms",
 };
@@ -116,21 +113,16 @@ const aliasReadability: ScenarioTest = {
     }
 
     if (totalAliases === 0) {
-      return makeResult("aliasReadability", false, 30, "No type aliases found");
+      return makeResult({ name: "aliasReadability", passed: false, reason: "No type aliases found", score: 30 });
     }
     const ratio = descriptiveAliases / totalAliases;
     score = Math.round(ratio * 80) + (totalAliases >= 5 ? 20 : 0);
     score = Math.min(100, score);
 
     const passed = score >= 40;
-    return makeResult(
-      "aliasReadability",
-      passed,
-      score,
-      passed
+    return makeResult({ name: "aliasReadability", passed: passed, reason: passed
         ? `${descriptiveAliases}/${totalAliases} aliases are descriptive`
-        : "Type aliases lack readability",
-    );
+        : "Type aliases lack readability", score: score });
   },
   name: "aliasReadability",
 };

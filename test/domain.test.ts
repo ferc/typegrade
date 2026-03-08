@@ -1,6 +1,6 @@
+import { Project } from "ts-morph";
 import { detectDomain } from "../src/domain.js";
 import { extractPublicSurface } from "../src/surface/index.js";
-import { Project } from "ts-morph";
 import { resolve } from "node:path";
 
 const fixturesDir = resolve(import.meta.dirname, "fixtures");

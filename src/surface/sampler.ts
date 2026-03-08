@@ -28,7 +28,8 @@ import type {
 
 export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
   const declarations: SurfaceDeclaration[] = [];
-  const visited = new Set<string>(); // Track resolved re-export files to prevent circularity
+  // Track resolved re-export files to prevent circularity
+  const visited = new Set<string>();
 
   for (const sf of sourceFiles) {
     visited.add(sf.getFilePath());
@@ -63,7 +64,7 @@ export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
   // Deduplicate merged declarations (same name from multiple declaration sources)
   const deduped = deduplicateMergedDeclarations(declarations);
 
-  const positions = deduped.flatMap((d) => d.positions);
+  const positions = deduped.flatMap((decl) => decl.positions);
   const stats = computeStats(deduped);
 
   return { declarations: deduped, positions, stats };
@@ -200,11 +201,10 @@ function deduplicateMergedDeclarations(declarations: SurfaceDeclaration[]): Surf
       }
       if (decl.methods) {
         existing.methods = existing.methods ?? [];
-        for (const method of decl.methods) {
-          if (!existing.methods.some((m) => m.name === method.name)) {
-            existing.methods.push(method);
-          }
-        }
+        const newMethods = decl.methods.filter(
+          (method) => !existing.methods!.some((em) => em.name === method.name),
+        );
+        existing.methods.push(...newMethods);
       }
     } else {
       seen.set(key, decl);
@@ -224,15 +224,18 @@ function nodeLocation(node: Node): { line: number; column: number } {
   };
 }
 
-function makePosition(
-  node: Node,
-  role: SurfacePosition["role"],
-  name: string,
-  declarationName: string,
-  declarationKind: SurfaceDeclarationKind,
-  filePath: string,
-  weight: number,
-): SurfacePosition {
+interface MakePositionOpts {
+  node: Node;
+  role: SurfacePosition["role"];
+  name: string;
+  declarationName: string;
+  declarationKind: SurfaceDeclarationKind;
+  filePath: string;
+  weight: number;
+}
+
+function makePosition(opts: MakePositionOpts): SurfacePosition {
+  const { node, role, name, declarationName, declarationKind, filePath, weight } = opts;
   const loc = nodeLocation(node);
   const typed = node as unknown as { getType(): Type; getTypeNode?: () => TypeNode | undefined };
   return {
@@ -250,15 +253,18 @@ function makePosition(
   };
 }
 
-function makeReturnPosition(
-  owner: Node,
-  returnType: Type,
-  returnTypeNode: TypeNode | undefined,
-  declarationName: string,
-  declarationKind: SurfaceDeclarationKind,
-  filePath: string,
-  weight: number,
-): SurfacePosition {
+interface MakeReturnPositionOpts {
+  owner: Node;
+  returnType: Type;
+  returnTypeNode: TypeNode | undefined;
+  declarationName: string;
+  declarationKind: SurfaceDeclarationKind;
+  filePath: string;
+  weight: number;
+}
+
+function makeReturnPosition(opts: MakeReturnPositionOpts): SurfacePosition {
+  const { owner, returnType, returnTypeNode, declarationName, declarationKind, filePath, weight } = opts;
   const loc = nodeLocation(owner);
   return {
     column: loc.column,
@@ -290,24 +296,32 @@ function extractFunction(fn: FunctionDeclaration, filePath: string): SurfaceDecl
   const positions: SurfacePosition[] = [];
 
   for (const param of fn.getParameters()) {
-    positions.push(makePosition(param, "param", param.getName(), name, "function", filePath, 1));
+    positions.push(makePosition({
+      declarationKind: "function",
+      declarationName: name,
+      filePath,
+      name: param.getName(),
+      node: param,
+      role: "param",
+      weight: 1,
+    }));
   }
 
   positions.push(
-    makeReturnPosition(
-      fn,
-      fn.getReturnType(),
-      fn.getReturnTypeNode(),
-      name,
-      "function",
+    makeReturnPosition({
+      declarationKind: "function",
+      declarationName: name,
       filePath,
-      1.25,
-    ),
+      owner: fn,
+      returnType: fn.getReturnType(),
+      returnTypeNode: fn.getReturnTypeNode(),
+      weight: 1.25,
+    }),
   );
 
   const overloads = fn.getOverloads();
   return {
-    allParamsTyped: fn.getParameters().every((p) => p.getTypeNode() !== undefined),
+    allParamsTyped: fn.getParameters().every((pm) => pm.getTypeNode() !== undefined),
     filePath,
     hasExplicitReturnType: fn.getReturnTypeNode() !== undefined,
     hasJSDoc: fn.getJsDocs().length > 0,
@@ -316,9 +330,9 @@ function extractFunction(fn: FunctionDeclaration, filePath: string): SurfaceDecl
     name,
     node: fn,
     overloadCount: overloads.length,
-    paramTypeNodes: fn.getParameters().map((p) => ({
-      name: p.getName(),
-      typeNode: p.getTypeNode(),
+    paramTypeNodes: fn.getParameters().map((pm) => ({
+      name: pm.getName(),
+      typeNode: pm.getTypeNode(),
     })),
     positions,
     returnTypeNode: fn.getReturnTypeNode(),
@@ -332,7 +346,15 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
 
   for (const prop of iface.getProperties()) {
     positions.push(
-      makePosition(prop, "property", prop.getName(), name, "interface", filePath, 0.75),
+      makePosition({
+        declarationKind: "interface",
+        declarationName: name,
+        filePath,
+        name: prop.getName(),
+        node: prop,
+        role: "property",
+        weight: 0.75,
+      }),
     );
   }
 
@@ -360,19 +382,27 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
   for (const callSig of iface.getCallSignatures()) {
     for (const param of callSig.getParameters()) {
       positions.push(
-        makePosition(param, "param", param.getName(), `${name}()`, "interface", filePath, 1),
+        makePosition({
+          declarationKind: "interface",
+          declarationName: `${name}()`,
+          filePath,
+          name: param.getName(),
+          node: param,
+          role: "param",
+          weight: 1,
+        }),
       );
     }
     positions.push(
-      makeReturnPosition(
-        callSig,
-        callSig.getReturnType(),
-        callSig.getReturnTypeNode(),
-        `${name}()`,
-        "interface",
+      makeReturnPosition({
+        declarationKind: "interface",
+        declarationName: `${name}()`,
         filePath,
-        1.25,
-      ),
+        owner: callSig,
+        returnType: callSig.getReturnType(),
+        returnTypeNode: callSig.getReturnTypeNode(),
+        weight: 1.25,
+      }),
     );
     // Override role to call-sig for the return position
     positions.at(-1)!.role = "call-sig";
@@ -382,19 +412,27 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
   for (const ctorSig of iface.getConstructSignatures()) {
     for (const param of ctorSig.getParameters()) {
       positions.push(
-        makePosition(param, "param", param.getName(), `new ${name}()`, "interface", filePath, 1),
+        makePosition({
+          declarationKind: "interface",
+          declarationName: `new ${name}()`,
+          filePath,
+          name: param.getName(),
+          node: param,
+          role: "param",
+          weight: 1,
+        }),
       );
     }
     positions.push(
-      makeReturnPosition(
-        ctorSig,
-        ctorSig.getReturnType(),
-        ctorSig.getReturnTypeNode(),
-        `new ${name}()`,
-        "interface",
+      makeReturnPosition({
+        declarationKind: "interface",
+        declarationName: `new ${name}()`,
         filePath,
-        1.25,
-      ),
+        owner: ctorSig,
+        returnType: ctorSig.getReturnType(),
+        returnTypeNode: ctorSig.getReturnTypeNode(),
+        weight: 1.25,
+      }),
     );
     // Override role to construct-sig for the return position
     positions.at(-1)!.role = "construct-sig";
@@ -429,32 +467,40 @@ function extractMethodSignature(
 
   for (const param of method.getParameters()) {
     positions.push(
-      makePosition(param, "param", param.getName(), qualifiedName, "interface", filePath, 1),
+      makePosition({
+        declarationKind: "interface",
+        declarationName: qualifiedName,
+        filePath,
+        name: param.getName(),
+        node: param,
+        role: "param",
+        weight: 1,
+      }),
     );
   }
 
   positions.push(
-    makeReturnPosition(
-      method,
-      method.getReturnType(),
-      method.getReturnTypeNode(),
-      qualifiedName,
-      "interface",
+    makeReturnPosition({
+      declarationKind: "interface",
+      declarationName: qualifiedName,
       filePath,
-      1.25,
-    ),
+      owner: method,
+      returnType: method.getReturnType(),
+      returnTypeNode: method.getReturnTypeNode(),
+      weight: 1.25,
+    }),
   );
 
   return {
-    allParamsTyped: method.getParameters().every((p) => p.getTypeNode() !== undefined),
+    allParamsTyped: method.getParameters().every((pm) => pm.getTypeNode() !== undefined),
     hasExplicitReturnType: method.getReturnTypeNode() !== undefined,
     hasJSDoc: method.getJsDocs().length > 0,
     isPrivate: false,
     name,
     overloadCount: 0,
-    paramTypeNodes: method.getParameters().map((p) => ({
-      name: p.getName(),
-      typeNode: p.getTypeNode(),
+    paramTypeNodes: method.getParameters().map((pm) => ({
+      name: pm.getName(),
+      typeNode: pm.getTypeNode(),
     })),
     positions,
     returnTypeNode: method.getReturnTypeNode(),
@@ -504,7 +550,15 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
   for (const ctor of cls.getConstructors()) {
     for (const param of ctor.getParameters()) {
       positions.push(
-        makePosition(param, "ctor-param", param.getName(), name, "class", filePath, 1),
+        makePosition({
+          declarationKind: "class",
+          declarationName: name,
+          filePath,
+          name: param.getName(),
+          node: param,
+          role: "ctor-param",
+          weight: 1,
+        }),
       );
     }
   }
@@ -514,9 +568,9 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
     if (!method.getScope || method.getScope() === "private") {
       continue;
     }
-    const m = extractClassMethod(method, name, filePath);
-    methods.push(m);
-    positions.push(...m.positions);
+    const classMethod = extractClassMethod(method, name, filePath);
+    methods.push(classMethod);
+    positions.push(...classMethod.positions);
   }
 
   // Properties
@@ -524,7 +578,15 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
     if (prop.getScope() === "private") {
       continue;
     }
-    positions.push(makePosition(prop, "property", prop.getName(), name, "class", filePath, 0.75));
+    positions.push(makePosition({
+      declarationKind: "class",
+      declarationName: name,
+      filePath,
+      name: prop.getName(),
+      node: prop,
+      role: "property",
+      weight: 0.75,
+    }));
   }
 
   // Getters
@@ -533,15 +595,15 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
       continue;
     }
     positions.push(
-      makeReturnPosition(
-        getter,
-        getter.getReturnType(),
-        getter.getReturnTypeNode(),
-        name,
-        "class",
+      makeReturnPosition({
+        declarationKind: "class",
+        declarationName: name,
         filePath,
-        1,
-      ),
+        owner: getter,
+        returnType: getter.getReturnType(),
+        returnTypeNode: getter.getReturnTypeNode(),
+        weight: 1,
+      }),
     );
     // Override role to "getter" (makeReturnPosition uses "return")
     positions.at(-1)!.role = "getter";
@@ -554,7 +616,15 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
     }
     for (const param of setter.getParameters()) {
       positions.push(
-        makePosition(param, "setter-param", param.getName(), name, "class", filePath, 1),
+        makePosition({
+          declarationKind: "class",
+          declarationName: name,
+          filePath,
+          name: param.getName(),
+          node: param,
+          role: "setter-param",
+          weight: 1,
+        }),
       );
     }
   }
@@ -583,33 +653,41 @@ function extractClassMethod(
 
   for (const param of method.getParameters()) {
     positions.push(
-      makePosition(param, "param", param.getName(), qualifiedName, "class", filePath, 1),
+      makePosition({
+        declarationKind: "class",
+        declarationName: qualifiedName,
+        filePath,
+        name: param.getName(),
+        node: param,
+        role: "param",
+        weight: 1,
+      }),
     );
   }
 
   positions.push(
-    makeReturnPosition(
-      method,
-      method.getReturnType(),
-      method.getReturnTypeNode(),
-      qualifiedName,
-      "class",
+    makeReturnPosition({
+      declarationKind: "class",
+      declarationName: qualifiedName,
       filePath,
-      1.25,
-    ),
+      owner: method,
+      returnType: method.getReturnType(),
+      returnTypeNode: method.getReturnTypeNode(),
+      weight: 1.25,
+    }),
   );
 
   const overloads = method.getOverloads();
   return {
-    allParamsTyped: method.getParameters().every((p) => p.getTypeNode() !== undefined),
+    allParamsTyped: method.getParameters().every((pm) => pm.getTypeNode() !== undefined),
     hasExplicitReturnType: method.getReturnTypeNode() !== undefined,
     hasJSDoc: method.getJsDocs().length > 0,
     isPrivate: false,
     name,
     overloadCount: overloads.length,
-    paramTypeNodes: method.getParameters().map((p) => ({
-      name: p.getName(),
-      typeNode: p.getTypeNode(),
+    paramTypeNodes: method.getParameters().map((pm) => ({
+      name: pm.getName(),
+      typeNode: pm.getTypeNode(),
     })),
     positions,
     returnTypeNode: method.getReturnTypeNode(),
@@ -643,7 +721,15 @@ function extractVariable(
     line: decl.getStartLineNumber(),
     name,
     node: decl,
-    positions: [makePosition(decl, "variable", name, name, "variable", filePath, 1)],
+    positions: [makePosition({
+      declarationKind: "variable",
+      declarationName: name,
+      filePath,
+      name,
+      node: decl,
+      role: "variable",
+      weight: 1,
+    })],
     typeParameters: [],
   };
 }
@@ -661,25 +747,25 @@ function computeStats(declarations: SurfaceDeclaration[]): SurfaceStats {
   let totalMethods = 0;
   let totalPositions = 0;
 
-  for (const d of declarations) {
-    totalPositions += d.positions.length;
-    switch (d.kind) {
+  for (const decl of declarations) {
+    totalPositions += decl.positions.length;
+    switch (decl.kind) {
       case "function": {
         functionCount++;
-        totalOverloads += d.overloadCount ?? 0;
+        totalOverloads += decl.overloadCount ?? 0;
         break;
       }
       case "interface": {
         interfaceCount++;
-        totalMethods += d.methods?.length ?? 0;
+        totalMethods += decl.methods?.length ?? 0;
         break;
       }
       case "class": {
         classCount++;
-        if (d.methods) {
-          totalMethods += d.methods.length;
-          for (const m of d.methods) {
-            totalOverloads += m.overloadCount;
+        if (decl.methods) {
+          totalMethods += decl.methods.length;
+          for (const mt of decl.methods) {
+            totalOverloads += mt.overloadCount;
           }
         }
         break;

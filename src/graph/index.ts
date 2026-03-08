@@ -1,7 +1,7 @@
+import type { DeclarationGraph, GraphStats } from "./types.js";
 import type { Project } from "ts-morph";
 import { deduplicateGraph } from "./dedup.js";
 import { resolveEntrypoints } from "./resolve.js";
-import type { DeclarationGraph, GraphStats } from "./types.js";
 import { walkDeclarationGraph } from "./walker.js";
 
 export type {
@@ -49,12 +49,12 @@ export function buildDeclarationGraph(pkgDir: string, project: Project): Declara
   const { groups, filesToRemove } = deduplicateGraph(nodes, entrypoints, project);
 
   // Final file list: all reachable minus deduped
-  const filesToAnalyze = [...nodes.keys()].filter((p) => !filesToRemove.has(p));
+  const filesToAnalyze = [...nodes.keys()].filter((fp) => !filesToRemove.has(fp));
 
   // Compute stats
   const dedupByStrategy: Record<string, number> = {};
-  for (const g of groups) {
-    dedupByStrategy[g.reason] = (dedupByStrategy[g.reason] ?? 0) + g.duplicates.length;
+  for (const grp of groups) {
+    dedupByStrategy[grp.reason] = (dedupByStrategy[grp.reason] ?? 0) + grp.duplicates.length;
   }
 
   const stats: GraphStats = {

@@ -1,5 +1,5 @@
-import type { DimensionResult } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
+import type { DimensionResult } from "../types.js";
 import type { PublicSurface } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "surfaceComplexity")!;
@@ -23,13 +23,14 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
         nonConventional++;
       }
     }
-    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
-      for (const method of decl.methods) {
-        for (const tp of method.typeParameters) {
-          totalTypeParams++;
-          if (!CONVENTIONAL_NAMES.has(tp.name) && !CONVENTIONAL_PREFIX.test(tp.name)) {
-            nonConventional++;
-          }
+    if (!(decl.kind === "class" || decl.kind === "interface") || !decl.methods) {
+      continue;
+    }
+    for (const method of decl.methods) {
+      for (const tp of method.typeParameters) {
+        totalTypeParams++;
+        if (!CONVENTIONAL_NAMES.has(tp.name) && !CONVENTIONAL_PREFIX.test(tp.name)) {
+          nonConventional++;
         }
       }
     }
@@ -124,18 +125,19 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     let chainedAliasCount = 0;
 
     for (const decl of surface.declarations) {
-      if (decl.kind === "type-alias" && decl.bodyTypeNode) {
-        const bodyText = decl.bodyTypeNode.getText();
-        let depth = 0;
-        for (const otherName of typeAliasNames) {
-          if (otherName !== decl.name && bodyText.includes(otherName)) {
-            depth++;
-          }
+      if (decl.kind !== "type-alias" || !decl.bodyTypeNode) {
+        continue;
+      }
+      const bodyText = decl.bodyTypeNode.getText();
+      let depth = 0;
+      for (const otherName of typeAliasNames) {
+        if (otherName !== decl.name && bodyText.includes(otherName)) {
+          depth++;
         }
-        if (depth > 0) {
-          totalChainDepth += depth;
-          chainedAliasCount++;
-        }
+      }
+      if (depth > 0) {
+        totalChainDepth += depth;
+        chainedAliasCount++;
       }
     }
 
@@ -156,7 +158,7 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
   const fnByName = new Map<string, number[]>();
   for (const decl of surface.declarations) {
     if (decl.kind === "function") {
-      const paramCount = decl.positions.filter((p) => p.role === "param").length;
+      const paramCount = decl.positions.filter((pos) => pos.role === "param").length;
       const existing = fnByName.get(decl.name);
       if (existing) {
         existing.push(paramCount);
@@ -180,13 +182,13 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
   }
 
   // --- Duplicate public concepts penalty ---
-  const declNames = surface.declarations.map((d) => d.name.toLowerCase());
+  const declNames = surface.declarations.map((decl) => decl.name.toLowerCase());
   let duplicateConcepts = 0;
-  for (let i = 0; i < declNames.length; i++) {
-    for (let j = i + 1; j < declNames.length; j++) {
-      const a = declNames[i]!;
-      const b = declNames[j]!;
-      if (a === b && a.length > 2) {
+  for (let idx = 0; idx < declNames.length; idx++) {
+    for (let jdx = idx + 1; jdx < declNames.length; jdx++) {
+      const nameA = declNames[idx]!;
+      const nameB = declNames[jdx]!;
+      if (nameA === nameB && nameA.length > 2) {
         duplicateConcepts++;
       }
     }

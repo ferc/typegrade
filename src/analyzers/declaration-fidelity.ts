@@ -1,6 +1,6 @@
 import type { DimensionResult, Issue } from "../types.js";
-import { DIMENSION_CONFIGS } from "../constants.js";
 import { Node, type SourceFile } from "ts-morph";
+import { DIMENSION_CONFIGS } from "../constants.js";
 import { analyzePrecision } from "../utils/type-utils.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "declarationFidelity")!;

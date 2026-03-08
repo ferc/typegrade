@@ -1,4 +1,4 @@
-import type { DomainKey, ScenarioResult, ScenarioScore } from "../types.js";
+import type { DomainKey, Grade, ScenarioResult, ScenarioScore } from "../types.js";
 import type { PublicSurface } from "../surface/index.js";
 
 /** A single scenario test within a domain pack */
@@ -38,24 +38,22 @@ export function evaluateScenarioPack(
 
   const avgScore = pack.scenarios.length > 0 ? Math.round(totalScore / pack.scenarios.length) : 0;
 
-  const gradeMap: Record<string, import("../types.js").Grade> = {};
+  let grade: Grade = "F";
   if (avgScore >= 95) {
-    gradeMap.g = "A+";
+    grade = "A+";
   } else if (avgScore >= 85) {
-    gradeMap.g = "A";
+    grade = "A";
   } else if (avgScore >= 70) {
-    gradeMap.g = "B";
+    grade = "B";
   } else if (avgScore >= 55) {
-    gradeMap.g = "C";
+    grade = "C";
   } else if (avgScore >= 40) {
-    gradeMap.g = "D";
-  } else {
-    gradeMap.g = "F";
+    grade = "D";
   }
 
   return {
     domain: pack.domain,
-    grade: gradeMap.g!,
+    grade,
     passedScenarios: passedCount,
     results,
     scenario: pack.name,
