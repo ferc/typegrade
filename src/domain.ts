@@ -326,23 +326,19 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
 
   // 2g+: Testing — query/render/screen patterns for testing-library style
-  const testingLibraryNames = [
-    "render",
-    "screen",
-    "getby",
-    "queryby",
-    "findby",
-    "within",
-    "cleanup",
-  ];
+  // Only exact or prefix matches to avoid false positives on generic names like "within"
+  const testingLibraryExact = new Set(["render", "screen", "cleanup", "fireevent", "userevent"]);
+  const testingLibraryPrefixes = ["getby", "queryby", "findby", "getall", "queryall", "findall"];
   let testingLibraryCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
-    if (testingLibraryNames.some((nm) => lowerName.includes(nm))) {
+    if (testingLibraryExact.has(lowerName)) {
+      testingLibraryCount++;
+    } else if (testingLibraryPrefixes.some((px) => lowerName.startsWith(px))) {
       testingLibraryCount++;
     }
   }
-  if (testingLibraryCount >= 2) {
+  if (testingLibraryCount >= 3) {
     const baseSignal = Math.min(0.6, 0.2 + testingLibraryCount * 0.1);
     const testingLibSignal =
       baseSignal *

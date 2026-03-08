@@ -335,14 +335,15 @@ function resolveCompanionTypesPackage(
  */
 function resolveDeclarationFile(pkgDir: string, relativePath: string): string | null {
   const fullPath = join(pkgDir, relativePath);
+  const isDts = DTS_EXTENSIONS.some((ext) => relativePath.endsWith(ext));
 
-  // Direct match
-  if (existsSync(fullPath)) {
+  // Direct match — only if it's actually a declaration file
+  if (isDts && existsSync(fullPath)) {
     return fullPath;
   }
 
-  // If the path already ends with a .d.ts variant, don't try further
-  if (DTS_EXTENSIONS.some((ext) => relativePath.endsWith(ext))) {
+  // If the path ends with a .d.ts variant but doesn't exist, don't try further
+  if (isDts) {
     return null;
   }
 

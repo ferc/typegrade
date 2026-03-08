@@ -44,7 +44,9 @@ function execCheck(cmd: string, cwd: string, timeoutMs = 120_000): { success: bo
 function findLatestSnapshot(splitPrefix?: string): Record<string, unknown> | null {
   const resultsDir = join(import.meta.dirname, "results");
   if (!existsSync(resultsDir)) return null;
-  const files = readdirSync(resultsDir).filter((f) => f.endsWith(".json")).sort();
+  const files = readdirSync(resultsDir)
+    .filter((f) => f.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(f))
+    .sort();
   if (files.length === 0) return null;
   for (let i = files.length - 1; i >= 0; i--) {
     const data = JSON.parse(readFileSync(join(resultsDir, files[i]!), "utf8"));
