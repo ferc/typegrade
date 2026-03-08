@@ -114,6 +114,8 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
 
   if (samples.length === 0) {
     return {
+      applicability: "applicable",
+      applicabilityReasons: [],
       enabled: true,
       issues: [],
       key: CONFIG.key,
@@ -360,6 +362,8 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
   }
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     confidence,
     confidenceSignals,
     enabled: true,

@@ -172,6 +172,8 @@ export function analyzeDeclarationFidelity(
   const score = Math.max(0, Math.min(100, 100 - penalties));
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues,
     key: CONFIG.key,

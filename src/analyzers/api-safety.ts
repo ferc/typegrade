@@ -45,6 +45,8 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
 
   if (totalPositions === 0) {
     return {
+      applicability: "applicable",
+      applicabilityReasons: [],
       enabled: true,
       issues: [],
       key: CONFIG.key,
@@ -72,6 +74,8 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
   }
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues,
     key: CONFIG.key,

@@ -301,6 +301,8 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
 
   if (totalPositions === 0) {
     return {
+      applicability: "applicable",
+      applicabilityReasons: [],
       enabled: true,
       issues: [],
       key: CONFIG.key,
@@ -402,6 +404,8 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   ];
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     confidence,
     confidenceSignals,
     enabled: true,

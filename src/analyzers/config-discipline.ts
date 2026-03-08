@@ -71,6 +71,8 @@ export function analyzeConfigDiscipline(
   score = Math.min(100, score);
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues,
     key: CONFIG.key,

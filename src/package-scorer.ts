@@ -1,4 +1,5 @@
-import type { AnalysisResult, PackageAnalysisContext } from "./types.js";
+import type { AnalysisResult, PackageAnalysisContext, PackageIdentity } from "./types.js";
+import { basename, join, resolve } from "node:path";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
 import {
   computePackageCacheKey,
@@ -7,7 +8,6 @@ import {
   markPackageCached,
 } from "./cache.js";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 import type { GraphStats } from "./graph/types.js";
 import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
@@ -37,9 +37,16 @@ function scoreLocalPackage(
   // Check if there are declaration entry fields
   const hasTypeEntries = Boolean(pkgJson.types || pkgJson.typings || pkgJson.exports);
 
+  const resolvedVersion: string | null = pkgJson.version ?? null;
+  const packageIdentity: PackageIdentity = {
+    displayName: packageName,
+    resolvedSpec: localPath,
+    resolvedVersion,
+  };
+
   if (!hasTypeEntries) {
     // No type entrypoints — fall back to analyzing all files
-    return analyzeProject(localPath, {
+    const result = analyzeProject(localPath, {
       domain: domain as any,
       mode: "package",
       packageContext: {
@@ -52,6 +59,8 @@ function scoreLocalPackage(
       },
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
+    result.packageIdentity = packageIdentity;
+    return result;
   }
 
   // Build declaration graph using the package's own structure
@@ -80,7 +89,9 @@ function scoreLocalPackage(
     opts!.fileFilter = new Set(graph.filesToAnalyze);
   }
 
-  return analyzeProject(localPath, opts);
+  const result = analyzeProject(localPath, opts);
+  result.packageIdentity = packageIdentity;
+  return result;
 }
 
 function parsePackageSpec(spec: string): { name: string; version: string } {
@@ -252,7 +263,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       return scoreLocalPackage(localPath, localPkgJsonPath, options?.domain);
     }
 
-    return analyzeProject(localPath, {
+    const result = analyzeProject(localPath, {
       domain: options?.domain as any,
       mode: "package",
       packageContext: {
@@ -265,6 +276,12 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       },
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
+    result.packageIdentity = {
+      displayName: basename(localPath),
+      resolvedSpec: localPath,
+      resolvedVersion: null,
+    };
+    return result;
   }
 
   // Parse name@version spec
@@ -330,7 +347,23 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       opts!.fileFilter = new Set(graph.filesToAnalyze);
     }
 
-    return analyzeProject(installRoot, opts);
+    const result = analyzeProject(installRoot, opts);
+
+    // Resolve version from the installed package's package.json
+    let resolvedVersion: string | null = null;
+    try {
+      const installedPkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+      resolvedVersion = installedPkgJson.version ?? null;
+    } catch {
+      // Version unavailable
+    }
+    result.packageIdentity = {
+      displayName: packageName,
+      resolvedSpec: nameOrPath,
+      resolvedVersion,
+    };
+
+    return result;
   } finally {
     cleanup();
   }

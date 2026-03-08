@@ -155,6 +155,8 @@ export function analyzeImplementationSoundness(sourceFiles: SourceFile[]): Dimen
   }
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues,
     key: CONFIG.key,

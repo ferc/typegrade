@@ -352,6 +352,8 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
   }
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues: [],
     key: CONFIG.key,

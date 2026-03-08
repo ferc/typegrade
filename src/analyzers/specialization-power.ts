@@ -329,6 +329,8 @@ export function analyzeSpecializationPower(surface: PublicSurface): DimensionRes
   const totalSignals = countTotalSignals(signals);
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     confidence,
     confidenceSignals,
     enabled: true,

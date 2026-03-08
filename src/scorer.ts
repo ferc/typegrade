@@ -45,9 +45,14 @@ function computeComposite(
   dimensions: DimensionResult[],
   mode: AnalysisMode,
 ): CompositeScore {
+  // Filter: enabled, has score, has weight, and applicable (not_applicable excluded entirely)
   const contributing = dimensions.filter(
     (dim) =>
-      dim.enabled && dim.score !== null && dim.weights[key] !== undefined && dim.weights[key]! > 0,
+      dim.enabled &&
+      dim.score !== null &&
+      dim.weights[key] !== undefined &&
+      dim.weights[key]! > 0 &&
+      dim.applicability !== "not_applicable",
   );
 
   if (contributing.length === 0) {
@@ -67,10 +72,13 @@ function computeComposite(
   const rationale: string[] = [];
 
   for (const dim of contributing) {
-    const weight = dim.weights[key]!;
+    const baseWeight = dim.weights[key]!;
+    // Reduce weight for insufficient_evidence dimensions (half weight)
+    const weight = dim.applicability === "insufficient_evidence" ? baseWeight * 0.5 : baseWeight;
     totalWeight += weight;
     weightedSum += dim.score! * weight;
-    rationale.push(`${dim.label}: ${Math.round(dim.score!)} (w=${weight})`);
+    const suffix = dim.applicability === "insufficient_evidence" ? " [insufficient evidence]" : "";
+    rationale.push(`${dim.label}: ${Math.round(dim.score!)} (w=${weight.toFixed(2)})${suffix}`);
   }
 
   const rawScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;

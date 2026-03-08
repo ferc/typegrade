@@ -192,6 +192,8 @@ export function analyzePublishQuality(
   const confidence = pkgJsonResolved ? 1 : 0.7;
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     confidence,
     confidenceSignals,
     enabled: true,

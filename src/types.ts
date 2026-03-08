@@ -1,5 +1,62 @@
 import type { GraphStats } from "./graph/types.js";
 
+// --- Applicability ---
+
+/** Whether a dimension is meaningful for a given library */
+export type Applicability = "applicable" | "not_applicable" | "insufficient_evidence";
+
+// --- Export Roles ---
+
+/** Functional role of an exported declaration in the public API */
+export type ExportRole =
+  | "public-constructor"
+  | "dsl-builder"
+  | "type-utility"
+  | "schema-constructor"
+  | "query-builder"
+  | "transport-boundary"
+  | "navigation-helper"
+  | "state-primitive"
+  | "ui-component"
+  | "ancillary-helper"
+  | "internal-helper";
+
+/** Role classification for a single declaration */
+export interface RoleClassification {
+  role: ExportRole;
+  confidence: number;
+  reasons: string[];
+}
+
+/** Centrality weight derived from role and entrypoint prominence */
+export interface CentralityWeight {
+  declarationName: string;
+  centralityWeight: number;
+  role: ExportRole;
+  isEntrypoint: boolean;
+  isReexported: boolean;
+}
+
+// --- Package Identity ---
+
+/** Resolved identity of the analyzed package */
+export interface PackageIdentity {
+  displayName: string;
+  resolvedSpec: string;
+  resolvedVersion: string | null;
+}
+
+// --- Evidence Summary ---
+
+/** Summary of evidence quality across scoring layers */
+export interface EvidenceSummary {
+  exportCoverage: number;
+  coreSurfaceCoverage: number;
+  specializationEvidence: number;
+  domainEvidence: number;
+  scenarioEvidence: number;
+}
+
 export type AnalysisMode = "source" | "package";
 export type CompositeKey =
   | "consumerApi"
@@ -38,6 +95,8 @@ export interface CompositeScore {
   rationale: string[];
   confidence?: number;
   compositeConfidenceReasons?: string[];
+  /** Which layer this score is comparable at */
+  comparability?: ScoreComparability;
 }
 
 export type Grade = "A+" | "A" | "B" | "C" | "D" | "F" | "N/A";
@@ -58,6 +117,11 @@ export interface DimensionResult {
   positives: string[];
   negatives: string[];
   issues: Issue[];
+  /** Whether this dimension is meaningful for this library */
+  applicability: Applicability;
+  /** Why this dimension is/isn't applicable */
+  applicabilityReasons: string[];
+  /** @deprecated Use applicabilityReasons[0] instead */
   applicabilityReason?: string;
   confidence?: number;
   confidenceSignals?: ConfidenceSignal[];
@@ -158,6 +222,12 @@ export interface AnalysisResult {
   /** Coverage diagnostics — reachable files, positions, undersampling */
   coverageDiagnostics?: CoverageDiagnostics;
   explainability?: ExplainabilityReport;
+  /** Resolved package identity (name, version, spec) */
+  packageIdentity?: PackageIdentity;
+  /** Summary of evidence quality across scoring layers */
+  evidenceSummary?: EvidenceSummary;
+  /** Role breakdown of exported declarations */
+  roleBreakdown?: { role: ExportRole; count: number; avgCentrality: number }[];
   benchmarkDiagnostics?: BenchmarkDiagnostics;
   scenarioDiagnostics?: {
     scenarioPack: string;

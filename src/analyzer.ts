@@ -7,6 +7,7 @@ import type {
   DimensionResult,
   DomainKey,
   DomainScore,
+  EvidenceSummary,
   ExplainabilityReport,
   GlobalScores,
   Issue,
@@ -333,7 +334,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       "configDiscipline",
     ]) {
       dimensions.push({
+        applicability: "not_applicable",
         applicabilityReason: "Not applicable for published declarations",
+        applicabilityReasons: ["Not applicable for published declarations"],
         enabled: false,
         issues: [],
         key,
@@ -349,6 +352,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       });
     }
   }
+
+  // Normalize applicability fields: set defaults for any dimension that didn't explicitly set them
+  normalizeDimensionApplicability(dimensions, consumerSurface, derivedIndex);
 
   // Apply confidence penalty when source-mode consumer analysis fell back to raw source files
   if (usingSourceFallback) {
@@ -493,6 +499,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     domainScore,
   });
 
+  // Build evidence summary
+  const evidenceSummary = buildEvidenceSummary(dimensions, domainInference, scenarioScore);
+
   const result: AnalysisResult = {
     caveats,
     composites,
@@ -502,6 +511,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     dimensions,
     domainInference,
     domainScore,
+    evidenceSummary,
     filesAnalyzed,
     globalScores,
     graphStats,
@@ -520,6 +530,88 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
 
   return result;
+}
+
+/**
+ * Normalize applicability fields on all dimensions.
+ * Sets defaults for dimensions that didn't explicitly set applicability,
+ * and applies heuristic applicability detection for certain dimensions.
+ */
+function normalizeDimensionApplicability(
+  dimensions: DimensionResult[],
+  surface: { stats: { totalDeclarations: number } },
+  derivedIndex: { genericStats: { totalTypeParams: number; constrainedCount: number } },
+): void {
+  for (const dim of dimensions) {
+    // Already explicitly set (e.g., disabled stubs, boundary-discipline)
+    if (dim.applicability) {
+      continue;
+    }
+
+    // Default: applicable with empty reasons
+    dim.applicability = "applicable";
+    dim.applicabilityReasons = [];
+
+    // Heuristic applicability detection per dimension
+    if (dim.key === "specializationPower") {
+      // No specialization axis: mark not_applicable for libraries with no generics at all
+      const { totalTypeParams } = derivedIndex.genericStats;
+      if (totalTypeParams === 0 && surface.stats.totalDeclarations > 0) {
+        dim.applicability = "not_applicable";
+        dim.applicabilityReasons = [
+          "No generic type parameters in public surface — no specialization axis",
+        ];
+      } else if (totalTypeParams > 0 && totalTypeParams < 3) {
+        dim.applicability = "insufficient_evidence";
+        dim.applicabilityReasons = [
+          `Only ${totalTypeParams} generic type parameter(s) — weak specialization evidence`,
+        ];
+      }
+    }
+
+    // Migrate legacy applicabilityReason
+    if (dim.applicabilityReason && dim.applicabilityReasons.length === 0) {
+      dim.applicabilityReasons = [dim.applicabilityReason];
+      if (!dim.enabled) {
+        dim.applicability = "not_applicable";
+      }
+    }
+  }
+}
+
+/**
+ * Build evidence summary across all scoring layers.
+ */
+function buildEvidenceSummary(
+  dimensions: DimensionResult[],
+  domainInference: { confidence: number },
+  scenarioScore: ScenarioScore | undefined,
+): EvidenceSummary {
+  const enabledDims = dimensions.filter((dim) => dim.enabled && dim.score !== null);
+  const totalDims = dimensions.filter((dim) => dim.enabled).length;
+  const exportCoverage = totalDims > 0 ? enabledDims.length / totalDims : 0;
+
+  // Core surface coverage: ratio of applicable dimensions with decent confidence
+  const applicableDims = enabledDims.filter((dim) => dim.applicability === "applicable");
+  const highConfDims = applicableDims.filter((dim) => (dim.confidence ?? 0.8) >= 0.7);
+  const coreSurfaceCoverage =
+    applicableDims.length > 0 ? highConfDims.length / applicableDims.length : 0;
+
+  // Specialization evidence: from specializationPower dimension
+  const specDim = dimensions.find((dim) => dim.key === "specializationPower");
+  const specializationEvidence =
+    specDim?.applicability === "applicable" ? (specDim.confidence ?? 0.8) : 0;
+
+  const domainEvidence = domainInference.confidence;
+  const scenarioEvidence = scenarioScore ? 0.9 : 0.1;
+
+  return {
+    coreSurfaceCoverage: Math.round(coreSurfaceCoverage * 100) / 100,
+    domainEvidence: Math.round(domainEvidence * 100) / 100,
+    exportCoverage: Math.round(exportCoverage * 100) / 100,
+    scenarioEvidence: Math.round(scenarioEvidence * 100) / 100,
+    specializationEvidence: Math.round(specializationEvidence * 100) / 100,
+  };
 }
 
 /**

@@ -800,6 +800,8 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   score = Math.max(0, Math.min(100, score));
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues: [],
     key: CONFIG.key,

@@ -145,7 +145,9 @@ export function analyzeBoundaryDiscipline(
   // If no boundary markers at all, disable this dimension
   if (!hasBoundaryMarkers && !hasValidationLib) {
     return {
+      applicability: "not_applicable",
       applicabilityReason: "No I/O boundaries detected in project",
+      applicabilityReasons: ["No I/O boundaries detected in project"],
       enabled: false,
       issues: [],
       key: CONFIG.key,
@@ -181,6 +183,8 @@ export function analyzeBoundaryDiscipline(
   score = Math.max(0, Math.min(100, score));
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues,
     key: CONFIG.key,

@@ -15,6 +15,8 @@ export type { CompareResult, CompareOptions } from "./compare.js";
 export type {
   AnalysisMode,
   AnalysisResult,
+  Applicability,
+  CentralityWeight,
   CompositeKey,
   CompositeScore,
   ConfidenceSignal,
@@ -23,10 +25,14 @@ export type {
   DimensionResult,
   DomainKey,
   DomainScore,
+  EvidenceSummary,
   ExplainabilityReport,
+  ExportRole,
   GlobalScores,
   Grade,
   Issue,
+  PackageIdentity,
+  RoleClassification,
   ScenarioScore,
   ScoreComparability,
 } from "./types.js";

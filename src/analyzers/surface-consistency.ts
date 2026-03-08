@@ -339,6 +339,8 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
   }
 
   return {
+    applicability: "applicable",
+    applicabilityReasons: [],
     enabled: true,
     issues: [],
     key: CONFIG.key,
