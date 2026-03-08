@@ -207,6 +207,32 @@ function runTrainGates(): GateResult[] {
     }),
   );
 
+  // Gate 11: Domain accuracy — correct rate (including "general" matches)
+  gates.push(
+    runGate("domain-accuracy->=90%", () => {
+      const domainAcc = snapshot["domainAccuracy"] as { accuracy?: number; correct?: number; total?: number } | undefined;
+      if (!domainAcc || !domainAcc.total) {
+        return { detail: "No domain data", passed: true };
+      }
+      const rate = domainAcc.accuracy ?? (domainAcc.correct! / domainAcc.total!);
+      return { detail: `${(rate * 100).toFixed(1)}%`, passed: rate >= 0.9 };
+    }),
+  );
+
+  // Gate 12: Scenario assertions — all must pass
+  gates.push(
+    runGate("scenario-assertions-100%", () => {
+      const scenAssertions = snapshot["scenarioAssertions"] as { passed?: number; failed?: number; total?: number } | undefined;
+      if (!scenAssertions || !scenAssertions.total) {
+        return { detail: "No scenario assertions", passed: true };
+      }
+      return {
+        detail: `${scenAssertions.passed}/${scenAssertions.total} passed`,
+        passed: scenAssertions.failed === 0,
+      };
+    }),
+  );
+
   return gates;
 }
 
@@ -266,8 +292,12 @@ function main() {
   );
   console.log(`\nGate report saved to benchmarks-output/${reportFilename}`);
 
-  if (!allPassed) {
+  // Train gates are strict — eval gates are report-only (non-blocking)
+  if (!allPassed && gateMode === "train") {
     process.exit(1);
+  }
+  if (!allPassed && gateMode === "eval") {
+    console.log("\nEval gate failures are non-blocking (report-only mode).");
   }
 }
 

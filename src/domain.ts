@@ -10,6 +10,9 @@ export type DomainType =
   | "schema"
   | "frontend"
   | "stream"
+  | "state"
+  | "testing"
+  | "cli"
   | "general";
 
 export interface DomainAdjustment {
@@ -261,6 +264,87 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       weight: streamSignal,
     });
     signals.push(`${streamMatchCount} declarations match stream/reactive patterns`);
+  }
+
+  // 2f: State — store/atom/selector/dispatch/derived declarations
+  // Note: "subscribe", "computed" removed — too generic (matches rxjs, vue, etc.)
+  const stateNames = ["store", "atom", "selector", "dispatch", "derived"];
+  let stateMatchCount = 0;
+  for (const decl of surface.declarations) {
+    const lowerName = decl.name.toLowerCase();
+    if (stateNames.some((nm) => lowerName.includes(nm))) {
+      stateMatchCount++;
+    }
+  }
+  if (stateMatchCount >= 2) {
+    const baseSignal = Math.min(0.6, 0.2 + stateMatchCount * 0.1);
+    const stateSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "state"
+        ? competingDomainPenalty
+        : 1);
+    emit({
+      category: "declaration-role",
+      direction: "positive",
+      domain: "state",
+      reason: `${stateMatchCount} declarations match state management patterns`,
+      ruleId: "state-symbol-density",
+      weight: stateSignal,
+    });
+    signals.push(`${stateMatchCount} declarations match state management patterns`);
+  }
+
+  // 2g: Testing — test/describe/expect/mock/fixture declarations
+  const testingNames = ["mock", "fixture", "stub", "spy", "assert", "matcher", "expect"];
+  let testingMatchCount = 0;
+  for (const decl of surface.declarations) {
+    const lowerName = decl.name.toLowerCase();
+    if (testingNames.some((nm) => lowerName.includes(nm))) {
+      testingMatchCount++;
+    }
+  }
+  if (testingMatchCount >= 2) {
+    const baseSignal = Math.min(0.6, 0.2 + testingMatchCount * 0.1);
+    const testingSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "testing"
+        ? competingDomainPenalty
+        : 1);
+    emit({
+      category: "declaration-role",
+      direction: "positive",
+      domain: "testing",
+      reason: `${testingMatchCount} declarations match testing patterns`,
+      ruleId: "testing-symbol-density",
+      weight: testingSignal,
+    });
+    signals.push(`${testingMatchCount} declarations match testing patterns`);
+  }
+
+  // 2h: CLI — command/program/subcommand/argv declarations
+  // Note: "option", "argument", "handler" removed — too generic (matches axios options, date-fns options, etc.)
+  const cliNames = ["command", "program", "subcommand", "argv", "parseargs"];
+  let cliMatchCount = 0;
+  for (const decl of surface.declarations) {
+    const lowerName = decl.name.toLowerCase();
+    if (cliNames.some((nm) => lowerName.includes(nm))) {
+      cliMatchCount++;
+    }
+  }
+  if (cliMatchCount >= 2) {
+    const baseSignal = Math.min(0.6, 0.2 + cliMatchCount * 0.1);
+    const cliSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "cli" ? competingDomainPenalty : 1);
+    emit({
+      category: "declaration-role",
+      direction: "positive",
+      domain: "cli",
+      reason: `${cliMatchCount} declarations match CLI patterns`,
+      ruleId: "cli-symbol-density",
+      weight: cliSignal,
+    });
+    signals.push(`${cliMatchCount} declarations match CLI patterns`);
   }
 
   // ── Category 3: Generic-structure rules ─────────────────────────────────
@@ -611,13 +695,9 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
-  // Fallback: utility only if overwhelmingly type aliases AND no other domain won
-  // Tightened from 50% to 70% to reduce false positives
-  if (bestDomain === "general" && totalDecls > 5 && typeAliases / totalDecls > 0.7) {
-    bestDomain = "utility";
-    bestScore = 0.4;
-    signals.push(`${typeAliases}/${totalDecls} declarations are type aliases (utility fallback)`);
-  }
+  // No utility fallback — type alias density alone is insufficient evidence.
+  // Libraries like ts-pattern use many type aliases but are general-purpose.
+  // If no domain-specific evidence is found, "general" is the correct default.
 
   // ── Compute false-positive risk ─────────────────────────────────────────
 
@@ -682,6 +762,30 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       adjustment: "expect high generic density",
       dimension: "apiSpecificity",
       reason: "Schema/utility libraries are expected to use generics extensively",
+    });
+  }
+
+  if (bestDomain === "state") {
+    adjustments.push({
+      adjustment: "accept reactive primitives",
+      dimension: "apiSpecificity",
+      reason: "State management libraries use reactive store/atom primitives",
+    });
+  }
+
+  if (bestDomain === "testing") {
+    adjustments.push({
+      adjustment: "accept mock/fixture patterns",
+      dimension: "apiSafety",
+      reason: "Testing libraries intentionally use flexible mock types",
+    });
+  }
+
+  if (bestDomain === "cli") {
+    adjustments.push({
+      adjustment: "accept builder pattern chains",
+      dimension: "surfaceComplexity",
+      reason: "CLI libraries use builder patterns for option/argument chaining",
     });
   }
 

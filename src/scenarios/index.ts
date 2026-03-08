@@ -1,21 +1,27 @@
+import { CLI_PACK } from "./cli-pack.js";
 import type { DomainKey } from "../types.js";
 import { ORM_PACK } from "./orm-pack.js";
 import { RESULT_PACK } from "./result-pack.js";
 import { ROUTER_PACK } from "./router-pack.js";
 import { SCHEMA_PACK } from "./schema-pack.js";
+import { STATE_PACK } from "./state-pack.js";
 import { STREAM_PACK } from "./stream-pack.js";
 import type { ScenarioPack } from "./types.js";
+import { TESTING_PACK } from "./testing-pack.js";
 import { VALIDATION_PACK } from "./validation-pack.js";
 
 export { evaluateScenarioPack } from "./types.js";
 export type { ScenarioPack, ScenarioTest } from "./types.js";
 
 const SCENARIO_PACKS: Record<string, ScenarioPack> = {
+  cli: CLI_PACK,
   orm: ORM_PACK,
   result: RESULT_PACK,
   router: ROUTER_PACK,
   schema: SCHEMA_PACK,
+  state: STATE_PACK,
   stream: STREAM_PACK,
+  testing: TESTING_PACK,
   validation: VALIDATION_PACK,
 };
 

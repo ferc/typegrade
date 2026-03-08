@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import type { AnalysisResult, CoverageDiagnostics, DomainKey, ScenarioScore } from "../src/types.js";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import type { AnalysisResult, ScenarioScore } from "../src/types.js";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS, UNDERSAMPLED_ANCHOR_WAIVERS } from "./assertions.js";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
@@ -24,25 +24,20 @@ const concurrencyIdx = args.indexOf("--concurrency");
 const concurrency = concurrencyIdx >= 0 ? Number.parseInt(args[concurrencyIdx + 1] ?? "4", 10) : undefined;
 
 // Determine corpus split
-let corpusSplit: BenchmarkSplit | "holdout" | "pool" = "train";
+let corpusSplit: BenchmarkSplit | "holdout" = "train";
 if (holdoutMode) corpusSplit = "holdout";
 else if (evalMode) corpusSplit = "eval-fixed";
-else if (poolSampleCount > 0 || poolCount > 0) corpusSplit = poolCount > 0 ? "eval-pool" : "pool";
+else if (poolSampleCount > 0 || poolCount > 0) corpusSplit = "eval-pool";
 
 function resolveManifestFilename(): string {
   if (manifestFlag) return manifestFlag.split("=")[1]!;
   if (holdoutMode) return "manifest.holdout.json";
   if (evalMode) return "manifest.eval.fixed.json";
-  if (poolCount > 0) return "manifest.eval.pool.json";
+  if (poolCount > 0 || poolSampleCount > 0) return "manifest.eval.pool.json";
   return "manifest.train.json";
 }
 
 const manifestFilename = resolveManifestFilename();
-
-interface ManifestEntryParsed {
-  spec: string;
-  typesVersion?: string;
-}
 
 interface BenchmarkEntry {
   agentReadiness: number | null;
@@ -55,11 +50,6 @@ interface BenchmarkEntry {
   typeSafety: number | null;
 }
 
-function parseManifestEntry(entry: ManifestEntry): ManifestEntryParsed {
-  if (typeof entry === "string") return { spec: entry };
-  return entry;
-}
-
 function getCompositeScore(result: AnalysisResult, key: string): number | null {
   return result.composites.find((comp) => comp.key === key)?.score ?? null;
 }
@@ -67,27 +57,25 @@ function getCompositeScore(result: AnalysisResult, key: string): number | null {
 async function main() {
   // Load manifest with split-aware loader
   let packages: { tier: string; entry: ManifestEntry }[] = [];
+  let poolManifestHash: string | undefined;
+  let poolSampledHashes: string[] | undefined;
 
   if (poolCount > 0) {
     // Pool sampling mode — stratified sample from eval-pool
     const manifest = loadManifest("eval-pool");
-    const { sampled, manifestHash } = samplePool(manifest, { count: poolCount, seed });
+    const { sampled, manifestHash, sampledHashes } = samplePool(manifest, { count: poolCount, seed });
     packages = sampled.map((s) => ({ entry: s.entry as ManifestEntry, tier: s.tier }));
+    poolManifestHash = manifestHash;
+    poolSampledHashes = sampledHashes;
     console.log(`Pool sample: ${sampled.length} packages (seed=${seed}, manifestHash=${manifestHash})\n`);
   } else if (poolSampleCount > 0) {
-    // Legacy pool-sample mode (from any manifest)
-    const manifest = loadManifestByFilename(manifestFilename);
-    const flat = flattenManifest(manifest);
-
-    // Fisher-Yates shuffle with seeded PRNG
-    const rng = mulberry32(seed);
-    for (let i = flat.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [flat[i], flat[j]] = [flat[j]!, flat[i]!];
-    }
-    const sampled = flat.slice(0, Math.min(poolSampleCount, flat.length));
+    // Random eval-pool sample — stratified sampling from eval pool
+    const manifest = loadManifest("eval-pool");
+    const { sampled, manifestHash, sampledHashes } = samplePool(manifest, { count: poolSampleCount, seed });
     packages = sampled.map((s) => ({ entry: s.entry as ManifestEntry, tier: s.tier }));
-    console.log(`Pool sample: ${sampled.length} packages (seed=${seed})\n`);
+    poolManifestHash = manifestHash;
+    poolSampledHashes = sampledHashes;
+    console.log(`Pool sample: ${sampled.length} packages (seed=${seed}, manifestHash=${manifestHash})\n`);
   } else {
     const manifest = loadManifestByFilename(manifestFilename);
     packages = flattenManifest(manifest).map((f) => ({ entry: f.entry as ManifestEntry, tier: f.tier }));
@@ -367,19 +355,21 @@ async function main() {
   console.log(`  Abstained: ${domainAbstained}/${domainTotal}`);
   console.log(`  Wrong-specific: ${domainIncorrect}/${domainTotal} (${(wrongSpecificRate * 100).toFixed(1)}%)`);
 
-  // Check for undersampled packages used as must-pass anchors
-  const mustPassPackages = new Set<string>();
+  // Check for undersampled packages used as HIGHER-side must-pass anchors.
+  // Only the higher side matters: an undersampled package with an unreliable
+  // HIGH score could make an assertion pass when it shouldn't. Undersampled
+  // packages on the lower side are fine — their low scores are correct.
+  const mustPassHigherPackages = new Set<string>();
   for (const assertion of PAIRWISE_ASSERTIONS) {
     if (assertion.class === "must-pass") {
-      mustPassPackages.add(assertion.higher);
-      mustPassPackages.add(assertion.lower);
+      mustPassHigherPackages.add(assertion.higher);
     }
   }
 
   const undersampledAnchors: { name: string; reasons: string[] }[] = [];
   for (const entry of entries) {
     const coverage = entry.result.coverageDiagnostics;
-    if (coverage?.undersampled && mustPassPackages.has(entry.name) && !UNDERSAMPLED_ANCHOR_WAIVERS.has(entry.name)) {
+    if (coverage?.undersampled && mustPassHigherPackages.has(entry.name) && !UNDERSAMPLED_ANCHOR_WAIVERS.has(entry.name)) {
       undersampledAnchors.push({ name: entry.name, reasons: coverage.undersampledReasons });
     }
   }
@@ -462,6 +452,7 @@ async function main() {
       undersampledAnchors: undersampledAnchors.map((a) => a.name),
     },
     corpusSplit,
+    manifestHash: poolManifestHash,
     domainAccuracy: {
       abstained: domainAbstained,
       accuracy: Math.round(domainAccuracy * 1000) / 1000,
@@ -471,6 +462,8 @@ async function main() {
       wrongSpecificRate: Math.round(wrongSpecificRate * 1000) / 1000,
     },
     manifestSource: manifestFilename,
+    sampleCount: poolSampleCount > 0 ? poolSampleCount : poolCount > 0 ? poolCount : undefined,
+    sampledHashes: poolSampledHashes,
     seed: (poolSampleCount > 0 || poolCount > 0) ? seed : undefined,
     timestamp: new Date().toISOString(),
   };
@@ -483,16 +476,6 @@ async function main() {
   if (mustPassFailed > 0 && corpusSplit === "train") {
     process.exit(1);
   }
-}
-
-// Seeded PRNG for reproducible pool sampling
-function mulberry32(a: number) {
-  return () => {
-    let t = (a += 0x6D2B79F5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 main().catch((err) => {

@@ -15,9 +15,21 @@ export type DomainKey =
   | "schema"
   | "frontend"
   | "stream"
+  | "state"
+  | "testing"
+  | "cli"
   | "general";
 export type ScoreComparability = "global" | "domain" | "scenario";
-export type ScenarioPackKey = "validation" | "router" | "orm" | "result" | "schema" | "stream";
+export type ScenarioPackKey =
+  | "validation"
+  | "router"
+  | "orm"
+  | "result"
+  | "schema"
+  | "stream"
+  | "state"
+  | "testing"
+  | "cli";
 
 export interface CompositeScore {
   key: CompositeKey;
@@ -203,6 +215,10 @@ export interface CoverageDiagnostics {
   crossPackageTypeRefs?: number;
   /** Whether a coverage penalty was applied to scores */
   coveragePenaltyApplied?: boolean;
+  /** Classification of sampling quality */
+  samplingClass: "complete" | "compact" | "undersampled";
+  /** If compact, explanation for why it's compact-but-complete */
+  compactReason?: string;
 }
 
 export interface PackageAnalysisContext {

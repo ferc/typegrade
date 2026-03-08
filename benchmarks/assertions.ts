@@ -150,15 +150,12 @@ export const EXPECTED_DOMAINS: Record<string, string> = {
  * Packages that are structurally undersampled (few reachable files, few positions/declarations)
  * but have been manually verified to produce stable, meaningful scores.
  * These are excluded from the undersampled-anchor gate check.
+ *
+ * NOTE: With the samplingClass distinction (complete/compact/undersampled),
+ * compact packages (few files but sufficient surface) are no longer flagged
+ * as undersampled and should not need waivers. This set should stay empty.
  */
-export const UNDERSAMPLED_ANCHOR_WAIVERS: Set<string> = new Set([
-  "valibot",      // Bundled re-exports from 2 files — scores are stable and representative
-  "neverthrow",   // Single-file library — small surface but well-typed, scores consistent
-  "express",      // @types package with few declarations — loose scores are correct and stable
-  "lodash",       // @types with few measured positions — loose scores are correct and stable
-  "axios",        // Bundled from 1 file — scores stable across runs
-  "moment",       // Bundled from 2 files — loose scores are correct and stable
-]);
+export const UNDERSAMPLED_ANCHOR_WAIVERS: Set<string> = new Set([]);
 
 export const SCENARIO_ASSERTIONS: ScenarioAssertion[] = [
   // Router scenario assertions (both detected as router domain)

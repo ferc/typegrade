@@ -121,18 +121,50 @@ function computeCoverageDiagnostics(opts: {
     );
   }
 
-  const undersampled = reasons.length > 0;
+  // Classify sampling quality:
+  // - "complete": all thresholds met
+  // - "compact": few files but sufficient positions and declarations (small-by-design library)
+  // - "undersampled": genuinely insufficient coverage
+  const fewFilesOnly =
+    reasons.length > 0 &&
+    graphStats.totalReachable > 0 &&
+    reasons.every((rr) => rr.startsWith("Only") && rr.includes("reachable file"));
+  const hasSufficientSurface =
+    surfacePositions >= MIN_MEASURED_POSITIONS &&
+    surfaceDeclarations >= MIN_MEASURED_DECLARATIONS &&
+    !graphStats.usedFallbackGlob;
 
-  return {
+  let samplingClass: "complete" | "compact" | "undersampled" = "complete";
+  let compactReason: string | undefined = undefined;
+
+  if (reasons.length === 0) {
+    samplingClass = "complete";
+  } else if (fewFilesOnly && hasSufficientSurface) {
+    samplingClass = "compact";
+    compactReason = `${graphStats.totalReachable} file(s) but ${surfacePositions} positions and ${surfaceDeclarations} declarations — small-by-design library`;
+  } else {
+    samplingClass = "undersampled";
+  }
+
+  const undersampled = samplingClass === "undersampled";
+
+  const result: CoverageDiagnostics = {
     coveragePenaltyApplied: undersampled,
     crossPackageTypeRefs: xrefs,
     measuredDeclarations: surfaceDeclarations,
     measuredPositions: surfacePositions,
     reachableFiles: graphStats.totalReachable,
+    samplingClass,
     typesSource,
     undersampled,
     undersampledReasons: reasons,
   };
+
+  if (compactReason) {
+    result.compactReason = compactReason;
+  }
+
+  return result;
 }
 
 export interface AnalyzeOptions {

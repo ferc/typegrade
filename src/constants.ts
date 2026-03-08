@@ -132,6 +132,7 @@ export const VALIDATION_LIBRARIES = [
 ];
 
 export const DOMAIN_PATTERNS = {
+  cli: ["commander", "yargs", "cac", "meow", "oclif", "inquirer", "prompts", "citty", "cleye"],
   frontend: ["react", "preact", "vue", "svelte", "solid-js", "@angular/core"],
   orm: ["drizzle-orm", "prisma", "typeorm", "sequelize", "knex", "mikro-orm", "kysely"],
   result: ["neverthrow", "effect", "fp-ts", "purify-ts", "oxide.ts"],
@@ -147,7 +148,28 @@ export const DOMAIN_PATTERNS = {
     "@tanstack/react-router",
   ],
   schema: ["type-fest", "ts-toolbelt", "utility-types", "type-zoo"],
+  state: [
+    "zustand",
+    "jotai",
+    "valtio",
+    "recoil",
+    "mobx",
+    "redux",
+    "@reduxjs/toolkit",
+    "nanostores",
+    "pinia",
+  ],
   stream: ["rxjs", "xstate", "most", "callbag", "@most/core"],
+  testing: [
+    "vitest",
+    "jest",
+    "@testing-library",
+    "playwright",
+    "cypress",
+    "supertest",
+    "msw",
+    "nock",
+  ],
   validation: [
     "zod",
     "valibot",
@@ -170,6 +192,23 @@ export const DOMAIN_FIT_ADJUSTMENTS: Record<
   string,
   { dimension: string; weight: number; reason: string }[]
 > = {
+  cli: [
+    {
+      dimension: "apiSpecificity",
+      reason: "Command option schema inference is core CLI value",
+      weight: 1.3,
+    },
+    {
+      dimension: "agentUsability",
+      reason: "CLI builder discoverability matters for AI agents",
+      weight: 1.2,
+    },
+    {
+      dimension: "specializationPower",
+      reason: "Parsed argument inference is key CLI specialization",
+      weight: 1.2,
+    },
+  ],
   orm: [
     {
       dimension: "apiSpecificity",
@@ -239,6 +278,23 @@ export const DOMAIN_FIT_ADJUSTMENTS: Record<
       weight: 1.3,
     },
   ],
+  state: [
+    {
+      dimension: "apiSpecificity",
+      reason: "Store/atom type inference is the core state value",
+      weight: 1.3,
+    },
+    {
+      dimension: "semanticLift",
+      reason: "Derived/computed state propagation matters",
+      weight: 1.2,
+    },
+    {
+      dimension: "specializationPower",
+      reason: "State slice narrowing is key specialization",
+      weight: 1.2,
+    },
+  ],
   stream: [
     {
       dimension: "semanticLift",
@@ -253,6 +309,23 @@ export const DOMAIN_FIT_ADJUSTMENTS: Record<
     {
       dimension: "specializationPower",
       reason: "Operator inference and typed channels are stream specializations",
+      weight: 1.2,
+    },
+  ],
+  testing: [
+    {
+      dimension: "apiSpecificity",
+      reason: "Mock/fixture typing precision matters for test tools",
+      weight: 1.2,
+    },
+    {
+      dimension: "agentUsability",
+      reason: "Test helper discoverability is key for testing tools",
+      weight: 1.3,
+    },
+    {
+      dimension: "specializationPower",
+      reason: "Assertion/matcher narrowing is key specialization",
       weight: 1.2,
     },
   ],
