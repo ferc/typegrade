@@ -1,11 +1,13 @@
 {
   "packages": {
-    "elite": ["zod@3.24.2", "valibot@1.0.0", "ts-pattern@5.6.2"],
-    "solid": ["date-fns@4.1.0", "remeda@2.21.2", "neverthrow@8.2.0"],
+    "elite": ["zod@3.24.2", "valibot@1.0.0", "ts-pattern@5.6.2", "arktype@2.1.0", "effect@3.14.8"],
+    "solid": ["date-fns@4.1.0", "remeda@2.21.2", "neverthrow@8.2.0", "type-fest@4.35.0", "drizzle-orm@0.39.3"],
     "loose": [
       { "spec": "express@5.1.0", "typesVersion": "5.0.6" },
       { "spec": "lodash@4.17.21", "typesVersion": "4.17.24" },
-      "axios@1.8.4"
+      "axios@1.8.4",
+      "uuid@11.1.0",
+      { "spec": "moment@2.30.1", "typesVersion": "2.30.5" }
     ]
   }
 }

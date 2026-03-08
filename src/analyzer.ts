@@ -2,7 +2,6 @@ import type { AnalysisMode, AnalysisResult, DimensionResult, Issue, PackageAnaly
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
 import { Project } from "ts-morph";
-import { analyzeApiExpressiveness } from "./analyzers/api-expressiveness.js";
 import { analyzeApiSafety } from "./analyzers/api-safety.js";
 import { analyzeApiSpecificity } from "./analyzers/api-specificity.js";
 import { analyzeBoundaryDiscipline } from "./analyzers/boundary-discipline.js";
@@ -10,6 +9,9 @@ import { analyzeConfigDiscipline } from "./analyzers/config-discipline.js";
 import { analyzeDeclarationFidelity } from "./analyzers/declaration-fidelity.js";
 import { analyzeImplementationSoundness } from "./analyzers/implementation-soundness.js";
 import { analyzePublishQuality } from "./analyzers/publish-quality.js";
+import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
+import { analyzeSurfaceCoherence } from "./analyzers/surface-coherence.js";
+import { detectDomain } from "./domain.js";
 import { computeComposites } from "./scorer.js";
 import { extractPublicSurface } from "./surface/index.js";
 
@@ -96,12 +98,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Extract public surface once, shared by all consumer-facing analyzers
   const consumerSurface = extractPublicSurface(consumerFiles);
 
-  // Run consumer-facing dimensions (1-4) against the shared surface
+  // Domain detection
+  const domainInference = detectDomain(consumerSurface, options?.packageContext?.packageName);
+
+  // Run consumer-facing dimensions against the shared surface
+  const packageName = options?.packageContext?.packageName;
   const dimensions: DimensionResult[] = [
     analyzeApiSpecificity(consumerSurface),
-    analyzeApiSafety(consumerSurface),
-    analyzeApiExpressiveness(consumerSurface),
+    analyzeApiSafety(consumerSurface, packageName),
+    analyzeSemanticLift(consumerSurface),
     analyzePublishQuality(consumerSurface, project, options?.packageContext),
+    analyzeSurfaceCoherence(consumerSurface),
   ];
 
   // Source-only dimensions (5-8)
@@ -148,6 +155,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     caveats,
     composites,
     dimensions,
+    domainInference,
     filesAnalyzed,
     mode,
     projectName,

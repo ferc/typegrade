@@ -6,6 +6,7 @@ export interface CompositeScore {
   score: number | null;
   grade: Grade;
   rationale: string[];
+  confidence?: number;
 }
 
 export type Grade = "A+" | "A" | "B" | "C" | "D" | "F" | "N/A";
@@ -21,6 +22,7 @@ export interface DimensionResult {
   negatives: string[];
   issues: Issue[];
   applicabilityReason?: string;
+  confidence?: number;
 }
 
 export interface Issue {
@@ -42,6 +44,7 @@ export interface AnalysisResult {
   dimensions: DimensionResult[];
   caveats: string[];
   topIssues: Issue[];
+  domainInference?: { domain: string; confidence: number; signals: string[] };
 }
 
 export interface PrecisionFeatures {

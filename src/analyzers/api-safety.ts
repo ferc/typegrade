@@ -2,13 +2,18 @@ import type { DimensionResult, Issue } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
 import type { PublicSurface, SurfacePosition } from "../surface/index.js";
 import { analyzePrecision } from "../utils/type-utils.js";
+import { detectDomain } from "../domain.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSafety")!;
 
-export function analyzeApiSafety(surface: PublicSurface): DimensionResult {
+export function analyzeApiSafety(surface: PublicSurface, packageName?: string): DimensionResult {
   const issues: Issue[] = [];
   const positives: string[] = [];
   const negatives: string[] = [];
+
+  // Domain-aware suppression for validation libraries
+  const domain = detectDomain(surface, packageName);
+  const suppressUnknownParams = domain.domain === "validation" && domain.confidence >= 0.5;
 
   let totalPositions = 0;
   let anyPositions = 0;
@@ -26,6 +31,10 @@ export function analyzeApiSafety(surface: PublicSurface): DimensionResult {
         anyPositions++;
         pushAnyIssue(pos, issues);
       } else if (result.containsUnknown) {
+        // Suppress unknown warnings for function params in validation libraries
+        if (suppressUnknownParams && pos.role === "param" && pos.declarationKind === "function") {
+          continue;
+        }
         unknownPositions++;
         pushUnknownIssue(pos, issues);
       }

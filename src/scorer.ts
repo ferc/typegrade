@@ -55,7 +55,14 @@ function computeComposite(
   }
 
   const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
-  return { grade: computeGrade(score), key, rationale, score };
+  const confidence = computeConfidence(contributing);
+  return { confidence, grade: computeGrade(score), key, rationale, score };
+}
+
+function computeConfidence(contributing: DimensionResult[]): number {
+  if (contributing.length === 0) {return 0;}
+  const sum = contributing.reduce((acc, dim) => acc + (dim.confidence ?? 0.8), 0);
+  return Math.round((sum / contributing.length) * 100) / 100;
 }
 
 function computeAgentReadiness(

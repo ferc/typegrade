@@ -45,11 +45,11 @@ describe("e2e: analyzeProject", () => {
     expect(ca!.score).toBeLessThanOrEqual(85);
   });
 
-  it("scores tanstack-style fixture with decent expressiveness", () => {
+  it("tanstack-style fixture has decent semantic lift", () => {
     const result = analyzeProject(resolve(fixturesDir, "tanstack-style"));
-    const expr = getDimension(result, "apiExpressiveness");
-    expect(expr).toBeDefined();
-    expect(expr!.score).toBeGreaterThanOrEqual(20);
+    const lift = getDimension(result, "semanticLift");
+    expect(lift).toBeDefined();
+    expect(lift!.score).toBeGreaterThanOrEqual(15);
   });
 
   it("unsound fixture has low soundness score", () => {
@@ -112,9 +112,9 @@ describe("e2e: analyzeProject", () => {
     }
   });
 
-  it("source mode has 8 dimensions", () => {
+  it("source mode has 9 dimensions", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
-    expect(result.dimensions).toHaveLength(8);
+    expect(result.dimensions).toHaveLength(9);
     expect(result.mode).toBe("source");
   });
 
@@ -126,18 +126,18 @@ describe("e2e: analyzeProject", () => {
     expect(safety!.issues.filter((issue) => issue.severity === "error").length).toBeGreaterThan(0);
   });
 
-  it("computed-generics fixture scores high on expressiveness", () => {
+  it("computed-generics fixture has semantic lift", () => {
     const result = analyzeProject(resolve(fixturesDir, "computed-generics"));
-    const expr = getDimension(result, "apiExpressiveness");
-    expect(expr).toBeDefined();
-    expect(expr!.score).toBeGreaterThanOrEqual(30);
+    const lift = getDimension(result, "semanticLift");
+    expect(lift).toBeDefined();
+    expect(lift!.score).toBeGreaterThanOrEqual(20);
   });
 
   it("correlated-generics fixture has generic correlation", () => {
     const result = analyzeProject(resolve(fixturesDir, "correlated-generics"));
-    const expr = getDimension(result, "apiExpressiveness");
-    expect(expr).toBeDefined();
-    expect(expr!.score).toBeGreaterThanOrEqual(20);
+    const lift = getDimension(result, "semanticLift");
+    expect(lift).toBeDefined();
+    expect(lift!.score).toBeGreaterThanOrEqual(15);
   });
 
   it("no-boundaries fixture disables boundary discipline", () => {

@@ -77,8 +77,9 @@ export function renderReport(result: AnalysisResult): string {
   const consumerKeys = new Set([
     "apiSpecificity",
     "apiSafety",
-    "apiExpressiveness",
+    "semanticLift",
     "publishQuality",
+    "surfaceCoherence",
     "declarationFidelity",
   ]);
   const consumerView = result.dimensions.filter((dim) => consumerKeys.has(dim.key));

@@ -12,25 +12,31 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "apiSpecificity",
     label: "API Specificity",
     sourceOnly: false,
-    weights: { consumerApi: 0.55 },
+    weights: { consumerApi: 0.4 },
   },
   {
     key: "apiSafety",
     label: "API Safety",
     sourceOnly: false,
-    weights: { consumerApi: 0.25 },
+    weights: { consumerApi: 0.2 },
   },
   {
-    key: "apiExpressiveness",
-    label: "API Expressiveness",
+    key: "semanticLift",
+    label: "Semantic Lift",
     sourceOnly: false,
-    weights: {},
+    weights: { consumerApi: 0.15 },
   },
   {
     key: "publishQuality",
     label: "Publish Quality",
     sourceOnly: false,
     weights: { consumerApi: 0.1 },
+  },
+  {
+    key: "surfaceCoherence",
+    label: "Surface Coherence",
+    sourceOnly: false,
+    weights: { consumerApi: 0.05 },
   },
   {
     key: "declarationFidelity",
@@ -91,3 +97,8 @@ export const VALIDATION_LIBRARIES = [
   "typia",
   "@effect/schema",
 ];
+
+export const DOMAIN_PATTERNS = {
+  result: ["neverthrow", "effect", "fp-ts", "purify-ts", "oxide.ts"],
+  validation: ["zod", "valibot", "arktype", "io-ts", "yup", "joi", "superstruct", "runtypes", "typia", "@effect/schema"],
+} as const;

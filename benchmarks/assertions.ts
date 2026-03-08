@@ -26,4 +26,39 @@ export const PAIRWISE_ASSERTIONS: PairwiseAssertion[] = [
   { composite: "consumerApi", higher: "zod", lower: "axios" },
   { composite: "consumerApi", higher: "ts-pattern", lower: "lodash" },
   { composite: "consumerApi", higher: "neverthrow", lower: "axios" },
+
+  // Elite tier internal (arktype & effect vs loose)
+  { composite: "consumerApi", higher: "arktype", lower: "express" },
+  { composite: "consumerApi", higher: "arktype", lower: "lodash" },
+  { composite: "consumerApi", higher: "arktype", lower: "axios" },
+  { composite: "consumerApi", higher: "effect", lower: "express" },
+  { composite: "consumerApi", higher: "effect", lower: "lodash" },
+  { composite: "consumerApi", higher: "effect", lower: "axios" },
+
+  // Elite vs solid
+  { composite: "consumerApi", higher: "valibot", lower: "type-fest" },
+  { composite: "consumerApi", higher: "valibot", lower: "drizzle-orm" },
+  { composite: "consumerApi", higher: "ts-pattern", lower: "type-fest" },
+
+  // Solid tier
+  { composite: "consumerApi", higher: "type-fest", lower: "lodash" },
+  { composite: "consumerApi", higher: "type-fest", lower: "axios" },
+  { composite: "consumerApi", higher: "drizzle-orm", lower: "axios" },
+  { composite: "consumerApi", higher: "remeda", lower: "axios" },
+  { composite: "consumerApi", higher: "neverthrow", lower: "lodash" },
+
+  // Loose tier differentiation
+  { composite: "consumerApi", higher: "express", lower: "moment" },
+  { composite: "consumerApi", higher: "axios", lower: "uuid" },
+  { composite: "consumerApi", higher: "lodash", lower: "uuid" },
+
+  // Cross-tier
+  { composite: "consumerApi", higher: "arktype", lower: "neverthrow" },
+  { composite: "consumerApi", higher: "effect", lower: "remeda" },
+  { composite: "consumerApi", higher: "date-fns", lower: "express" },
+  { composite: "consumerApi", higher: "date-fns", lower: "uuid" },
+  { composite: "consumerApi", higher: "zod", lower: "moment" },
+  { composite: "consumerApi", higher: "ts-pattern", lower: "axios" },
+  { composite: "consumerApi", higher: "remeda", lower: "express" },
+  { composite: "consumerApi", higher: "remeda", lower: "moment" },
 ];
