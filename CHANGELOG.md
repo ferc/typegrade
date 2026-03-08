@@ -1,3 +1,9 @@
+## [0.7.5](https://github.com/ferc/typegrade/compare/v0.7.4...v0.7.5) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** manually exchange OIDC token and write npm auth to project .npmrc ([2424448](https://github.com/ferc/typegrade/commit/242444813a96ecc0451f0923eaca4a95b405cfb6))
+
 ## [0.7.4](https://github.com/ferc/typegrade/compare/v0.7.3...v0.7.4) (2026-03-08)
 
 ### Bug Fixes
