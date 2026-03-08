@@ -35,7 +35,6 @@ export default {
 				changelogFile: "CHANGELOG.md",
 			},
 		],
-		["@semantic-release/npm", { provenance: true }],
 		[
 			"@semantic-release/git",
 			{
@@ -45,5 +44,6 @@ export default {
 			},
 		],
 		"@semantic-release/github",
+		["@semantic-release/npm", { provenance: true }],
 	],
 };
