@@ -50,13 +50,16 @@ function compositeLabel(key: string): string {
 export function renderReport(result: AnalysisResult): string {
   const lines: string[] = [
     "",
-    pc.bold("  tsguard v0.2.0"),
+    pc.bold("  tsguard v0.3.0"),
     "",
   ];
 
   const modeLabel = result.mode === "package" ? "package analysis" : "source analysis";
   lines.push(`  Project: ${pc.bold(result.projectName)} (${modeLabel})`);
   lines.push(`  Files: ${result.filesAnalyzed} analyzed in ${(result.timeMs / 1000).toFixed(1)}s`);
+  if (result.domainInference && result.domainInference.confidence >= 0.5) {
+    lines.push(`  Domain: ${result.domainInference.domain} (${Math.round(result.domainInference.confidence * 100)}% confidence)`);
+  }
   lines.push("");
 
   // Composite scores box

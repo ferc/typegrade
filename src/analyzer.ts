@@ -130,7 +130,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         enabled: false,
         issues: [],
         key,
-        label: key.replaceAll(/([A-Z])/g, " $1").trim(),
+        label: key.replaceAll(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()).trim(),
         metrics: {},
         negatives: [],
         positives: [],
