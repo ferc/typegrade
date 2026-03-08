@@ -5,3 +5,4 @@ dist/
 
 .claude/plans/
 benchmarks/results/
+benchmarks-output/
