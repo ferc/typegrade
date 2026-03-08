@@ -43,7 +43,7 @@ export function run() {
   program
     .name("tsguard")
     .description("TypeScript type-safety and precision analyzer")
-    .version("0.3.0")
+    .version("0.4.0")
     .option("--json", "Output as JSON")
     .option("--min-score <n>", "Exit code 1 if score < n (CI gate)", parseInt)
     .option("--verbose", "Show per-dimension breakdown")

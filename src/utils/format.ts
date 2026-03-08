@@ -50,7 +50,7 @@ function compositeLabel(key: string): string {
 export function renderReport(result: AnalysisResult): string {
   const lines: string[] = [
     "",
-    pc.bold("  tsguard v0.3.0"),
+    pc.bold("  tsguard v0.4.0"),
     "",
   ];
 
