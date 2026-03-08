@@ -10,6 +10,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(\(.+\))?!?: .+'
+          if ! echo "$PR_TITLE" | grep -qE "$pattern"; then
+            echo "::error::PR title must follow conventional commit format: type(scope): description"
+            echo "Allowed types: feat, fix, perf, refactor, docs, test, build, ci, chore, style, revert"
+            echo "Got: $PR_TITLE"
+            exit 1
+          fi
+
   quality:
     runs-on: ubuntu-latest
     steps:
