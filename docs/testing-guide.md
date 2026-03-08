@@ -1,16 +1,16 @@
-# tsguard Testing Guide
+# typegrade Testing Guide
 
-How to validate tsguard's scoring against real-world TypeScript packages.
+How to validate typegrade's scoring against real-world TypeScript packages.
 
 ## Testing Methods
 
 ### A) Analyze source code
 
-Clone the repo and point tsguard at the source directory. All 11 dimensions contribute, giving the fullest picture:
+Clone the repo and point typegrade at the source directory. All 11 dimensions contribute, giving the fullest picture:
 
 ```bash
 git clone --depth 1 https://github.com/colinhacks/zod.git /tmp/test-zod
-tsguard analyze /tmp/test-zod/packages/zod
+typegrade analyze /tmp/test-zod/packages/zod
 ```
 
 Best for: projects you own or want the complete source+implementation analysis.
@@ -20,9 +20,9 @@ Best for: projects you own or want the complete source+implementation analysis.
 Installs the package to a temp directory and analyzes published `.d.ts` declarations:
 
 ```bash
-tsguard score zod
-tsguard score zod@3.24.2
-tsguard score express --json
+typegrade score zod
+typegrade score zod@3.24.2
+typegrade score express --json
 ```
 
 Best for: evaluating the published API surface that consumers and AI agents actually see. Uses the declaration graph engine to resolve entrypoints and walk only reachable files.
@@ -30,8 +30,8 @@ Best for: evaluating the published API surface that consumers and AI agents actu
 ### C) Analyze local packages
 
 ```bash
-tsguard score ./path/to/package     # Package mode (declarations only)
-tsguard analyze ./path/to/project   # Source mode (all dimensions)
+typegrade score ./path/to/package     # Package mode (declarations only)
+typegrade analyze ./path/to/project   # Source mode (all dimensions)
 ```
 
 ## Architecture Overview
@@ -69,7 +69,7 @@ tsguard analyze ./path/to/project   # Source mode (all dimensions)
 
 ## Benchmark Results (Package Scoring)
 
-Scored with `tsguard score` (package mode, published declarations only).
+Scored with `typegrade score` (package mode, published declarations only).
 
 ### Elite Tier
 
@@ -152,7 +152,7 @@ Source analysis uses all 11 dimensions. Key differences from package mode:
 
 ### Domain Detection
 
-tsguard detects 9 library domains and adjusts scoring:
+typegrade detects 9 library domains and adjusts scoring:
 
 - **Validation** (zod, valibot, arktype, etc.): `unknown` param warnings suppressed in API Safety
 - **Result** (neverthrow, effect, fp-ts): Recognized for discriminated union patterns
@@ -182,12 +182,12 @@ pnpm benchmark
 npx tsx benchmarks/calibrate.ts
 
 # Score individual packages
-tsguard score <package-name> --json
-tsguard score <package-name>@<version> --verbose
+typegrade score <package-name> --json
+typegrade score <package-name>@<version> --verbose
 
 # Compare packages
 for pkg in zod valibot arktype effect; do
   echo -n "$pkg: "
-  tsguard score "$pkg" --json | jq '.composites[] | select(.key == "consumerApi") | .score'
+  typegrade score "$pkg" --json | jq '.composites[] | select(.key == "consumerApi") | .score'
 done
 ```

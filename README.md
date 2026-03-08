@@ -1,4 +1,4 @@
-# tsguard
+# typegrade
 
 A fast CLI tool that scores TypeScript projects on **type precision quality** — not just "do you have types?" but "how narrow, specific, and useful are your types?"
 
@@ -7,45 +7,48 @@ AI coding agents produce better output when operating within tighter static boun
 ## Install
 
 ```bash
-npx tsguard
+npx typegrade
 ```
 
 Or install globally:
 
 ```bash
-npm install -g tsguard
+npm install -g typegrade
 ```
 
 ## Usage
 
 ```bash
 # Analyze current directory
-tsguard
+typegrade
 
 # Analyze specific path
-tsguard analyze ./src
+typegrade analyze ./src
 
 # Score an npm package's published declarations
-tsguard score zod
-tsguard score zod@3.24.2
+typegrade score zod
+typegrade score zod@3.24.2
 
 # Score a local package
-tsguard score ./node_modules/@tanstack/router-core
+typegrade score ./node_modules/@tanstack/router-core
 
 # JSON output
-tsguard --json
+typegrade --json
 
 # CI gate: fail if score < 70
-tsguard --min-score 70
+typegrade --min-score 70
 
 # Verbose per-dimension details
-tsguard --verbose
+typegrade --verbose
+
+# Explainability report
+typegrade --explain
 ```
 
 ## Output
 
 ```
-  tsguard v0.3.0
+  typegrade v0.4.0
 
   Project: my-project (source analysis)
   Files: 42 analyzed in 1.2s
@@ -61,7 +64,9 @@ tsguard --verbose
   API Safety            ████████████████████  99%
   Semantic Lift         ██████████████░░░░░░  68%
   Publish Quality       ████████████████░░░░  82%
-  Surface Coherence     ██████████████████░░  90%
+  Surface Consistency   ██████████████████░░  90%
+  Surface Complexity    ████████████████████  95%
+  Agent Usability       ████████████████░░░░  80%
   Declaration Fidelity  ████████████████████  95%
 
   Implementation Dimensions:
@@ -77,14 +82,14 @@ tsguard --verbose
 
 ## Scoring Architecture
 
-tsguard produces three composite scores from nine dimensions:
+typegrade produces three composite scores from eleven dimensions:
 
 ### Composite Scores
 
 | Composite | Source Mode | Package Mode |
 |---|---|---|
 | **Agent Readiness** | 65% Consumer API + 35% Implementation | 100% Consumer API |
-| **Consumer API** | Weighted average of 6 consumer dimensions | Weighted average of 5 consumer dimensions |
+| **Consumer API** | Weighted average of 8 consumer dimensions | Weighted average of 7 consumer dimensions |
 | **Implementation** | Weighted average of 3 implementation dimensions | n/a (disabled) |
 
 ### Consumer API Dimensions
@@ -93,12 +98,14 @@ These measure the quality of your **published API surface** — what downstream 
 
 | Dimension | Weight | What it measures |
 |---|---|---|
-| **API Specificity** | 40% | How narrow and specific are your exported types? Branded types > literal unions > interfaces > wide primitives > any |
+| **API Specificity** | 35% | How narrow and specific are your exported types? Per-position feature-model scoring with 16 feature bonuses. |
 | **API Safety** | 20% | How much `any` leaks into your public API? Domain-aware: suppresses false positives for validation libraries. |
-| **Semantic Lift** | 15% | How much do advanced type features (branded types, discriminated unions, mapped types, constrained generics) lift your API above baseline? |
-| **Publish Quality** | 10% | Do exported functions have explicit return types, typed parameters, and JSDoc documentation? |
-| **Surface Coherence** | 5% | Is your API consistent? Checks overload density, return type explicitness, and naming conventions. |
-| **Declaration Fidelity** | 10% | Do emitted `.d.ts` declarations preserve the source types? Checks generic parameters and constraints. Source-only. |
+| **Semantic Lift** | 15% | How much do advanced type features lift your API above baseline? Per-feature scaling rewards discriminated unions, branded types, etc. |
+| **Publish Quality** | 8% | Do exported functions have explicit return types, typed parameters, JSDoc, and proper entrypoint clarity? |
+| **Surface Consistency** | 5% | Is your API consistent? Checks overload density, naming conventions, nullability, generic naming, and result shape consistency. |
+| **Surface Complexity** | 5% | Is your API approachable? Penalizes deep nesting, wide unions, overload explosion, and declaration sprawl. |
+| **Agent Usability** | 5% | Is your API AI-agent-friendly? Checks named exports, discriminated errors, correlated generics, overload clarity. |
+| **Declaration Fidelity** | 7% | Do emitted `.d.ts` declarations preserve the source types? Checks generic parameters and constraints. Source-only. |
 
 ### Implementation Dimensions (source mode only)
 
@@ -116,9 +123,9 @@ From lowest to highest precision:
 |---|---|---|
 | `any` | 0 | `any` |
 | `unknown` | 20 | `unknown` |
-| `void` | 60 | `void` |
 | `wide-primitive` | 40 | `string`, `number`, `boolean` |
 | `interface` | 55 | `{ name: string; age: number }` |
+| `void` | 60 | `void` |
 | `enum` | 65 | `enum Role { Admin, User }` |
 | `generic-bound` | 70 | `<T extends string>` |
 | `literal` | 80 | `'active'`, `42` |
@@ -140,24 +147,29 @@ From lowest to highest precision:
 
 ## Source vs Package Mode
 
-**Source mode** (`tsguard analyze`) examines your TypeScript source files directly. All 9 dimensions contribute. Best for analyzing projects you own.
+**Source mode** (`typegrade analyze`) examines your TypeScript source files directly. All 11 dimensions contribute. Best for analyzing projects you own.
 
-**Package mode** (`tsguard score`) analyzes published `.d.ts` declarations — what consumers actually import. Only the 5 consumer-facing dimensions apply (Declaration Fidelity and all 3 implementation dimensions are disabled). Best for evaluating npm packages.
+**Package mode** (`typegrade score`) analyzes published `.d.ts` declarations — what consumers actually import. Only the 7 consumer-facing dimensions apply (Declaration Fidelity and all 3 implementation dimensions are disabled). Best for evaluating npm packages.
 
-In source mode, tsguard emits declarations in-memory via `ts-morph` to build a "consumer view" of your API, then scores both the source (implementation dimensions) and the emitted declarations (consumer dimensions).
+In source mode, typegrade emits declarations in-memory via `ts-morph` to build a "consumer view" of your API, then scores both the source (implementation dimensions) and the emitted declarations (consumer dimensions).
 
 ## Domain Detection
 
-tsguard detects library domains (validation, result/effect) and adjusts scoring accordingly:
+typegrade detects library domains and adjusts scoring accordingly:
 
-- **Validation libraries** (zod, valibot, arktype, etc.): `unknown` parameters in functions are expected and don't penalize API Safety.
-- **Result libraries** (neverthrow, effect, fp-ts): Recognized for their discriminated union patterns.
+- **Validation** (zod, valibot, arktype, etc.): `unknown` parameters suppressed in API Safety
+- **Result** (neverthrow, effect, fp-ts): Recognized for discriminated union patterns
+- **Stream** (rxjs, xstate, most): Higher-order generic signatures accepted
+- **Schema/Utility** (type-fest, ts-toolbelt): High generic density expected
+- **Router** (express, fastify, hono): Route/handler/middleware pattern detection
+- **ORM** (drizzle-orm, prisma): Model/schema/table pattern detection
+- **Frontend** (react, preact, vue, svelte): Package name matching
 
-Domain is inferred from package name patterns and API surface analysis (e.g., functions accepting `unknown` parameters).
+Domain is inferred from package name patterns and API surface analysis.
 
 ## Declaration Graph Engine
 
-For package scoring, tsguard builds a declaration import graph rather than analyzing all `.d.ts` files in a package:
+For package scoring, typegrade builds a declaration import graph rather than analyzing all `.d.ts` files in a package:
 
 1. **Resolve entrypoints** from `types`, `typings`, and `exports` fields in `package.json`
 2. **Walk imports** via BFS following `import`/`export` statements and `/// <reference path>` directives
@@ -179,7 +191,7 @@ This ensures only reachable, consumer-visible declarations are scored.
 ## JSON Output
 
 ```bash
-tsguard --json
+typegrade --json
 ```
 
 Returns an `AnalysisResult` object with:
@@ -207,14 +219,14 @@ Returns an `AnalysisResult` object with:
       "label": "API Specificity",
       "enabled": true,
       "score": 61,
-      "weights": { "consumerApi": 0.4 },
+      "weights": { "consumerApi": 0.35 },
       "metrics": { /* dimension-specific */ },
       "positives": ["Strong use of discriminated unions"],
       "negatives": ["42% of positions are wide primitives"],
       "issues": [/* file-level issues */],
       "confidence": 0.85
     }
-    // ... 8 more dimensions
+    // ... 10 more dimensions
   ],
   "domainInference": {
     "domain": "validation",
@@ -228,19 +240,20 @@ Returns an `AnalysisResult` object with:
 
 ## Benchmarks
 
-tsguard ships with a benchmark suite of 15 npm packages across three tiers:
+typegrade ships with a benchmark suite of 20 npm packages across four tiers:
 
 | Tier | Packages | Score Range |
 |---|---|---|
-| Elite | valibot (90), effect (77), ts-pattern (74), arktype (73), zod (71) | 71-90 |
-| Solid | date-fns (74), remeda (72), type-fest (71), drizzle-orm (63), neverthrow (61) | 61-74 |
-| Loose | lodash (61), uuid (61), moment (57), axios (50), express (46) | 46-61 |
+| Elite | valibot (84), ts-pattern (74), arktype (68), effect (68), zod (67) | 67-84 |
+| Solid | date-fns (72), remeda (71), neverthrow (64), type-fest (62), drizzle-orm (58) | 58-72 |
+| Loose | uuid (64), lodash (62), express (60), moment (57), axios (50) | 50-64 |
+| Stretch | io-ts (78), fp-ts (77), rxjs (65), hono (63), @tanstack/react-router (58) | 58-78 |
 
 Run benchmarks:
 
 ```bash
-pnpm benchmark              # Score all 15 packages + run assertions
-npx tsx benchmarks/calibrate.ts  # Evaluate assertions + suggest weight adjustments
+pnpm benchmark                      # Score all 20 packages + run assertions
+npx tsx benchmarks/calibrate.ts     # Evaluate assertions + calibration analysis
 ```
 
 ## License

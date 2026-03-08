@@ -41,7 +41,7 @@ export function run() {
   const program = new Command();
 
   program
-    .name("tsguard")
+    .name("typegrade")
     .description("TypeScript type-safety and precision analyzer")
     .version("0.4.0")
     .option("--json", "Output as JSON")

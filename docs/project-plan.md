@@ -1,4 +1,4 @@
-# tsguard — Architecture & Implementation Status
+# typegrade — Architecture & Implementation Status
 
 ## v0.3.0 (current)
 
@@ -18,7 +18,7 @@ All implementation steps complete.
 ### Project Structure
 
 ```
-tsguard/
+typegrade/
 ├── package.json
 ├── tsconfig.json
 ├── tsup.config.ts

@@ -71,7 +71,7 @@ describe("e2e: analyzeProject", () => {
   });
 
   it("returns 0/N/A when no source files found", () => {
-    const emptyDir = resolve(tmpdir(), `tsguard-empty-${Date.now()}`);
+    const emptyDir = resolve(tmpdir(), `typegrade-empty-${Date.now()}`);
     mkdirSync(emptyDir, { recursive: true });
     try {
       const result = analyzeProject(emptyDir);

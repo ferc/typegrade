@@ -1,6 +1,6 @@
 # Benchmark Policy
 
-This document describes the governance rules for the tsguard benchmark suite.
+This document describes the governance rules for the typegrade benchmark suite.
 
 ## Corpus
 

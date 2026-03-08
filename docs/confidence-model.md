@@ -1,6 +1,6 @@
 # Confidence Model
 
-tsguard attaches confidence values to scores, indicating how much evidence supports each measurement.
+typegrade attaches confidence values to scores, indicating how much evidence supports each measurement.
 
 ## Dimension Confidence
 

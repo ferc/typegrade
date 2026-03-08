@@ -1,6 +1,6 @@
 # Domain Adjustments
 
-tsguard detects the domain of a package and adjusts scoring accordingly. This document describes the detection mechanism, supported domains, and suppression behavior.
+typegrade detects the domain of a package and adjusts scoring accordingly. This document describes the detection mechanism, supported domains, and suppression behavior.
 
 ## Supported Domains
 
@@ -79,4 +79,4 @@ Domain inference appears in the JSON output:
 
 Domain detection is automatic. To analyze without domain adjustments, the package name should not be provided to the analyzer (source mode without package context).
 
-In package mode via `tsguard score <pkg>`, the package name is always available and domain detection always runs.
+In package mode via `typegrade score <pkg>`, the package name is always available and domain detection always runs.

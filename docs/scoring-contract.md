@@ -4,7 +4,7 @@ This document specifies the complete scoring model: dimensions, formulas, weight
 
 ## Composites
 
-tsguard produces three composite scores:
+typegrade produces three composite scores:
 
 | Composite | Key | Description |
 |-----------|-----|-------------|

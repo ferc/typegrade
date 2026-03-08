@@ -117,7 +117,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
   const { name: packageName, version: packageVersion } = parsePackageSpec(nameOrPath);
 
   // Npm package — install to temp dir
-  const tmpDir = join(tmpdir(), `tsguard-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `typegrade-${Date.now()}`);
 
   try {
     mkdirSync(tmpDir, { recursive: true });
@@ -128,7 +128,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
         dependencies: {
           [packageName]: packageVersion,
         },
-        name: "tsguard-tmp",
+        name: "typegrade-tmp",
         version: "0.0.0",
       }),
     );

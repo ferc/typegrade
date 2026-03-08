@@ -1,4 +1,4 @@
-# tsguard — Implementation Plan
+# typegrade — Implementation Plan
 
 ## What This Is
 
@@ -24,7 +24,7 @@ This is a greenfield project. Start from scratch.
 ## Project Structure
 
 ```
-tsguard/
+typegrade/
 ├── package.json
 ├── tsconfig.json
 ├── tsup.config.ts
@@ -62,7 +62,7 @@ tsguard/
 │   ├── scorer.test.ts
 │   └── e2e.test.ts               # Full CLI runs against fixture projects
 └── scripts/
-    └── score-popular-packages.ts  # Script to run tsguard against top npm packages for calibration
+    └── score-popular-packages.ts  # Script to run typegrade against top npm packages for calibration
 ```
 
 ---
@@ -476,12 +476,12 @@ score = sum, capped at 100
 ## CLI Interface (src/cli.ts)
 
 ```
-Usage: tsguard [command] [options]
+Usage: typegrade [command] [options]
 
 Commands:
   analyze [path]       Analyze a local TypeScript project (default: .)
   score <package>      Analyze an npm package by name (future)
-  init                 Create a .tsguardrc.json with default config
+  init                 Create a .typegraderc.json with default config
 
 Options:
   --json               Output as JSON
@@ -494,10 +494,10 @@ Options:
   --no-color           Disable colored output
 
 Examples:
-  tsguard                          # Analyze current directory
-  tsguard analyze ./src            # Analyze specific path
-  tsguard --json > report.json     # JSON output
-  tsguard --min-score 70           # CI gate: fail below 70
+  typegrade                          # Analyze current directory
+  typegrade analyze ./src            # Analyze specific path
+  typegrade --json > report.json     # JSON output
+  typegrade --min-score 70           # CI gate: fail below 70
 ```
 
 ---
@@ -654,7 +654,7 @@ Build `src/cli.ts` with `commander`. Build `src/utils/format.ts` for pretty term
 The terminal output should look like this:
 
 ```
-  tsguard v0.1.0
+  typegrade v0.1.0
 
   Project: my-project
   Files: 42 analyzed in 1.2s
@@ -692,7 +692,7 @@ Test scenarios:
 2. A "bare minimum" project (no strict, all string/any) → D or F
 3. A "typical" project (strict: true, interfaces, some any) → B or C
 
-**Acceptance:** All e2e tests pass. README.md has usage examples. `npx tsguard` works.
+**Acceptance:** All e2e tests pass. README.md has usage examples. `npx typegrade` works.
 
 ---
 
@@ -725,7 +725,7 @@ Type Precision gets the highest weight because it's what no other tool measures 
 
 5. **Fast by default.** Exclude `node_modules`, test files, and generated files by default. Only analyze `.ts` and `.tsx` files. Use ts-morph's lazy loading where possible.
 
-6. **Config file is optional.** Everything works with sensible defaults. A `.tsguardrc.json` can override weights and thresholds.
+6. **Config file is optional.** Everything works with sensible defaults. A `.typegraderc.json` can override weights and thresholds.
 
 ---
 
@@ -733,11 +733,11 @@ Type Precision gets the highest weight because it's what no other tool measures 
 
 ```json
 {
-  "name": "tsguard",
+  "name": "typegrade",
   "version": "0.1.0",
   "description": "TypeScript type-safety and precision analyzer for the AI agent era",
   "bin": {
-    "tsguard": "./dist/index.js"
+    "typegrade": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup",
@@ -764,7 +764,7 @@ Type Precision gets the highest weight because it's what no other tool measures 
 
 ## What "Done" Looks Like for Phase 1
 
-- [ ] `npx tsguard` analyzes the current directory and prints a score
+- [ ] `npx typegrade` analyzes the current directory and prints a score
 - [ ] Score is reproducible — same input always gives same output
 - [ ] All 6 dimensions produce meaningful scores
 - [ ] Type precision correctly differentiates: `string` < `'a' | 'b'` < branded type
@@ -781,11 +781,11 @@ Type Precision gets the highest weight because it's what no other tool measures 
 ## Future (Not Phase 1 — Don't Build Yet)
 
 - Go rewrite using `typescript-go` for 10x speed
-- `tsguard score <npm-package>` — download and analyze npm packages
+- `typegrade score <npm-package>` — download and analyze npm packages
 - Badge SVG generation for READMEs
 - GitHub Action
 - VS Code extension
 - Public leaderboard website
 - Auto-generate AGENTS.md from analysis results
 - Oxlint plugin with "agent-ready" preset rules
-- `tsguard fix` — auto-apply improvements (add explicit return types, suggest Zod schemas)
+- `typegrade fix` — auto-apply improvements (add explicit return types, suggest Zod schemas)
