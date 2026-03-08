@@ -233,6 +233,35 @@ function runTrainGates(): GateResult[] {
     }),
   );
 
+  // Gate 13: High-score-low-confidence check
+  // Packages scoring >=75 should have confidence >= 0.65
+  gates.push(
+    runGate("score-confidence-coherence", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        consumerApi: number | null;
+        confidenceSummary?: { sampleCoverage: number } | null;
+        coverageDiagnostics?: { samplingClass?: string; undersampled?: boolean } | null;
+      }[] | undefined;
+      if (!entries) return { detail: "No entry data", passed: true };
+
+      let violations = 0;
+      for (const en of entries) {
+        if (en.consumerApi === null || en.consumerApi < 75) continue;
+        const isUndersampled = en.coverageDiagnostics?.undersampled === true;
+        const isCompact = en.coverageDiagnostics?.samplingClass === "compact";
+        const sampleCov = en.confidenceSummary?.sampleCoverage ?? 1;
+        if (isUndersampled || (isCompact && sampleCov < 0.65)) {
+          violations++;
+        }
+      }
+      return {
+        detail: `${violations} high-score-low-confidence package(s)`,
+        passed: violations === 0,
+      };
+    }),
+  );
+
   return gates;
 }
 

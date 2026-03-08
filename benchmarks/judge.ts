@@ -41,6 +41,7 @@ interface EvalEntry {
     measuredDeclarations: number;
     undersampled: boolean;
     undersampledReasons: string[];
+    samplingClass?: "complete" | "compact" | "undersampled";
   } | null;
   dimensions: { key: string; score: number | null; confidence: number | null }[];
 }
@@ -305,10 +306,30 @@ function computeUnlabeledMetrics(entries: EvalEntry[]): UnlabeledEvalMetrics {
   }
   const scenarioOverreachRate = scenarioOverreachCount / total;
 
+  // Compact package rate
+  const compactCount = entries.filter(
+    (en) => en.coverageDiagnostics?.samplingClass === "compact",
+  ).length;
+  const compactRate = compactCount / total;
+
+  // Confidence moderation rate — packages with compositeConfidenceReasons mentioning moderation
+  // Approximated by: high score + low confidence (score >= 70 + fewer than 10 positions)
+  let moderatedCount = 0;
+  for (const entry of entries) {
+    const cov = entry.coverageDiagnostics;
+    const score = entry.consumerApi ?? 0;
+    if (score >= 60 && cov && (cov.undersampled || cov.samplingClass === "compact")) {
+      moderatedCount++;
+    }
+  }
+  const confidenceModerationRate = moderatedCount / total;
+
   // Train-vs-eval distribution drift
   const driftValue = computeTrainEvalDrift(entries);
 
   const result: UnlabeledEvalMetrics = {
+    compactRate: Math.round(compactRate * 1000) / 1000,
+    confidenceModerationRate: Math.round(confidenceModerationRate * 1000) / 1000,
     coverageConfidenceViolations,
     domainOverreachRate: Math.round(domainOverreachRate * 1000) / 1000,
     fallbackGlobRate: Math.round(fallbackGlobRate * 1000) / 1000,
@@ -521,6 +542,8 @@ function main() {
   console.log(`  Domain overreach rate:      ${(metrics.domainOverreachRate * 100).toFixed(1)}%`);
   console.log(`  Scenario overreach rate:    ${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`);
   console.log(`  Train-eval drift:           ${metrics.trainEvalDrift !== undefined ? metrics.trainEvalDrift.toFixed(3) : "n/a (no train data)"}`);
+  console.log(`  Compact package rate:       ${metrics.compactRate !== undefined ? `${(metrics.compactRate * 100).toFixed(1)}%` : "n/a"}`);
+  console.log(`  Confidence moderation rate: ${metrics.confidenceModerationRate !== undefined ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%` : "n/a"}`);
 
   console.log("\n=== Eval Gates ===\n");
   for (const gate of gates) {
@@ -551,6 +574,12 @@ function main() {
       }),
       ...(metrics.trainEvalDrift !== undefined && {
         trainEvalDrift: metrics.trainEvalDrift,
+      }),
+      ...(metrics.compactRate !== undefined && {
+        compactRate: metrics.compactRate,
+      }),
+      ...(metrics.confidenceModerationRate !== undefined && {
+        confidenceModerationRate: metrics.confidenceModerationRate,
       }),
       undersampledRate: metrics.undersampledRate,
     },

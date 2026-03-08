@@ -73,8 +73,28 @@ function computeComposite(
     rationale.push(`${dim.label}: ${Math.round(dim.score!)} (w=${weight})`);
   }
 
-  const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+  const rawScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
   const { confidence, reasons } = computeConfidence(contributing);
+
+  // Confidence-weighted score moderation:
+  // When confidence is low, moderate the score toward a conservative baseline.
+  // This prevents high scores from packages with thin or contradictory evidence.
+  // Only applies when confidence < 0.7 and raw score is above baseline.
+  const MODERATION_BASELINE = 50;
+  const MODERATION_THRESHOLD = 0.7;
+  let score = rawScore;
+  if (confidence < MODERATION_THRESHOLD && rawScore > MODERATION_BASELINE) {
+    // Linear interpolation: at confidence=0.7 no moderation, at confidence=0.3 full moderation
+    const moderationStrength = Math.min(1, (MODERATION_THRESHOLD - confidence) / 0.4);
+    const pullDown = (rawScore - MODERATION_BASELINE) * moderationStrength * 0.3;
+    score = Math.round(rawScore - pullDown);
+    if (pullDown >= 1) {
+      reasons.push(
+        `Score moderated by ${Math.round(pullDown)} points (confidence=${confidence}, raw=${rawScore})`,
+      );
+    }
+  }
+
   return {
     compositeConfidenceReasons: reasons,
     confidence,

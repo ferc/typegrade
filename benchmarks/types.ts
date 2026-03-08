@@ -92,6 +92,8 @@ export interface RedactedEvalSummary {
     medianTypeSafety: number;
     scoreStdDev: number;
     trainEvalDrift?: number;
+    compactRate?: number;
+    confidenceModerationRate?: number;
   };
   /** Gate pass/fail results */
   gates: { gate: string; passed: boolean; detail: string }[];
@@ -120,6 +122,10 @@ export interface UnlabeledEvalMetrics {
   scenarioOverreachRate: number;
   /** Drift between train and eval score distributions */
   trainEvalDrift?: number;
+  /** Rate of compact (small-by-design) packages */
+  compactRate?: number;
+  /** Rate of packages where score was moderated due to low confidence */
+  confidenceModerationRate?: number;
 }
 
 export interface ParetoViolation {
