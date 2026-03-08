@@ -108,7 +108,7 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     negatives.push(`Declaration sprawl (${totalDeclarations} declarations, -${penalty})`);
   }
 
-  // --- Helper-chain depth estimation ---
+  // --- Opaque helper-chain depth ---
   const typeAliasNames = new Set<string>();
   for (const decl of surface.declarations) {
     if (decl.kind === "type-alias") {
@@ -116,6 +116,7 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     }
   }
 
+  let avgChainDepth = 0;
   if (typeAliasNames.size > 0) {
     let totalChainDepth = 0;
     let chainedAliasCount = 0;
@@ -137,12 +138,58 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     }
 
     if (chainedAliasCount > 0) {
-      const avgChainDepth = totalChainDepth / chainedAliasCount;
+      avgChainDepth = totalChainDepth / chainedAliasCount;
       if (avgChainDepth > 2) {
         score -= 5;
         negatives.push(`High type alias chain depth (avg ${avgChainDepth.toFixed(1)} references, -5)`);
       }
     }
+  }
+
+  // --- Ambiguous call surface penalty ---
+  // Functions with very similar parameter counts but different types increase cognitive load
+  let ambiguousCallSurfaces = 0;
+  const fnByName = new Map<string, number[]>();
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function") {
+      const paramCount = decl.positions.filter((p) => p.role === "param").length;
+      const existing = fnByName.get(decl.name);
+      if (existing) {
+        existing.push(paramCount);
+      } else {
+        fnByName.set(decl.name, [paramCount]);
+      }
+    }
+  }
+  for (const counts of fnByName.values()) {
+    if (counts.length > 1) {
+      const uniqueCounts = new Set(counts);
+      if (uniqueCounts.size < counts.length) {
+        ambiguousCallSurfaces++;
+      }
+    }
+  }
+  if (ambiguousCallSurfaces > 3) {
+    const penalty = Math.min(10, ambiguousCallSurfaces * 2);
+    score -= penalty;
+    negatives.push(`${ambiguousCallSurfaces} functions with ambiguous call surfaces (-${penalty})`);
+  }
+
+  // --- Duplicate public concepts penalty ---
+  const declNames = surface.declarations.map((d) => d.name.toLowerCase());
+  let duplicateConcepts = 0;
+  for (let i = 0; i < declNames.length; i++) {
+    for (let j = i + 1; j < declNames.length; j++) {
+      const a = declNames[i]!;
+      const b = declNames[j]!;
+      if (a === b && a.length > 2) {
+        duplicateConcepts++;
+      }
+    }
+  }
+  if (duplicateConcepts > 2) {
+    score -= Math.min(5, duplicateConcepts);
+    negatives.push(`${duplicateConcepts} duplicate public concept name(s)`);
   }
 
   score = Math.max(0, Math.min(100, score));
@@ -157,7 +204,10 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     key: CONFIG.key,
     label: CONFIG.label,
     metrics: {
+      ambiguousCallSurfaces,
+      avgChainDepth: Math.round(avgChainDepth * 100) / 100,
       deeplyNestedCount,
+      duplicateConcepts,
       nonConventionalTypeParams: nonConventional,
       overloadCount,
       totalDeclarations,

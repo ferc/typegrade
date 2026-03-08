@@ -49,7 +49,6 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
         }
       }
     }
-    // Check for generic Error in return types
     for (const pos of decl.positions) {
       if (pos.role === "return") {
         const typeText = pos.type.getText();
@@ -102,17 +101,14 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
-  // --- Overload ambiguity detection (replaces old overload clarity) ---
+  // --- Overload ambiguity detection ---
   let clearOverloads = 0;
   let ambiguousOverloads = 0;
-  let totalOverloadedFunctions = 0;
+  let _totalOverloadedFunctions = 0;
 
   for (const decl of surface.declarations) {
     if (decl.kind === "function" && (decl.overloadCount ?? 0) > 1) {
-      totalOverloadedFunctions++;
-      // For functions with overloads, check if the overload count is manageable
-      // Fewer overloads (<=4) are clear and easy for agents to disambiguate
-      // Many overloads (>6) create ambiguity
+      _totalOverloadedFunctions++;
       const overloads = decl.overloadCount!;
       if (overloads <= 4) {
         clearOverloads++;
@@ -123,7 +119,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
       for (const method of decl.methods) {
         if (method.overloadCount > 1) {
-          totalOverloadedFunctions++;
+          _totalOverloadedFunctions++;
           if (method.overloadCount <= 4) {
             clearOverloads++;
           } else if (method.overloadCount > 6) {
@@ -166,7 +162,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
-  // --- Parameter/return relationship check (correlated generics) ---
+  // --- Predictable inference: parameter/return type correlation ---
   let correlatedGenericFunctions = 0;
   let functionsWithGenerics = 0;
 
@@ -179,7 +175,6 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
         .join(" ");
       const returnText = decl.returnTypeNode?.getText() ?? "";
 
-      // Check if any generic type param appears in both params and return
       const hasCorrelation = typeParamNames.some(
         (name) => paramTexts.includes(name) && returnText.includes(name),
       );
@@ -296,6 +291,44 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     negatives.push(`${optionBagPenalties} option bag(s) without discriminant property (-${penalty})`);
   }
 
+  // --- Stable alias quality: type aliases that are readable and self-documenting ---
+  let stableAliases = 0;
+  let totalTypeAliases = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind === "type-alias") {
+      totalTypeAliases++;
+      // Aliases with descriptive names (>4 chars) and not just renaming primitives
+      if (decl.name.length > 4 && decl.bodyTypeNode) {
+        const bodyText = decl.bodyTypeNode.getText();
+        // Not a simple primitive rename
+        if (!["string", "number", "boolean", "any", "unknown", "void", "never", "null", "undefined"].includes(bodyText.trim())) {
+          stableAliases++;
+        }
+      }
+    }
+  }
+
+  if (totalTypeAliases >= 3 && totalTypeAliases > 0) {
+    const stableRatio = stableAliases / totalTypeAliases;
+    if (stableRatio > 0.7) {
+      score += 5;
+      positives.push(`${Math.round(stableRatio * 100)}% of type aliases are descriptive and non-trivial (+5)`);
+    }
+  }
+
+  // --- Generic opacity penalty: deeply nested generics that are hard to reason about ---
+  let opaqueGenericCount = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function" && decl.typeParameters.length > 3) {
+      opaqueGenericCount++;
+    }
+  }
+  if (opaqueGenericCount > 2) {
+    const penalty = Math.min(8, opaqueGenericCount * 2);
+    score -= penalty;
+    negatives.push(`${opaqueGenericCount} function(s) with >3 generic type parameters (opaque for agents, -${penalty})`);
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   return {
@@ -311,12 +344,15 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       functionsWithExample,
       functionsWithGenerics,
       namedExports,
+      opaqueGenericCount,
       optionBagPenalties,
       readableGenericNames,
       specificReturnTypes,
+      stableAliases,
       totalFunctions,
       totalGenericParams,
       totalReturnTypeFunctions,
+      totalTypeAliases,
     },
     negatives,
     positives,

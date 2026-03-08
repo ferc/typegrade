@@ -6,7 +6,7 @@ interface MakeDimOptions {
   key: string;
   label: string;
   score: number | null;
-  weights: Partial<Record<"consumerApi" | "implementationQuality" | "agentReadiness", number>>;
+  weights: Partial<Record<"consumerApi" | "implementationQuality" | "agentReadiness" | "typeSafety", number>>;
 }
 
 function makeDim(opts: MakeDimOptions): DimensionResult {
@@ -41,7 +41,7 @@ describe(computeComposites, () => {
     const dims = [
       makeDim({ key: "apiSpecificity", label: "API Specificity", score: 80, weights: { consumerApi: 0.3 } }),
       makeDim({ key: "apiSafety", label: "API Safety", score: 100, weights: { consumerApi: 0.25 } }),
-      makeDim({ key: "apiExpressiveness", label: "API Expressiveness", score: 60, weights: { consumerApi: 0.2 } }),
+      makeDim({ key: "semanticLift", label: "Semantic Lift", score: 60, weights: { consumerApi: 0.2 } }),
       makeDim({ key: "publishQuality", label: "Publish Quality", score: 70, weights: { consumerApi: 0.15 } }),
     ];
     const composites = computeComposites(dims, "source");
@@ -63,31 +63,59 @@ describe(computeComposites, () => {
     expect(impl!.grade).toBe("N/A");
   });
 
-  it("agent readiness equals consumer API in package mode", () => {
+  it("computes typeSafety from safety and specificity dimensions", () => {
     const dims = [
-      makeDim({ key: "apiSpecificity", label: "API Specificity", score: 80, weights: { consumerApi: 0.3 } }),
-      makeDim({ key: "apiSafety", label: "API Safety", score: 100, weights: { consumerApi: 0.25 } }),
+      makeDim({ key: "apiSafety", label: "API Safety", score: 90, weights: { consumerApi: 0.2, typeSafety: 0.55 } }),
+      makeDim({ key: "apiSpecificity", label: "API Specificity", score: 80, weights: { consumerApi: 0.3, typeSafety: 0.25 } }),
+      makeDim({ key: "semanticLift", label: "Semantic Lift", score: 70, weights: { consumerApi: 0.15, typeSafety: 0.10 } }),
+      makeDim({ key: "publishQuality", label: "Publish Quality", score: 60, weights: { consumerApi: 0.10, typeSafety: 0.10 } }),
+    ];
+    const composites = computeComposites(dims, "package");
+    const typeSafety = composites.find((item) => item.key === "typeSafety");
+    expect(typeSafety).toBeDefined();
+    expect(typeSafety!.score).toBeGreaterThan(0);
+    // apiSafety dominates typeSafety, so it should be > 80
+    expect(typeSafety!.score).toBeGreaterThan(80);
+  });
+
+  it("computes agentReadiness from dimension weights directly", () => {
+    const dims = [
+      makeDim({ key: "agentUsability", label: "Agent Usability", score: 70, weights: { consumerApi: 0.15, agentReadiness: 0.35 } }),
+      makeDim({ key: "apiSpecificity", label: "API Specificity", score: 80, weights: { consumerApi: 0.30, agentReadiness: 0.20 } }),
+      makeDim({ key: "apiSafety", label: "API Safety", score: 90, weights: { consumerApi: 0.20, agentReadiness: 0.15 } }),
     ];
     const composites = computeComposites(dims, "package");
     const ar = composites.find((item) => item.key === "agentReadiness");
-    const ca = composites.find((item) => item.key === "consumerApi");
-    expect(ar!.score).toBe(ca!.score);
+    expect(ar).toBeDefined();
+    expect(ar!.score).toBeGreaterThan(0);
   });
 
-  it("agent readiness blends consumer and implementation in source mode", () => {
+  it("returns all four composites", () => {
     const dims = [
-      makeDim({ key: "apiSpecificity", label: "API Specificity", score: 100, weights: { consumerApi: 0.5 } }),
-      makeDim({ key: "implementationSoundness", label: "Soundness", score: 50, weights: { implementationQuality: 0.5 } }),
+      makeDim({ key: "apiSpecificity", label: "API Specificity", score: 80, weights: { consumerApi: 0.3, typeSafety: 0.25 } }),
     ];
-    const composites = computeComposites(dims, "source");
-    const ar = composites.find((item) => item.key === "agentReadiness");
-    // 0.65 * 100 + 0.35 * 50 = 82.5 -> 83
-    expect(ar!.score).toBe(83);
+    const composites = computeComposites(dims, "package");
+    const keys = composites.map((c) => c.key);
+    expect(keys).toContain("consumerApi");
+    expect(keys).toContain("agentReadiness");
+    expect(keys).toContain("typeSafety");
+    expect(keys).toContain("implementationQuality");
   });
 
   it("returns 0 for empty dimensions", () => {
     const composites = computeComposites([], "source");
     const ca = composites.find((item) => item.key === "consumerApi");
     expect(ca!.score).toBe(0);
+  });
+
+  it("includes compositeConfidenceReasons when dimensions have confidence", () => {
+    const dims = [
+      { ...makeDim({ key: "apiSpecificity", label: "API Specificity", score: 80, weights: { consumerApi: 0.3 } }), confidence: 0.5 },
+      { ...makeDim({ key: "apiSafety", label: "API Safety", score: 90, weights: { consumerApi: 0.2 } }), confidence: 0.9 },
+    ];
+    const composites = computeComposites(dims, "package");
+    const ca = composites.find((item) => item.key === "consumerApi");
+    expect(ca!.compositeConfidenceReasons).toBeDefined();
+    expect(ca!.compositeConfidenceReasons!.length).toBeGreaterThan(0);
   });
 });

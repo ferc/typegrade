@@ -1,5 +1,4 @@
 import type { AnalysisMode, CompositeKey, CompositeScore, DimensionResult, Grade } from "./types.js";
-import { AGENT_READINESS_WEIGHTS } from "./constants.js";
 
 export function computeGrade(score: number | null): Grade {
   if (score === null) {return "N/A";}
@@ -17,9 +16,10 @@ export function computeComposites(
 ): CompositeScore[] {
   const consumerApi = computeComposite("consumerApi", dimensions, mode);
   const implementationQuality = computeComposite("implementationQuality", dimensions, mode);
-  const agentReadiness = computeAgentReadiness(consumerApi, implementationQuality, mode);
+  const typeSafety = computeComposite("typeSafety", dimensions, mode);
+  const agentReadiness = computeComposite("agentReadiness", dimensions, mode);
 
-  return [agentReadiness, consumerApi, implementationQuality];
+  return [agentReadiness, consumerApi, typeSafety, implementationQuality];
 }
 
 function computeComposite(
@@ -55,48 +55,53 @@ function computeComposite(
   }
 
   const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
-  const confidence = computeConfidence(contributing);
-  return { confidence, grade: computeGrade(score), key, rationale, score };
+  const { confidence, reasons } = computeConfidence(contributing);
+  return {
+    compositeConfidenceReasons: reasons,
+    confidence,
+    grade: computeGrade(score),
+    key,
+    rationale,
+    score,
+  };
 }
 
-function computeConfidence(contributing: DimensionResult[]): number {
-  if (contributing.length === 0) {return 0;}
+function computeConfidence(contributing: DimensionResult[]): { confidence: number; reasons: string[] } {
+  if (contributing.length === 0) {return { confidence: 0, reasons: ["No contributing dimensions"] };}
 
-  // Use minimum-signal logic: composite confidence = min(dimension confidences)
+  const reasons: string[] = [];
   let minConfidence = 1;
+  let minDimension = "";
+
   for (const dim of contributing) {
     const dimConfidence = dim.confidence ?? 0.8;
-    minConfidence = Math.min(minConfidence, dimConfidence);
+    if (dimConfidence < minConfidence) {
+      minConfidence = dimConfidence;
+      minDimension = dim.label;
+    }
   }
 
-  return Math.round(minConfidence * 100) / 100;
-}
-
-function computeAgentReadiness(
-  consumerApi: CompositeScore,
-  implementationQuality: CompositeScore,
-  mode: AnalysisMode,
-): CompositeScore {
-  const rationale: string[] = [];
-
-  if (mode === "package") {
-    const {score} = consumerApi;
-    rationale.push(`Package mode: 100% Consumer API (${score ?? "n/a"})`);
-    return { grade: computeGrade(score), key: "agentReadiness", rationale, score };
+  if (minDimension) {
+    reasons.push(`Bottleneck: ${minDimension} (confidence=${minConfidence})`);
   }
 
-  if (consumerApi.score === null) {
-    return { grade: "N/A", key: "agentReadiness", rationale: ["No data"], score: null };
+  // Weighted evidence score: use weighted average with min as floor
+  let totalWeight = 0;
+  let weightedConfidence = 0;
+  for (const dim of contributing) {
+    const dimConf = dim.confidence ?? 0.8;
+    totalWeight += 1;
+    weightedConfidence += dimConf;
+  }
+  const avgConfidence = totalWeight > 0 ? weightedConfidence / totalWeight : 0;
+
+  // Composite = 60% min + 40% average (evidence-weighted)
+  const composite = 0.6 * minConfidence + 0.4 * avgConfidence;
+  const confidence = Math.round(composite * 100) / 100;
+
+  if (avgConfidence > minConfidence + 0.1) {
+    reasons.push(`Average dimension confidence (${Math.round(avgConfidence * 100)}%) higher than bottleneck`);
   }
 
-  const implScore = implementationQuality.score ?? 0;
-  const sourceWeights = AGENT_READINESS_WEIGHTS.source;
-  const score = Math.round(
-    sourceWeights.consumerApi * consumerApi.score + sourceWeights.implementationQuality * implScore,
-  );
-  rationale.push(
-    `${sourceWeights.consumerApi * 100}% Consumer API (${consumerApi.score}) + ${sourceWeights.implementationQuality * 100}% Implementation (${implScore})`,
-  );
-
-  return { grade: computeGrade(score), key: "agentReadiness", rationale, score };
+  return { confidence, reasons };
 }

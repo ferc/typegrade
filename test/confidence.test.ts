@@ -6,7 +6,7 @@ function makeDim(opts: {
   key: string;
   label: string;
   score: number | null;
-  weights: Partial<Record<"consumerApi" | "implementationQuality" | "agentReadiness", number>>;
+  weights: Partial<Record<"consumerApi" | "implementationQuality" | "agentReadiness" | "typeSafety", number>>;
   confidence?: number;
   confidenceSignals?: Array<{ source: string; value: number; reason: string }>;
 }): DimensionResult {
@@ -26,14 +26,15 @@ function makeDim(opts: {
 }
 
 describe("confidence signal propagation", () => {
-  it("uses min-signal logic for composite confidence", () => {
+  it("uses weighted evidence score for composite confidence", () => {
     const dims = [
       makeDim({ key: "a", label: "A", score: 80, weights: { consumerApi: 0.5 }, confidence: 1.0 }),
       makeDim({ key: "b", label: "B", score: 60, weights: { consumerApi: 0.5 }, confidence: 0.5 }),
     ];
     const composites = computeComposites(dims, "source");
     const ca = composites.find((c) => c.key === "consumerApi");
-    expect(ca!.confidence).toBe(0.5); // min of 1.0 and 0.5
+    // Weighted: 0.6 * min(0.5) + 0.4 * avg(0.75) = 0.3 + 0.3 = 0.6
+    expect(ca!.confidence).toBe(0.6);
   });
 
   it("defaults to 0.8 when no confidence specified", () => {
@@ -52,6 +53,7 @@ describe("confidence signal propagation", () => {
     ];
     const composites = computeComposites(dims, "source");
     const ca = composites.find((c) => c.key === "consumerApi");
+    // 0.6 * 0.3 + 0.4 * 0.3 = 0.3
     expect(ca!.confidence).toBe(0.3);
   });
 
@@ -76,5 +78,17 @@ describe("confidence signal propagation", () => {
     const ca = composites.find((c) => c.key === "consumerApi");
     expect(ca!.confidence).toBeUndefined();
     expect(ca!.score).toBe(0);
+  });
+
+  it("compositeConfidenceReasons are populated", () => {
+    const dims = [
+      makeDim({ key: "a", label: "A", score: 80, weights: { consumerApi: 0.5 }, confidence: 0.9 }),
+      makeDim({ key: "b", label: "B", score: 60, weights: { consumerApi: 0.5 }, confidence: 0.5 }),
+    ];
+    const composites = computeComposites(dims, "source");
+    const ca = composites.find((c) => c.key === "consumerApi");
+    expect(ca!.compositeConfidenceReasons).toBeDefined();
+    expect(ca!.compositeConfidenceReasons!.length).toBeGreaterThan(0);
+    expect(ca!.compositeConfidenceReasons!.some((r) => r.includes("Bottleneck"))).toBe(true);
   });
 });

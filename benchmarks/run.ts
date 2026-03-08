@@ -19,6 +19,7 @@ interface BenchmarkEntry {
   result: AnalysisResult;
   consumerApi: number | null;
   agentReadiness: number | null;
+  typeSafety: number | null;
 }
 
 function parseManifestEntry(entry: string | { spec: string; typesVersion?: string }): ManifestEntry {
@@ -48,8 +49,9 @@ async function main() {
           name,
           result,
           tier,
+          typeSafety: getCompositeScore(result, "typeSafety"),
         });
-        console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")}`);
+        console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}`);
       } catch (err) {
         console.error(`  FAILED: ${err}`);
       }
@@ -58,16 +60,17 @@ async function main() {
 
   // Print ranking table
   console.log("\n=== Benchmark Results ===\n");
-  console.log("Package".padEnd(20) + "Tier".padEnd(10) + "ConsumerAPI".padEnd(14) + "AgentReady");
-  console.log("-".repeat(54));
+  console.log("Package".padEnd(25) + "Tier".padEnd(12) + "ConsumerAPI".padEnd(14) + "AgentReady".padEnd(14) + "TypeSafety");
+  console.log("-".repeat(79));
 
   const sorted = entries.toSorted((a, b) => (b.consumerApi ?? 0) - (a.consumerApi ?? 0));
   for (const entry of sorted) {
     console.log(
-      entry.name.padEnd(20) +
-      entry.tier.padEnd(10) +
+      entry.name.padEnd(25) +
+      entry.tier.padEnd(12) +
       String(entry.consumerApi ?? "n/a").padEnd(14) +
-      String(entry.agentReadiness ?? "n/a"),
+      String(entry.agentReadiness ?? "n/a").padEnd(14) +
+      String(entry.typeSafety ?? "n/a"),
     );
   }
 
@@ -77,8 +80,18 @@ async function main() {
   let mustPassFailed = 0;
   let diagnosticPassed = 0;
   let diagnosticFailed = 0;
+  let hardDiagPassed = 0;
+  let hardDiagFailed = 0;
 
-  const assertionResults: { assertion: string; class: string; result: "pass" | "fail" | "skip"; higherScore?: number | null; lowerScore?: number | null; delta?: number | null; minDelta?: number }[] = [];
+  const assertionResults: {
+    assertion: string;
+    class: string;
+    result: "pass" | "fail" | "skip";
+    higherScore?: number | null;
+    lowerScore?: number | null;
+    delta?: number | null;
+    minDelta?: number;
+  }[] = [];
 
   for (const assertion of PAIRWISE_ASSERTIONS) {
     const higher = entries.find((e) => e.name === assertion.higher);
@@ -90,35 +103,51 @@ async function main() {
       continue;
     }
 
-    const higherScore = assertion.composite === "consumerApi" ? higher.consumerApi : higher.agentReadiness;
-    const lowerScore = assertion.composite === "consumerApi" ? lower.consumerApi : lower.agentReadiness;
+    let higherScore: number | null;
+    let lowerScore: number | null;
+
+    if (assertion.composite === "consumerApi") {
+      higherScore = higher.consumerApi;
+      lowerScore = lower.consumerApi;
+    } else if (assertion.composite === "agentReadiness") {
+      higherScore = higher.agentReadiness;
+      lowerScore = lower.agentReadiness;
+    } else {
+      higherScore = higher.typeSafety;
+      lowerScore = lower.typeSafety;
+    }
 
     const delta = (higherScore ?? 0) - (lowerScore ?? 0);
     const meetsMinDelta = assertion.minDelta ? delta >= assertion.minDelta : true;
     const passes = higherScore !== null && lowerScore !== null && higherScore > lowerScore && meetsMinDelta;
 
     if (passes) {
-      const label = assertion.class === "must-pass" ? "PASS" : "PASS (diag)";
-      console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
-      if (assertion.class === "must-pass") {mustPassPassed++;} else {diagnosticPassed++;}
+      const label = assertion.class === "must-pass" ? "PASS" : assertion.class === "hard-diagnostic" ? "PASS (hard)" : `PASS (${assertion.class})`;
+      console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
+      if (assertion.class === "must-pass") {mustPassPassed++;}
+      else if (assertion.class === "hard-diagnostic") {hardDiagPassed++;}
+      else {diagnosticPassed++;}
       assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "pass" });
     } else {
-      // Check if it's a margin failure (order correct but delta too small)
       if (!meetsMinDelta && higherScore !== null && lowerScore !== null && higherScore > lowerScore) {
-        const label = assertion.class === "must-pass" ? "MARGIN" : "MARGIN (diag)";
-        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta}`);
+        const label = assertion.class === "must-pass" ? "MARGIN" : `MARGIN (${assertion.class})`;
+        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta} [${assertion.composite}]`);
       } else {
-        const label = assertion.class === "must-pass" ? "FAIL" : "WARN (diag)";
-        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
+        const label = assertion.class === "must-pass" ? "FAIL" : assertion.class === "hard-diagnostic" ? "FAIL (hard)" : `WARN (${assertion.class})`;
+        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
       }
-      if (assertion.class === "must-pass") {mustPassFailed++;} else {diagnosticFailed++;}
+      if (assertion.class === "must-pass") {mustPassFailed++;}
+      else if (assertion.class === "hard-diagnostic") {hardDiagFailed++;}
+      else {diagnosticFailed++;}
       assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "fail" });
     }
   }
 
   const totalMustPass = mustPassPassed + mustPassFailed;
   const totalDiagnostic = diagnosticPassed + diagnosticFailed;
+  const totalHardDiag = hardDiagPassed + hardDiagFailed;
   console.log(`\nMust-pass: ${mustPassPassed}/${totalMustPass} passed`);
+  console.log(`Hard-diagnostic: ${hardDiagPassed}/${totalHardDiag} passed`);
   console.log(`Diagnostic: ${diagnosticPassed}/${totalDiagnostic} passed (warnings only)`);
 
   // Persist results to JSON
@@ -134,18 +163,24 @@ async function main() {
       tier: e.tier,
       consumerApi: e.consumerApi,
       agentReadiness: e.agentReadiness,
+      typeSafety: e.typeSafety,
       dimensions: e.result.dimensions.map((d) => ({
         key: d.key,
         score: d.score,
         confidence: d.confidence ?? null,
+        metrics: d.metrics,
       })),
       graphStats: e.result.graphStats ?? null,
+      dedupStats: e.result.dedupStats ?? null,
       domainInference: e.result.domainInference ?? null,
+      topIssues: e.result.topIssues.slice(0, 5),
+      explainability: e.result.explainability ?? null,
       caveats: e.result.caveats,
     })),
     assertions: assertionResults,
     summary: {
       mustPass: { passed: mustPassPassed, failed: mustPassFailed, total: totalMustPass },
+      hardDiagnostic: { passed: hardDiagPassed, failed: hardDiagFailed, total: totalHardDiag },
       diagnostic: { passed: diagnosticPassed, failed: diagnosticFailed, total: totalDiagnostic },
     },
   };

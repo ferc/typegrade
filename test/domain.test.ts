@@ -114,4 +114,13 @@ describe("detectDomain", () => {
     expect(result.domain).toBe("general");
     expect(result.confidence).toBeLessThan(0.5);
   });
+
+  it("includes falsePositiveRisk and matchedRules", () => {
+    const surface = getSurfaceFromCode("export function parse(x: string): number { return 0; }");
+    const result = detectDomain(surface, "zod");
+    expect(result.falsePositiveRisk).toBeDefined();
+    expect(typeof result.falsePositiveRisk).toBe("number");
+    expect(result.matchedRules).toBeDefined();
+    expect(result.matchedRules.length).toBeGreaterThan(0);
+  });
 });

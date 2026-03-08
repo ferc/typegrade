@@ -5,7 +5,19 @@ import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
+import type { GraphStats } from "./graph/types.js";
 import { loadProject } from "./utils/project-loader.js";
+
+function makeFallbackGraphStats(): GraphStats {
+  return {
+    dedupByStrategy: {},
+    filesDeduped: 0,
+    totalAfterDedup: 0,
+    totalEntrypoints: 0,
+    totalReachable: 0,
+    usedFallbackGlob: true,
+  };
+}
 
 function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResult {
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
@@ -19,6 +31,7 @@ function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResu
     return analyzeProject(localPath, {
       mode: "package",
       packageContext: {
+        graphStats: makeFallbackGraphStats(),
         packageJsonPath: pkgJsonPath,
         packageName,
         packageRoot: localPath,
@@ -28,30 +41,19 @@ function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResu
     });
   }
 
-  // Write broad tsconfig for ts-morph resolution
-  const tsconfigPath = join(localPath, "tsconfig.json");
-  const hadTsconfig = existsSync(tsconfigPath);
-  let originalTsconfig: string | undefined;
-
-  if (hadTsconfig) {
-    originalTsconfig = readFileSync(tsconfigPath, "utf8");
-  }
-
   // Build declaration graph using the package's own structure
   const graphProject = loadProject(localPath);
   const graph = buildDeclarationGraph(localPath, graphProject);
 
   let fileFilter: Set<string> | undefined;
-  let graphUsed = false;
 
   if (graph.filesToAnalyze.length > 0) {
     fileFilter = new Set(graph.filesToAnalyze);
-    graphUsed = true;
   }
 
   const entrypoints = resolveEntrypoints(localPath);
   const packageContext: PackageAnalysisContext = {
-    graphStats: graphUsed ? graph.stats : undefined,
+    graphStats: graph.stats,
     packageJsonPath: pkgJsonPath,
     packageName,
     packageRoot: localPath,
@@ -109,6 +111,13 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
 
     return analyzeProject(localPath, {
       mode: "package",
+      packageContext: {
+        graphStats: makeFallbackGraphStats(),
+        packageJsonPath: "",
+        packageName: "local-package",
+        packageRoot: localPath,
+        typesEntrypoint: null,
+      },
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
   }
@@ -196,23 +205,18 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
 
     // Determine files to analyze
     let fileFilter: Set<string> | undefined;
-    let graphUsed = false;
 
     if (graph.filesToAnalyze.length > 0) {
       fileFilter = new Set(graph.filesToAnalyze);
-      graphUsed = true;
-    } else if (graph.stats.usedFallbackGlob || graph.entrypoints.length === 0) {
-      // No entrypoints found — fall back to analyzing all declaration files
-      // (fileFilter remains undefined, so all files from tsconfig are analyzed)
     }
 
     // Resolve first entrypoint for context
     const entrypoints = resolveEntrypoints(effectivePkgDir);
 
-    // Build package context
+    // Build package context — graphStats always present
     const targetPkgJsonPath = join(effectivePkgDir, "package.json");
     const packageContext: PackageAnalysisContext = {
-      graphStats: graphUsed ? graph.stats : undefined,
+      graphStats: graph.stats,
       packageJsonPath: targetPkgJsonPath,
       packageName,
       packageRoot: effectivePkgDir,

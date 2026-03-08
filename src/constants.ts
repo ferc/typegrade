@@ -12,74 +12,69 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "apiSpecificity",
     label: "API Specificity",
     sourceOnly: false,
-    weights: { consumerApi: 0.35 },
+    weights: { agentReadiness: 0.20, consumerApi: 0.30, typeSafety: 0.25 },
   },
   {
     key: "apiSafety",
     label: "API Safety",
     sourceOnly: false,
-    weights: { consumerApi: 0.2 },
+    weights: { agentReadiness: 0.15, consumerApi: 0.20, typeSafety: 0.55 },
   },
   {
     key: "semanticLift",
     label: "Semantic Lift",
     sourceOnly: false,
-    weights: { consumerApi: 0.15 },
+    weights: { agentReadiness: 0.15, consumerApi: 0.15, typeSafety: 0.10 },
   },
   {
     key: "publishQuality",
     label: "Publish Quality",
     sourceOnly: false,
-    weights: { consumerApi: 0.08 },
+    weights: { agentReadiness: 0.05, consumerApi: 0.10, typeSafety: 0.10 },
   },
   {
     key: "surfaceConsistency",
     label: "Surface Consistency",
     sourceOnly: false,
-    weights: { consumerApi: 0.05 },
+    weights: { agentReadiness: 0.05, consumerApi: 0.05 },
   },
   {
     key: "surfaceComplexity",
     label: "Surface Complexity",
     sourceOnly: false,
-    weights: { consumerApi: 0.05 },
+    weights: { agentReadiness: 0.05, consumerApi: 0.05 },
   },
   {
     key: "agentUsability",
     label: "Agent Usability",
     sourceOnly: false,
-    weights: { consumerApi: 0.05 },
+    weights: { agentReadiness: 0.35, consumerApi: 0.15 },
   },
   {
     key: "declarationFidelity",
     label: "Declaration Fidelity",
     sourceOnly: true,
-    weights: { consumerApi: 0.07 },
+    weights: { agentReadiness: 0.05, consumerApi: 0.10, typeSafety: 0.10 },
   },
   {
     key: "implementationSoundness",
     label: "Soundness",
     sourceOnly: true,
-    weights: { implementationQuality: 0.45 },
+    weights: { implementationQuality: 0.45, typeSafety: 0.20 },
   },
   {
     key: "boundaryDiscipline",
     label: "Boundary Discipline",
     sourceOnly: true,
-    weights: { implementationQuality: 0.25 },
+    weights: { implementationQuality: 0.25, typeSafety: 0.10 },
   },
   {
     key: "configDiscipline",
     label: "Config Discipline",
     sourceOnly: true,
-    weights: { implementationQuality: 0.2 },
+    weights: { implementationQuality: 0.20, typeSafety: 0.05 },
   },
 ];
-
-export const AGENT_READINESS_WEIGHTS = {
-  package: { consumerApi: 1 },
-  source: { consumerApi: 0.65, implementationQuality: 0.35 },
-} as const;
 
 export const STRICT_FLAGS: Record<string, number> = {
   exactOptionalPropertyTypes: 10,

@@ -50,6 +50,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       composites: [
         { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: 0 },
         { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: 0 },
+        { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: 0 },
         { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
       ],
       dimensions: [],
@@ -72,8 +73,6 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
 
   // Build consumer view
-  // In source mode, emit declarations in-memory for consumer-facing analysis
-  // In package mode, source files ARE the declarations
   let consumerFiles = sourceFiles;
   const sourceOnlyFiles = sourceFiles;
   const caveats: string[] = [];
@@ -85,7 +84,6 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       const emittedFiles = emitResult.getFiles();
       const diagnostics = emitResult.getDiagnostics();
 
-      // Track emission health
       const emitDiagnosticCount = diagnostics.length;
       if (emitDiagnosticCount > 0) {
         caveats.push(`Declaration emit produced ${emitDiagnosticCount} diagnostic(s)`);
@@ -132,7 +130,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     analyzeAgentUsability(consumerSurface),
   ];
 
-  // Source-only dimensions (5-8)
+  // Source-only dimensions
   if (mode === "source") {
     dimensions.push(analyzeDeclarationFidelity(sourceOnlyFiles, consumerFiles));
     dimensions.push(analyzeImplementationSoundness(sourceOnlyFiles));
@@ -178,7 +176,6 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     }
   }
 
-  // Add source-mode emit telemetry
   if (mode === "source") {
     caveats.push(`Source mode: ${consumerFiles.length} consumer files analyzed`);
   }
@@ -231,11 +228,13 @@ function buildExplainability(
     domain: string;
     confidence: number;
     signals: string[];
+    falsePositiveRisk?: number;
+    matchedRules?: string[];
     suppressedIssues?: string[];
     adjustments?: Array<{ dimension: string; adjustment: string; reason: string }>;
   },
 ): ExplainabilityReport {
-  // Lowest specificity: issues from apiSpecificity, sorted by score
+  // Lowest specificity: issues from apiSpecificity
   const specDim = dimensions.find((d) => d.key === "apiSpecificity");
   const lowestSpecificity = (specDim?.issues ?? [])
     .filter((i) => i.severity === "error" || i.severity === "warning")
@@ -245,6 +244,14 @@ function buildExplainability(
       line: i.line,
       name: i.message,
       score: 0,
+    }));
+
+  // Highest specificity: from apiSpecificity positives
+  const highestSpecificity = (specDim?.positives ?? [])
+    .slice(0, 10)
+    .map((p) => ({
+      name: p,
+      score: specDim?.score ?? 0,
     }));
 
   // Highest lift: from semantic lift positives
@@ -268,6 +275,15 @@ function buildExplainability(
       score: 0,
     }));
 
+  // Lowest usability: from agentUsability negatives
+  const usabilityDim = dimensions.find((d) => d.key === "agentUsability");
+  const lowestUsability = (usabilityDim?.negatives ?? [])
+    .slice(0, 10)
+    .map((n) => ({
+      name: n,
+      score: usabilityDim?.score ?? 0,
+    }));
+
   // Domain suppressions
   const domainSuppressions: Array<{ name: string; reason: string }> = [];
   if (domainInference.suppressedIssues) {
@@ -279,10 +295,22 @@ function buildExplainability(
     }
   }
 
+  // Domain ambiguities
+  const domainAmbiguities: Array<{ domain: string; confidence: number; competingDomain?: string }> = [];
+  if (domainInference.confidence < 0.5) {
+    domainAmbiguities.push({
+      confidence: domainInference.confidence,
+      domain: domainInference.domain,
+    });
+  }
+
   return {
+    domainAmbiguities,
     domainSuppressions,
     highestLift,
+    highestSpecificity,
     lowestSpecificity,
+    lowestUsability,
     safetyLeaks,
   };
 }

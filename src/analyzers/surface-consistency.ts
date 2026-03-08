@@ -35,6 +35,27 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     }
   }
 
+  // --- Overload ordering quality ---
+  // Check if overloaded functions have narrowest-first ordering
+  let poorlyOrderedOverloads = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function" && (decl.overloadCount ?? 0) > 1) {
+      // Check if last overload is broader than first (good practice = narrow-first)
+      const params = decl.positions.filter((p) => p.role === "param");
+      if (params.length >= 2) {
+        const firstParamText = params[0]!.type.getText();
+        const lastParamText = params[params.length - 1]!.type.getText();
+        if (firstParamText.includes("any") && !lastParamText.includes("any")) {
+          poorlyOrderedOverloads++;
+        }
+      }
+    }
+  }
+  if (poorlyOrderedOverloads > 0) {
+    score -= Math.min(10, poorlyOrderedOverloads * 3);
+    negatives.push(`${poorlyOrderedOverloads} overloaded function(s) with suboptimal signature ordering`);
+  }
+
   // --- Return type explicitness penalty ---
   let explicitReturns = 0;
   let totalReturnable = 0;
@@ -101,7 +122,7 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     }
   }
 
-  // --- Generic naming consistency ---
+  // --- Generic parameter discipline ---
   let singleLetterGenerics = 0;
   let descriptiveGenerics = 0;
   for (const decl of surface.declarations) {
@@ -136,32 +157,7 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     }
   }
 
-  // --- Duplicate public concept detection ---
-  const declNames = surface.declarations.map((d) => d.name.toLowerCase());
-  let nearDuplicatePairs = 0;
-  for (let i = 0; i < declNames.length; i++) {
-    for (let j = i + 1; j < declNames.length; j++) {
-      const a = declNames[i]!;
-      const b = declNames[j]!;
-      // Check if one name is a prefix/suffix variant of the other
-      if (
-        (a.length > 2 && b.startsWith(a)) ||
-        (b.length > 2 && a.startsWith(b)) ||
-        (a.length > 2 && b.endsWith(a)) ||
-        (b.length > 2 && a.endsWith(b))
-      ) {
-        nearDuplicatePairs++;
-      }
-    }
-  }
-
-  if (nearDuplicatePairs > 3) {
-    negatives.push(`${nearDuplicatePairs} near-duplicate declaration name pairs detected`);
-  } else if (nearDuplicatePairs > 0) {
-    positives.push(`${nearDuplicatePairs} related declaration name pair(s) (e.g. sync/async variants)`);
-  }
-
-  // --- Result shape consistency ---
+  // --- Error/result shape consistency ---
   const discriminantProperties = new Set<string>();
   const KNOWN_DISCRIMINANTS = ["type", "kind", "tag", "_tag", "status", "code"];
   let resultFunctionCount = 0;
@@ -205,8 +201,8 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     metrics: {
       descriptiveGenerics,
       explicitReturns,
-      nearDuplicatePairs,
       overloadRatio: totalFunctions > 0 ? Math.round((totalOverloads / totalFunctions) * 100) / 100 : 0,
+      poorlyOrderedOverloads,
       resultFunctionCount,
       singleLetterGenerics,
       totalFunctions,

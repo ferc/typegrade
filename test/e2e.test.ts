@@ -96,7 +96,7 @@ describe("e2e: analyzeProject", () => {
     expect(result).toHaveProperty("dimensions");
     expect(result).toHaveProperty("topIssues");
     expect(result).toHaveProperty("caveats");
-    expect(result.composites.length).toBeGreaterThanOrEqual(3);
+    expect(result.composites.length).toBeGreaterThanOrEqual(4);
   });
 
   it("all enabled dimensions have key, label, score", () => {
@@ -221,6 +221,9 @@ describe("e2e: analyzeProject", () => {
     expect(result.explainability!.highestLift).toBeDefined();
     expect(result.explainability!.safetyLeaks).toBeDefined();
     expect(result.explainability!.domainSuppressions).toBeDefined();
+    expect(result.explainability!.lowestUsability).toBeDefined();
+    expect(result.explainability!.highestSpecificity).toBeDefined();
+    expect(result.explainability!.domainAmbiguities).toBeDefined();
   });
 
   it("composites include confidence values", () => {

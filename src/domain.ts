@@ -9,10 +9,18 @@ export interface DomainAdjustment {
   reason: string;
 }
 
+export interface DomainRule {
+  name: string;
+  category: "package-name" | "declaration-shape" | "symbol-role" | "generic-structure" | "issue-pattern";
+  score: number;
+}
+
 export interface DomainInference {
   domain: DomainType;
   confidence: number;
   signals: string[];
+  falsePositiveRisk: number;
+  matchedRules: string[];
   suppressedIssues?: string[];
   adjustments?: DomainAdjustment[];
 }
@@ -22,13 +30,22 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   const suppressedIssues: string[] = [];
   const adjustments: DomainAdjustment[] = [];
   const scores: Record<string, number> = {};
+  const matchedRules: string[] = [];
+  const rulesByDomain: Record<string, DomainRule[]> = {};
 
-  // Check package name against known patterns
+  function addRule(domain: string, rule: DomainRule): void {
+    scores[domain] = (scores[domain] ?? 0) + rule.score;
+    matchedRules.push(`${domain}:${rule.name}`);
+    if (!rulesByDomain[domain]) rulesByDomain[domain] = [];
+    rulesByDomain[domain]!.push(rule);
+  }
+
+  // Rule 1: Package name match (strongest signal)
   if (packageName) {
     for (const [domain, libs] of Object.entries(DOMAIN_PATTERNS)) {
       for (const lib of libs) {
         if (packageName === lib || packageName.startsWith(`${lib}/`) || packageName.startsWith(`@${lib}/`)) {
-          scores[domain] = (scores[domain] ?? 0) + 0.6;
+          addRule(domain, { name: `pkg-name:${lib}`, category: "package-name", score: 0.6 });
           signals.push(`package name matches ${domain} library '${lib}'`);
           break;
         }
@@ -36,14 +53,14 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
-  // Check for validation patterns: functions accepting `unknown` parameters
+  // Rule 2: Declaration shape — validation patterns
   let unknownParamFunctions = 0;
   let totalFunctions = 0;
   for (const decl of surface.declarations) {
     if (decl.kind === "function") {
       totalFunctions++;
       const hasUnknownParam = decl.positions.some(
-        (pos) => pos.role === "param" && (pos.type.getFlags() & 2) !== 0, // TypeFlags.Unknown = 2
+        (pos) => pos.role === "param" && (pos.type.getFlags() & 2) !== 0,
       );
       if (hasUnknownParam) {
         unknownParamFunctions++;
@@ -51,22 +68,22 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (totalFunctions > 0 && unknownParamFunctions / totalFunctions > 0.3) {
-    scores["validation"] = (scores["validation"] ?? 0) + 0.3;
+    addRule("validation", { name: "unknown-param-density", category: "declaration-shape", score: 0.3 });
     signals.push(`${unknownParamFunctions}/${totalFunctions} functions accept 'unknown' params`);
   }
 
-  // Check for Result/Either type aliases
+  // Rule 3: Symbol role — Result/Either type aliases
   for (const decl of surface.declarations) {
     if (decl.kind === "type-alias") {
       const name = decl.name.toLowerCase();
       if (name === "result" || name === "either" || name === "ok" || name === "err") {
-        scores["result"] = (scores["result"] ?? 0) + 0.3;
+        addRule("result", { name: `symbol:${decl.name}`, category: "symbol-role", score: 0.3 });
         signals.push(`type alias '${decl.name}' suggests result pattern`);
       }
     }
   }
 
-  // Check for router patterns
+  // Rule 4: Declaration shape — router patterns
   const routerNames = ["route", "handler", "middleware", "request", "response", "router", "endpoint"];
   let routerMatchCount = 0;
   for (const decl of surface.declarations) {
@@ -77,11 +94,11 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
   if (routerMatchCount >= 3) {
     const routerSignal = Math.min(0.6, 0.2 + routerMatchCount * 0.1);
-    scores["router"] = (scores["router"] ?? 0) + routerSignal;
+    addRule("router", { name: "router-symbol-density", category: "declaration-shape", score: routerSignal });
     signals.push(`${routerMatchCount} declarations match router patterns`);
   }
 
-  // Check for ORM patterns
+  // Rule 5: Declaration shape — ORM patterns
   const ormNames = ["model", "schema", "column", "migration", "query", "table", "entity"];
   let ormMatchCount = 0;
   for (const decl of surface.declarations) {
@@ -92,11 +109,11 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
   if (ormMatchCount >= 3) {
     const ormSignal = Math.min(0.6, 0.2 + ormMatchCount * 0.1);
-    scores["orm"] = (scores["orm"] ?? 0) + ormSignal;
+    addRule("orm", { name: "orm-symbol-density", category: "declaration-shape", score: ormSignal });
     signals.push(`${ormMatchCount} declarations match ORM patterns`);
   }
 
-  // Check for stream/reactive patterns
+  // Rule 6: Declaration shape — stream/reactive patterns
   const streamNames = ["observable", "subject", "stream", "subscription", "pipe", "operator", "subscriber"];
   let streamMatchCount = 0;
   for (const decl of surface.declarations) {
@@ -107,20 +124,19 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
   if (streamMatchCount >= 3) {
     const streamSignal = Math.min(0.6, 0.2 + streamMatchCount * 0.1);
-    scores["stream"] = (scores["stream"] ?? 0) + streamSignal;
+    addRule("stream", { name: "stream-symbol-density", category: "declaration-shape", score: streamSignal });
     signals.push(`${streamMatchCount} declarations match stream/reactive patterns`);
   }
 
-  // Check for schema/utility: mostly type aliases and generic functions
+  // Rule 7: Generic structure — schema/utility detection
   const typeAliases = surface.declarations.filter((d) => d.kind === "type-alias").length;
   const totalDecls = surface.declarations.length;
   if (totalDecls > 0 && typeAliases / totalDecls > 0.6) {
-    scores["schema"] = (scores["schema"] ?? 0) + 0.3;
+    addRule("schema", { name: "type-alias-density", category: "generic-structure", score: 0.3 });
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases`);
   }
 
-  // Multi-signal: generic pattern detection
-  // If >30% of exported functions have >=2 generic type parameters, boost schema/utility
+  // Rule 8: Generic structure — multi-generic function density
   if (totalFunctions > 0) {
     let multiGenericFunctions = 0;
     for (const decl of surface.declarations) {
@@ -129,14 +145,13 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       }
     }
     if (multiGenericFunctions / totalFunctions > 0.3) {
-      scores["schema"] = (scores["schema"] ?? 0) + 0.2;
-      scores["utility"] = (scores["utility"] ?? 0) + 0.2;
+      addRule("schema", { name: "multi-generic-fn-density", category: "generic-structure", score: 0.2 });
+      addRule("utility", { name: "multi-generic-fn-density", category: "generic-structure", score: 0.2 });
       signals.push(`${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type parameters`);
     }
   }
 
-  // Multi-signal: public API role detection
-  // If surface has >5 type aliases that are generic (have type parameters), boost schema
+  // Rule 9: Generic type aliases count
   let genericTypeAliases = 0;
   for (const decl of surface.declarations) {
     if (decl.kind === "type-alias" && decl.typeParameters.length > 0) {
@@ -144,18 +159,25 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (genericTypeAliases > 5) {
-    scores["schema"] = (scores["schema"] ?? 0) + 0.2;
+    addRule("schema", { name: "generic-type-alias-count", category: "generic-structure", score: 0.2 });
     signals.push(`${genericTypeAliases} generic type aliases detected`);
   }
 
   // Determine winning domain
   let bestDomain: DomainType = "general";
   let bestScore = 0;
+  let secondBestScore = 0;
+  let _secondBestDomain: DomainType = "general";
 
   for (const [domain, score] of Object.entries(scores)) {
     if (score > bestScore && score >= 0.5) {
+      secondBestScore = bestScore;
+      _secondBestDomain = bestDomain;
       bestDomain = domain as DomainType;
       bestScore = score;
+    } else if (score > secondBestScore) {
+      secondBestScore = score;
+      _secondBestDomain = domain as DomainType;
     }
   }
 
@@ -165,6 +187,28 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     bestScore = 0.4;
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases`);
   }
+
+  // Compute false positive risk based on rule diversity and competing domains
+  const bestRules = rulesByDomain[bestDomain] ?? [];
+  const ruleCategories = new Set(bestRules.map((r) => r.category));
+  let falsePositiveRisk = 0;
+
+  // Single-category evidence is riskier
+  if (ruleCategories.size <= 1 && bestDomain !== "general") {
+    falsePositiveRisk += 0.3;
+  }
+
+  // Close competing domain increases risk
+  if (secondBestScore > 0 && bestScore > 0 && secondBestScore / bestScore > 0.7) {
+    falsePositiveRisk += 0.2;
+  }
+
+  // No package name match increases risk
+  if (!matchedRules.some((r) => r.includes("pkg-name"))) {
+    falsePositiveRisk += 0.1;
+  }
+
+  falsePositiveRisk = Math.min(1, falsePositiveRisk);
 
   // Record suppressions and adjustments
   if (bestDomain === "validation") {
@@ -197,6 +241,8 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   const result: DomainInference = {
     confidence,
     domain: bestDomain,
+    falsePositiveRisk,
+    matchedRules,
     signals,
   };
 

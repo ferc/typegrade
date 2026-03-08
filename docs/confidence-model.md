@@ -4,7 +4,7 @@ typegrade attaches confidence values to scores, indicating how much evidence sup
 
 ## Dimension Confidence
 
-Each dimension emits a confidence value (0–1) based on evidence quality:
+Each dimension emits a confidence value (0-1) based on evidence quality:
 
 | Dimension | Confidence Source | Formula |
 |-----------|-------------------|---------|
@@ -33,7 +33,7 @@ Dimensions that emit confidence also provide structured `confidenceSignals`:
 ```typescript
 interface ConfidenceSignal {
   source: string;   // e.g., "sample-coverage", "metadata-availability", "source-fallback"
-  value: number;    // 0–1
+  value: number;    // 0-1
   reason: string;   // Human-readable explanation
 }
 ```
@@ -53,30 +53,32 @@ Example:
 
 ## Composite Confidence
 
-Composite confidence uses **minimum-signal logic**:
+Composite confidence uses a **weighted evidence score**:
 
 ```
-composite.confidence = min(dimension.confidence for each contributing dimension)
+composite.confidence = 0.6 * min(dimensionConfidences) + 0.4 * avg(dimensionConfidences)
 ```
 
-**Rationale:** A composite score is only as reliable as its weakest input. If one dimension has low confidence (e.g., only 3 positions analyzed), the entire composite's confidence should reflect that uncertainty.
+**Rationale:** The bottleneck dimension still dominates (60% weight), but the average adds signal from well-sampled dimensions (40% weight). This replaces the previous pure-min model, which was too conservative when only one dimension had low coverage.
+
+Each composite also includes `compositeConfidenceReasons` — structured reasons explaining the confidence bottleneck and any notable confidence gaps between dimensions.
 
 When no confidence is explicitly set on a dimension, **0.8** is used as the default.
 
 ### Examples
 
-- 2 dimensions with confidence 1.0 and 0.5 → composite confidence = 0.5
-- 2 dimensions with no explicit confidence → composite confidence = 0.8
-- 1 dimension with confidence 0.3 → composite confidence = 0.3
-- 0 contributing dimensions → confidence is undefined
-- Source-mode fallback active → all confidences capped at 0.6
+- 2 dimensions with confidence 1.0 and 0.5 -> composite = 0.6 * 0.5 + 0.4 * 0.75 = 0.6
+- 2 dimensions with no explicit confidence -> composite = 0.6 * 0.8 + 0.4 * 0.8 = 0.8
+- 1 dimension with confidence 0.3 -> composite = 0.6 * 0.3 + 0.4 * 0.3 = 0.3
+- 0 contributing dimensions -> confidence is undefined
+- Source-mode fallback active -> all confidences capped at 0.6
 
 ## Interpreting Confidence
 
 | Confidence | Interpretation |
 |------------|---------------|
-| ≥ 0.8 | High — sufficient evidence for reliable scoring |
-| 0.5–0.8 | Moderate — score is directionally correct but may shift with more data |
+| >= 0.8 | High — sufficient evidence for reliable scoring |
+| 0.5-0.8 | Moderate — score is directionally correct but may shift with more data |
 | < 0.5 | Low — score should be treated as indicative only |
 
 ## Confidence in JSON Output
@@ -90,7 +92,11 @@ Confidence appears on both dimensions and composites:
       "key": "consumerApi",
       "score": 72,
       "grade": "B",
-      "confidence": 0.7
+      "confidence": 0.7,
+      "compositeConfidenceReasons": [
+        "Bottleneck: API Specificity (confidence=0.7)",
+        "Average dimension confidence (85%) higher than bottleneck"
+      ]
     }
   ],
   "dimensions": [

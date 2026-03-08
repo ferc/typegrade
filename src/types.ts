@@ -1,5 +1,5 @@
 export type AnalysisMode = "source" | "package";
-export type CompositeKey = "consumerApi" | "implementationQuality" | "agentReadiness";
+export type CompositeKey = "consumerApi" | "implementationQuality" | "agentReadiness" | "typeSafety";
 
 export interface CompositeScore {
   key: CompositeKey;
@@ -7,6 +7,7 @@ export interface CompositeScore {
   grade: Grade;
   rationale: string[];
   confidence?: number;
+  compositeConfidenceReasons?: string[];
 }
 
 export type Grade = "A+" | "A" | "B" | "C" | "D" | "F" | "N/A";
@@ -55,11 +56,17 @@ export interface AnalysisResult {
     domain: string;
     confidence: number;
     signals: string[];
+    falsePositiveRisk?: number;
+    matchedRules?: string[];
     adjustments?: Array<{ dimension: string; adjustment: string; reason: string }>;
   };
   graphStats?: import("./graph/types.js").GraphStats;
   dedupStats?: { groups: number; filesRemoved: number };
   explainability?: ExplainabilityReport;
+  benchmarkDiagnostics?: {
+    assertionMargins: Array<{ assertion: string; delta: number; minDelta?: number }>;
+    rankingLoss?: number;
+  };
 }
 
 export interface PrecisionFeatures {
@@ -85,7 +92,10 @@ export interface ExplainabilityReport {
   lowestSpecificity: ExplainabilityEntry[];
   highestLift: ExplainabilityEntry[];
   safetyLeaks: ExplainabilityEntry[];
+  lowestUsability: ExplainabilityEntry[];
+  highestSpecificity: ExplainabilityEntry[];
   domainSuppressions: Array<{ name: string; reason: string }>;
+  domainAmbiguities: Array<{ domain: string; confidence: number; competingDomain?: string }>;
 }
 
 export interface PackageAnalysisContext {
