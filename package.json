@@ -38,8 +38,9 @@
     "benchmark:holdout": "tsx benchmarks/run.ts --holdout",
     "benchmark:eval": "tsx benchmarks/run.ts --eval",
     "benchmark:pool": "tsx benchmarks/run.ts --eval --count",
-    "benchmark:random": "tsx benchmarks/run.ts --pool-sample",
+    "benchmark:random": "tsx benchmarks/run.ts --count 30",
     "benchmark:random:multi": "tsx benchmarks/multi-seed.ts",
+    "benchmark:eval:all": "tsx benchmarks/run.ts --eval && tsx benchmarks/multi-seed.ts && tsx benchmarks/judge.ts && tsx benchmarks/gate.ts --eval",
     "benchmark:all": "tsx benchmarks/run.ts && tsx benchmarks/run.ts --holdout && tsx benchmarks/gate.ts && (tsx benchmarks/run.ts --eval && tsx benchmarks/multi-seed.ts && tsx benchmarks/judge.ts && tsx benchmarks/gate.ts --eval || echo 'Eval gates reported issues (non-blocking)')",
     "benchmark:calibrate": "tsx benchmarks/calibrate.ts",
     "benchmark:judge": "tsx benchmarks/judge.ts",
@@ -81,7 +82,8 @@
     "node": ">=18"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "keywords": [
     "typescript",
