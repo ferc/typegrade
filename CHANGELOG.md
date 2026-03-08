@@ -1,3 +1,13 @@
+## [0.7.0](https://github.com/ferc/typegrade/compare/v0.6.0...v0.7.0) (2026-03-08)
+
+### Features
+
+* accuracy-to-95% plan — phases 8-9 ([e4a52cd](https://github.com/ferc/typegrade/commit/e4a52cdf142102dbccfe6b6849c9f7037e7a99af))
+
+### Bug Fixes
+
+* **release:** enable npm provenance publishing via OIDC ([f340538](https://github.com/ferc/typegrade/commit/f340538ced3e798d4e5fa14ed6002ecb59745b4d))
+
 ## [0.6.0](https://github.com/ferc/typegrade/compare/v0.5.0...v0.6.0) (2026-03-08)
 
 ### Features
