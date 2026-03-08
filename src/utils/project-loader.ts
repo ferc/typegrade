@@ -39,9 +39,15 @@ export function getSourceFiles(project: Project, options?: GetSourceFilesOptions
 
   return project.getSourceFiles().filter((sf) => {
     const path = sf.getFilePath();
-    if (!includeNodeModules && path.includes("node_modules")) {return false;}
-    if (!includeDts && /\.d\.[mc]?ts$/.test(path)) {return false;}
-    if (path.endsWith(".test.ts") || path.endsWith(".spec.ts")) {return false;}
+    if (!includeNodeModules && path.includes("node_modules")) {
+      return false;
+    }
+    if (!includeDts && /\.d\.[mc]?ts$/.test(path)) {
+      return false;
+    }
+    if (path.endsWith(".test.ts") || path.endsWith(".spec.ts")) {
+      return false;
+    }
     return true;
   });
 }

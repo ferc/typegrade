@@ -26,7 +26,9 @@ export function analyzePublishQuality(
 
   for (const decl of surface.declarations) {
     totalExportedDecls++;
-    if (decl.hasJSDoc) {exportedWithJSDoc++;}
+    if (decl.hasJSDoc) {
+      exportedWithJSDoc++;
+    }
 
     switch (decl.kind) {
       case "function": {
@@ -43,17 +45,29 @@ export function analyzePublishQuality(
             severity: "warning",
           });
         }
-        if (decl.allParamsTyped) {fnsWithFullyTypedParams++;}
-        if ((decl.overloadCount ?? 0) > 0) {overloadCount += decl.overloadCount!;}
+        if (decl.allParamsTyped) {
+          fnsWithFullyTypedParams++;
+        }
+        if ((decl.overloadCount ?? 0) > 0) {
+          overloadCount += decl.overloadCount!;
+        }
         break;
       }
       case "class": {
         for (const method of decl.methods ?? []) {
           totalExportedFns++;
-          if (method.hasJSDoc) {exportedWithJSDoc++;}
-          if (method.hasExplicitReturnType) {fnsWithExplicitReturn++;}
-          if (method.allParamsTyped) {fnsWithFullyTypedParams++;}
-          if (method.overloadCount > 0) {overloadCount += method.overloadCount;}
+          if (method.hasJSDoc) {
+            exportedWithJSDoc++;
+          }
+          if (method.hasExplicitReturnType) {
+            fnsWithExplicitReturn++;
+          }
+          if (method.allParamsTyped) {
+            fnsWithFullyTypedParams++;
+          }
+          if (method.overloadCount > 0) {
+            overloadCount += method.overloadCount;
+          }
         }
         break;
       }
@@ -95,7 +109,11 @@ export function analyzePublishQuality(
     try {
       const pkg = JSON.parse(readFileSync(packageContext.packageJsonPath, "utf8"));
       pkgJsonResolved = true;
-      confidenceSignals.push({ reason: "package.json resolved", source: "metadata-availability", value: 1.0 });
+      confidenceSignals.push({
+        reason: "package.json resolved",
+        source: "metadata-availability",
+        value: 1,
+      });
 
       if (pkg.types || pkg.typings) {
         score += 15;
@@ -113,18 +131,26 @@ export function analyzePublishQuality(
         }
       }
     } catch {
-      confidenceSignals.push({ reason: "package.json parse failed", source: "metadata-availability", value: 0.5 });
+      confidenceSignals.push({
+        reason: "package.json parse failed",
+        source: "metadata-availability",
+        value: 0.5,
+      });
     }
   }
   if (!pkgJsonResolved) {
-    const tsconfigPath = project.getCompilerOptions()['configFilePath'];
+    const tsconfigPath = project.getCompilerOptions()["configFilePath"];
     if (typeof tsconfigPath === "string") {
       const pkgPath = join(dirname(tsconfigPath), "package.json");
       if (existsSync(pkgPath)) {
         try {
           const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
           pkgJsonResolved = true;
-          confidenceSignals.push({ reason: "package.json resolved via tsconfig", source: "metadata-availability", value: 0.9 });
+          confidenceSignals.push({
+            reason: "package.json resolved via tsconfig",
+            source: "metadata-availability",
+            value: 0.9,
+          });
           if (pkg.types || pkg.typings) {
             score += 15;
             positives.push("package.json has types/typings field");
@@ -144,7 +170,11 @@ export function analyzePublishQuality(
       }
     }
     if (!pkgJsonResolved) {
-      confidenceSignals.push({ reason: "no package.json found", source: "metadata-availability", value: 0.7 });
+      confidenceSignals.push({
+        reason: "no package.json found",
+        source: "metadata-availability",
+        value: 0.7,
+      });
     }
   }
 
@@ -169,7 +199,7 @@ export function analyzePublishQuality(
 
   score = Math.min(100, score);
 
-  const confidence = pkgJsonResolved ? 1.0 : 0.7;
+  const confidence = pkgJsonResolved ? 1 : 0.7;
 
   return {
     confidence,
@@ -195,12 +225,18 @@ export function analyzePublishQuality(
 }
 
 function checkExportsHaveTypes(exports: unknown): boolean {
-  if (typeof exports !== "object" || exports === null) {return false;}
+  if (typeof exports !== "object" || exports === null) {
+    return false;
+  }
   for (const value of Object.values(exports)) {
     if (typeof value === "object" && value !== null) {
-      if ("types" in value) {return true;}
+      if ("types" in value) {
+        return true;
+      }
       // Recurse into nested conditions
-      if (checkExportsHaveTypes(value)) {return true;}
+      if (checkExportsHaveTypes(value)) {
+        return true;
+      }
     }
   }
   return false;

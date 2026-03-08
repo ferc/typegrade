@@ -17,4 +17,6 @@ export function createRouter(): { get: (path: string, handler: Handler) => void 
 }
 
 export function route(path: string, handler: Handler): void {}
-export function middleware(fn: Middleware): Middleware { return fn; }
+export function middleware(fn: Middleware): Middleware {
+  return fn;
+}

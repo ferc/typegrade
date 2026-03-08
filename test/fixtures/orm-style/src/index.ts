@@ -15,7 +15,10 @@ export function column<T>(name: string, type: T): Column<T> {
   return { name, type, nullable: false };
 }
 
-export function table<T extends Record<string, Column<unknown>>>(name: string, columns: T): Table<T> {
+export function table<T extends Record<string, Column<unknown>>>(
+  name: string,
+  columns: T,
+): Table<T> {
   return { name, columns };
 }
 

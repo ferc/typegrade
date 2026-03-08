@@ -19,7 +19,9 @@ export function number(): Schema<number> {
   };
 }
 
-export function object<T extends Record<string, Schema>>(shape: T): Schema<{ [K in keyof T]: InferOutput<T[K]> }> {
+export function object<T extends Record<string, Schema>>(
+  shape: T,
+): Schema<{ [K in keyof T]: InferOutput<T[K]> }> {
   return {
     parse: (input: unknown) => input as any,
     safeParse: (input: unknown) => ({ success: true, data: input as any }),

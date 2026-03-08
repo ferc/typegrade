@@ -1,4 +1,3 @@
-
 import { analyzePrecision, isDiscriminatedUnion } from "../src/utils/type-utils.js";
 import { Project } from "ts-morph";
 
@@ -9,7 +8,9 @@ function getTypeFromCode(code: string, typeName = "T") {
   });
   const sf = project.createSourceFile("test.ts", code);
   const alias = sf.getTypeAlias(typeName);
-  if (!alias) {throw new Error(`Type alias '${typeName}' not found`);}
+  if (!alias) {
+    throw new Error(`Type alias '${typeName}' not found`);
+  }
   return alias.getType();
 }
 
@@ -20,7 +21,9 @@ function getParamType(code: string, fnName: string, paramIndex = 0) {
   });
   const sf = project.createSourceFile("test.ts", code);
   const fn = sf.getFunction(fnName);
-  if (!fn) {throw new Error(`Function '${fnName}' not found`);}
+  if (!fn) {
+    throw new Error(`Function '${fnName}' not found`);
+  }
   return fn.getParameters()[paramIndex].getType();
 }
 
@@ -79,7 +82,10 @@ describe(analyzePrecision, () => {
 
   it("scores constrained generics with strong constraint as 70", () => {
     const result = analyzePrecision(
-      getParamType("interface Opts { x: number }\nfunction test<T extends Opts>(x: T): T { return x; }", "test"),
+      getParamType(
+        "interface Opts { x: number }\nfunction test<T extends Opts>(x: T): T { return x; }",
+        "test",
+      ),
     );
     expect(result.score).toBe(70);
     expect(result.features).toContain("constraint-strong");

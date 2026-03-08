@@ -1,4 +1,3 @@
-
 import { mkdirSync, rmSync } from "node:fs";
 import { analyzeProject } from "../src/analyzer.js";
 import { resolve } from "node:path";
@@ -185,21 +184,21 @@ describe("e2e: analyzeProject", () => {
     const result = analyzeProject(resolve(fixturesDir, "index-signatures"));
     const consistency = getDimension(result, "surfaceConsistency");
     expect(consistency).toBeDefined();
-    expect(consistency!.enabled).toBe(true);
+    expect(consistency!.enabled).toBeTruthy();
   });
 
   it("index-signatures fixture has surface complexity dimension", () => {
     const result = analyzeProject(resolve(fixturesDir, "index-signatures"));
     const complexity = getDimension(result, "surfaceComplexity");
     expect(complexity).toBeDefined();
-    expect(complexity!.enabled).toBe(true);
+    expect(complexity!.enabled).toBeTruthy();
   });
 
   it("index-signatures fixture has agent usability dimension", () => {
     const result = analyzeProject(resolve(fixturesDir, "index-signatures"));
     const agentUsability = getDimension(result, "agentUsability");
     expect(agentUsability).toBeDefined();
-    expect(agentUsability!.enabled).toBe(true);
+    expect(agentUsability!.enabled).toBeTruthy();
   });
 
   it("router-style fixture has domain inference with signals", () => {
@@ -255,7 +254,7 @@ describe("e2e: analyzeProject", () => {
     expect(result.filesAnalyzed).toBeGreaterThan(0);
     const spec = getDimension(result, "apiSpecificity");
     expect(spec).toBeDefined();
-    expect(spec!.enabled).toBe(true);
+    expect(spec!.enabled).toBeTruthy();
   });
 
   it("all composites have valid grades", () => {
@@ -269,7 +268,7 @@ describe("e2e: analyzeProject", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
     const consistency = getDimension(result, "surfaceConsistency");
     expect(consistency).toBeDefined();
-    expect(consistency!.enabled).toBe(true);
+    expect(consistency!.enabled).toBeTruthy();
     expect(consistency!.score).toBeGreaterThanOrEqual(0);
   });
 
@@ -277,7 +276,7 @@ describe("e2e: analyzeProject", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
     const complexity = getDimension(result, "surfaceComplexity");
     expect(complexity).toBeDefined();
-    expect(complexity!.enabled).toBe(true);
+    expect(complexity!.enabled).toBeTruthy();
     expect(complexity!.score).toBeGreaterThanOrEqual(0);
   });
 
@@ -285,7 +284,7 @@ describe("e2e: analyzeProject", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
     const agentUsability = getDimension(result, "agentUsability");
     expect(agentUsability).toBeDefined();
-    expect(agentUsability!.enabled).toBe(true);
+    expect(agentUsability!.enabled).toBeTruthy();
     expect(agentUsability!.score).toBeGreaterThanOrEqual(0);
   });
 

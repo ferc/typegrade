@@ -4,13 +4,26 @@ import type { PublicSurface } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "agentUsability")!;
 
+/**
+ * Consumer-guidance analyzer: measures how well the API guides
+ * AI agents and human consumers toward correct usage.
+ *
+ * Signals:
+ * - Inference stability
+ * - Ambiguity of overload resolution
+ * - Parameter-to-result predictability
+ * - Discoverability of the correct export/symbol
+ * - Discriminant-rich workflows
+ * - Readability of emitted helper types
+ * - Number of plausible wrong paths
+ */
 export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   const positives: string[] = [];
   const negatives: string[] = [];
 
   let score = 50; // Start at midpoint
 
-  // --- Named exports vs default exports ---
+  // --- Named exports vs default exports (discoverability) ---
   let namedExports = 0;
   let defaultExports = 0;
   for (const decl of surface.declarations) {
@@ -25,14 +38,14 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   if (totalExports > 0) {
     const namedRatio = namedExports / totalExports;
     if (namedRatio >= 0.9) {
-      score += 15;
-      positives.push("Predominantly named exports (AI-agent friendly)");
+      score += 12;
+      positives.push("Predominantly named exports (AI-agent friendly, +12)");
     } else if (namedRatio >= 0.7) {
-      score += 8;
-      positives.push("Mostly named exports");
+      score += 6;
+      positives.push("Mostly named exports (+6)");
     } else if (defaultExports > namedExports) {
       score -= 10;
-      negatives.push("Heavy use of default exports (harder for AI agents)");
+      negatives.push("Heavy use of default exports (harder for AI agents, -10)");
     }
   }
 
@@ -44,7 +57,13 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       const name = decl.name.toLowerCase();
       if (name.includes("error") || name.includes("result")) {
         const bodyText = decl.bodyTypeNode?.getText() ?? "";
-        if (bodyText.includes("|") && (bodyText.includes("kind") || bodyText.includes("type") || bodyText.includes("tag") || bodyText.includes("_tag"))) {
+        if (
+          bodyText.includes("|") &&
+          (bodyText.includes("kind") ||
+            bodyText.includes("type") ||
+            bodyText.includes("tag") ||
+            bodyText.includes("_tag"))
+        ) {
           hasDiscriminatedErrors = true;
         }
       }
@@ -61,11 +80,11 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
 
   if (hasDiscriminatedErrors) {
     score += 10;
-    positives.push("Uses discriminated error unions (precise error handling)");
+    positives.push("Uses discriminated error unions (precise error handling, +10)");
   }
   if (hasGenericErrors) {
     score -= 5;
-    negatives.push("Returns generic Error types");
+    negatives.push("Returns generic Error types (-5)");
   }
 
   // --- @example JSDoc tag coverage ---
@@ -90,18 +109,22 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   if (totalFunctions > 0) {
     const exampleRatio = functionsWithExample / totalFunctions;
     if (exampleRatio >= 0.5) {
-      score += 10;
-      positives.push(`${functionsWithExample}/${totalFunctions} exported functions have @example`);
+      score += 8;
+      positives.push(
+        `${functionsWithExample}/${totalFunctions} exported functions have @example (+8)`,
+      );
     } else if (exampleRatio >= 0.2) {
-      score += 5;
-      positives.push(`${functionsWithExample}/${totalFunctions} exported functions have @example`);
+      score += 4;
+      positives.push(
+        `${functionsWithExample}/${totalFunctions} exported functions have @example (+4)`,
+      );
     } else if (totalFunctions >= 5) {
       score -= 5;
-      negatives.push("Few functions have @example JSDoc tags");
+      negatives.push("Few functions have @example JSDoc tags (-5)");
     }
   }
 
-  // --- Overload ambiguity detection ---
+  // --- Overload ambiguity detection (inference stability) ---
   let clearOverloads = 0;
   let ambiguousOverloads = 0;
   let _totalOverloadedFunctions = 0;
@@ -132,7 +155,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
 
   if (clearOverloads > 0 && ambiguousOverloads === 0) {
     score += 5;
-    positives.push(`${clearOverloads} function(s) with clear overload patterns`);
+    positives.push(`${clearOverloads} function(s) with clear overload patterns (+5)`);
   } else if (ambiguousOverloads > 0) {
     const penalty = Math.min(10, ambiguousOverloads * 3);
     score -= penalty;
@@ -158,11 +181,11 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     const readableRatio = readableGenericNames / totalGenericParams;
     if (readableRatio >= 0.9) {
       score += 5;
-      positives.push("Generic parameter names are readable");
+      positives.push("Generic parameter names are readable (+5)");
     }
   }
 
-  // --- Predictable inference: parameter/return type correlation ---
+  // --- Parameter-to-result predictability (correlated generics) ---
   let correlatedGenericFunctions = 0;
   let functionsWithGenerics = 0;
 
@@ -207,7 +230,9 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     const correlatedRatio = correlatedGenericFunctions / functionsWithGenerics;
     if (correlatedRatio > 0.3) {
       score += 8;
-      positives.push(`${Math.round(correlatedRatio * 100)}% of generic functions preserve input→output type relationships (+8)`);
+      positives.push(
+        `${Math.round(correlatedRatio * 100)}% of generic functions preserve input→output type relationships (+8)`,
+      );
     }
   }
 
@@ -255,7 +280,9 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     const dominantKindCount = Math.max(...Object.values(kindCounts));
     const dominantKindRatio = dominantKindCount / totalExports;
     if (dominantKindRatio > 0.6) {
-      const dominantKind = Object.entries(kindCounts).find(([, count]) => count === dominantKindCount)?.[0] ?? "unknown";
+      const dominantKind =
+        Object.entries(kindCounts).find(([, count]) => count === dominantKindCount)?.[0] ??
+        "unknown";
       score += 5;
       positives.push(`Predictable export structure (>60% ${dominantKind}s, +5)`);
     }
@@ -288,20 +315,32 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   if (optionBagPenalties > 0) {
     const penalty = Math.min(9, optionBagPenalties * 3);
     score -= penalty;
-    negatives.push(`${optionBagPenalties} option bag(s) without discriminant property (-${penalty})`);
+    negatives.push(
+      `${optionBagPenalties} option bag(s) without discriminant property (-${penalty})`,
+    );
   }
 
-  // --- Stable alias quality: type aliases that are readable and self-documenting ---
+  // --- Stable alias quality ---
   let stableAliases = 0;
   let totalTypeAliases = 0;
   for (const decl of surface.declarations) {
     if (decl.kind === "type-alias") {
       totalTypeAliases++;
-      // Aliases with descriptive names (>4 chars) and not just renaming primitives
       if (decl.name.length > 4 && decl.bodyTypeNode) {
         const bodyText = decl.bodyTypeNode.getText();
-        // Not a simple primitive rename
-        if (!["string", "number", "boolean", "any", "unknown", "void", "never", "null", "undefined"].includes(bodyText.trim())) {
+        if (
+          ![
+            "string",
+            "number",
+            "boolean",
+            "any",
+            "unknown",
+            "void",
+            "never",
+            "null",
+            "undefined",
+          ].includes(bodyText.trim())
+        ) {
           stableAliases++;
         }
       }
@@ -312,11 +351,13 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     const stableRatio = stableAliases / totalTypeAliases;
     if (stableRatio > 0.7) {
       score += 5;
-      positives.push(`${Math.round(stableRatio * 100)}% of type aliases are descriptive and non-trivial (+5)`);
+      positives.push(
+        `${Math.round(stableRatio * 100)}% of type aliases are descriptive and non-trivial (+5)`,
+      );
     }
   }
 
-  // --- Generic opacity penalty: deeply nested generics that are hard to reason about ---
+  // --- Generic opacity penalty ---
   let opaqueGenericCount = 0;
   for (const decl of surface.declarations) {
     if (decl.kind === "function" && decl.typeParameters.length > 3) {
@@ -326,7 +367,72 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
   if (opaqueGenericCount > 2) {
     const penalty = Math.min(8, opaqueGenericCount * 2);
     score -= penalty;
-    negatives.push(`${opaqueGenericCount} function(s) with >3 generic type parameters (opaque for agents, -${penalty})`);
+    negatives.push(
+      `${opaqueGenericCount} function(s) with >3 generic type parameters (opaque for agents, -${penalty})`,
+    );
+  }
+
+  // --- Wrong-path count: how many plausible wrong ways can an agent call the API ---
+  let wrongPathCount = 0;
+
+  // Functions with same name but different param counts (ambiguous overloads)
+  const fnNameCounts = new Map<string, number>();
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function") {
+      fnNameCounts.set(decl.name, (fnNameCounts.get(decl.name) ?? 0) + 1);
+    }
+  }
+  for (const count of fnNameCounts.values()) {
+    if (count > 1) {
+      wrongPathCount += count - 1;
+    }
+  }
+
+  // Optional params without clear documentation increase wrong paths
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function") {
+      const optionalParams = decl.positions.filter(
+        (p) => p.role === "param" && p.type.getText().includes("undefined"),
+      );
+      if (optionalParams.length > 3) {
+        wrongPathCount++;
+      }
+    }
+  }
+
+  if (wrongPathCount > 5) {
+    const penalty = Math.min(8, Math.round(wrongPathCount / 2));
+    score -= penalty;
+    negatives.push(`${wrongPathCount} plausible wrong paths for agents (-${penalty})`);
+  } else if (wrongPathCount <= 1 && totalExports >= 5) {
+    score += 3;
+    positives.push("Low ambiguity: few wrong paths for agents (+3)");
+  }
+
+  // --- Inference stability: constrained generics vs unconstrained ---
+  let constrainedGenerics = 0;
+  let unconstrainedGenerics = 0;
+  for (const decl of surface.declarations) {
+    for (const tp of decl.typeParameters) {
+      if (tp.constraint) {
+        constrainedGenerics++;
+      } else {
+        unconstrainedGenerics++;
+      }
+    }
+  }
+
+  if (constrainedGenerics + unconstrainedGenerics > 3) {
+    const constrainedRatio = constrainedGenerics / (constrainedGenerics + unconstrainedGenerics);
+    if (constrainedRatio > 0.7) {
+      score += 4;
+      positives.push(
+        `${Math.round(constrainedRatio * 100)}% of generics are constrained (stable inference, +4)`,
+      );
+    } else if (constrainedRatio < 0.3 && unconstrainedGenerics > 5) {
+      score -= 3;
+      negatives.push(`${unconstrainedGenerics} unconstrained generics (unstable inference, -3)`);
+    }
   }
 
   score = Math.max(0, Math.min(100, score));
@@ -339,6 +445,7 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     metrics: {
       ambiguousOverloads,
       clearOverloads,
+      constrainedGenerics,
       correlatedGenericFunctions,
       defaultExports,
       functionsWithExample,
@@ -353,6 +460,8 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
       totalGenericParams,
       totalReturnTypeFunctions,
       totalTypeAliases,
+      unconstrainedGenerics,
+      wrongPathCount,
     },
     negatives,
     positives,

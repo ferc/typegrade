@@ -7,14 +7,20 @@ import { existsSync, readFileSync } from "node:fs";
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "boundaryDiscipline")!;
 
 function detectValidationLib(projectDir: string | undefined): string | null {
-  if (!projectDir) {return null;}
+  if (!projectDir) {
+    return null;
+  }
   const pkgPath = join(projectDir, "package.json");
-  if (!existsSync(pkgPath)) {return null;}
+  if (!existsSync(pkgPath)) {
+    return null;
+  }
   try {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
     const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
     for (const lib of VALIDATION_LIBRARIES) {
-      if (allDeps[lib]) {return lib;}
+      if (allDeps[lib]) {
+        return lib;
+      }
     }
   } catch {
     // Ignore parse errors
@@ -83,7 +89,14 @@ function analyzeSourceFileBoundaries(sf: SourceFile): BoundaryFileResult {
     }
   });
 
-  return { assertFunctionCount, hasBoundaryMarkers, issues, jsonParseCount, satisfiesCount, typeGuardCount };
+  return {
+    assertFunctionCount,
+    hasBoundaryMarkers,
+    issues,
+    jsonParseCount,
+    satisfiesCount,
+    typeGuardCount,
+  };
 }
 
 export function analyzeBoundaryDiscipline(
@@ -97,10 +110,9 @@ export function analyzeBoundaryDiscipline(
   let score = 0;
 
   // Check package.json for validation libraries
-  const tsconfigPath = project.getCompilerOptions()['configFilePath'];
-  const projectDir: string | undefined = typeof tsconfigPath === "string"
-    ? dirname(tsconfigPath)
-    : undefined;
+  const tsconfigPath = project.getCompilerOptions()["configFilePath"];
+  const projectDir: string | undefined =
+    typeof tsconfigPath === "string" ? dirname(tsconfigPath) : undefined;
 
   const validationLib = detectValidationLib(projectDir);
   const hasValidationLib = validationLib !== null;
@@ -108,7 +120,9 @@ export function analyzeBoundaryDiscipline(
     positives.push(`Validation library found: ${validationLib}`);
   }
 
-  if (hasValidationLib) {score += 30;}
+  if (hasValidationLib) {
+    score += 30;
+  }
 
   let typeGuardCount = 0;
   let assertFunctionCount = 0;
@@ -122,7 +136,9 @@ export function analyzeBoundaryDiscipline(
     assertFunctionCount += fileResult.assertFunctionCount;
     satisfiesCount += fileResult.satisfiesCount;
     jsonParseCount += fileResult.jsonParseCount;
-    if (fileResult.hasBoundaryMarkers) {hasBoundaryMarkers = true;}
+    if (fileResult.hasBoundaryMarkers) {
+      hasBoundaryMarkers = true;
+    }
     issues.push(...fileResult.issues);
   }
 

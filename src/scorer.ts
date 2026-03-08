@@ -1,12 +1,30 @@
-import type { AnalysisMode, CompositeKey, CompositeScore, DimensionResult, Grade } from "./types.js";
+import type {
+  AnalysisMode,
+  CompositeKey,
+  CompositeScore,
+  DimensionResult,
+  Grade,
+} from "./types.js";
 
 export function computeGrade(score: number | null): Grade {
-  if (score === null) {return "N/A";}
-  if (score >= 95) {return "A+";}
-  if (score >= 85) {return "A";}
-  if (score >= 70) {return "B";}
-  if (score >= 55) {return "C";}
-  if (score >= 40) {return "D";}
+  if (score === null) {
+    return "N/A";
+  }
+  if (score >= 95) {
+    return "A+";
+  }
+  if (score >= 85) {
+    return "A";
+  }
+  if (score >= 70) {
+    return "B";
+  }
+  if (score >= 55) {
+    return "C";
+  }
+  if (score >= 40) {
+    return "D";
+  }
   return "F";
 }
 
@@ -28,7 +46,8 @@ function computeComposite(
   mode: AnalysisMode,
 ): CompositeScore {
   const contributing = dimensions.filter(
-    (dim) => dim.enabled && dim.score !== null && dim.weights[key] !== undefined && dim.weights[key]! > 0,
+    (dim) =>
+      dim.enabled && dim.score !== null && dim.weights[key] !== undefined && dim.weights[key]! > 0,
   );
 
   if (contributing.length === 0) {
@@ -66,8 +85,13 @@ function computeComposite(
   };
 }
 
-function computeConfidence(contributing: DimensionResult[]): { confidence: number; reasons: string[] } {
-  if (contributing.length === 0) {return { confidence: 0, reasons: ["No contributing dimensions"] };}
+function computeConfidence(contributing: DimensionResult[]): {
+  confidence: number;
+  reasons: string[];
+} {
+  if (contributing.length === 0) {
+    return { confidence: 0, reasons: ["No contributing dimensions"] };
+  }
 
   const reasons: string[] = [];
   let minConfidence = 1;
@@ -100,7 +124,9 @@ function computeConfidence(contributing: DimensionResult[]): { confidence: numbe
   const confidence = Math.round(composite * 100) / 100;
 
   if (avgConfidence > minConfidence + 0.1) {
-    reasons.push(`Average dimension confidence (${Math.round(avgConfidence * 100)}%) higher than bottleneck`);
+    reasons.push(
+      `Average dimension confidence (${Math.round(avgConfidence * 100)}%) higher than bottleneck`,
+    );
   }
 
   return { confidence, reasons };

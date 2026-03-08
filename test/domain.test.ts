@@ -1,4 +1,3 @@
-
 import { detectDomain } from "../src/domain.js";
 import { extractPublicSurface } from "../src/surface/index.js";
 import { Project } from "ts-morph";
@@ -22,7 +21,7 @@ function getFixtureSurface(name: string) {
   return extractPublicSurface(project.getSourceFiles());
 }
 
-describe("detectDomain", () => {
+describe(detectDomain, () => {
   it("detects validation domain by package name", () => {
     const surface = getSurfaceFromCode("export function parse(x: string): number { return 0; }");
     const result = detectDomain(surface, "zod");
@@ -31,7 +30,9 @@ describe("detectDomain", () => {
   });
 
   it("detects result domain by package name", () => {
-    const surface = getSurfaceFromCode("export type Result<T> = { ok: true; value: T } | { ok: false };");
+    const surface = getSurfaceFromCode(
+      "export type Result<T> = { ok: true; value: T } | { ok: false };",
+    );
     const result = detectDomain(surface, "neverthrow");
     expect(result.domain).toBe("result");
     expect(result.confidence).toBeGreaterThanOrEqual(0.5);
@@ -67,7 +68,7 @@ describe("detectDomain", () => {
 
   it("detects validation domain by unknown params with package name hint", () => {
     // Validation detection by unknown params alone requires >30% unknown params
-    // which is hard to guarantee without the package name hint
+    // Which is hard to guarantee without the package name hint
     const surface = getSurfaceFromCode(`
       export function parse(input: unknown): string { return ""; }
       export function validate(input: unknown): boolean { return true; }
@@ -109,7 +110,9 @@ describe("detectDomain", () => {
   });
 
   it("returns general domain with low confidence when no pattern matches", () => {
-    const surface = getSurfaceFromCode("export function add(a: number, b: number): number { return a + b; }");
+    const surface = getSurfaceFromCode(
+      "export function add(a: number, b: number): number { return a + b; }",
+    );
     const result = detectDomain(surface);
     expect(result.domain).toBe("general");
     expect(result.confidence).toBeLessThan(0.5);
@@ -119,7 +122,7 @@ describe("detectDomain", () => {
     const surface = getSurfaceFromCode("export function parse(x: string): number { return 0; }");
     const result = detectDomain(surface, "zod");
     expect(result.falsePositiveRisk).toBeDefined();
-    expect(typeof result.falsePositiveRisk).toBe("number");
+    expectTypeOf(result.falsePositiveRisk).toBeNumber();
     expect(result.matchedRules).toBeDefined();
     expect(result.matchedRules.length).toBeGreaterThan(0);
   });

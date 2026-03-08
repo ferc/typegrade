@@ -1,4 +1,3 @@
-
 import { extractPublicSurface } from "../src/surface/index.js";
 import { Project } from "ts-morph";
 import { resolve } from "node:path";
@@ -21,7 +20,7 @@ function getSurfaceFromCode(code: string) {
   return extractPublicSurface(project.getSourceFiles());
 }
 
-describe("extractPublicSurface", () => {
+describe(extractPublicSurface, () => {
   describe("index signatures", () => {
     it("extracts index signatures from interfaces", () => {
       const surface = getSurfaceFromCode(`
@@ -30,7 +29,7 @@ describe("extractPublicSurface", () => {
         }
       `);
       const indexPositions = surface.positions.filter((p) => p.role === "index-sig");
-      expect(indexPositions.length).toBe(1);
+      expect(indexPositions).toHaveLength(1);
       expect(indexPositions[0]!.name).toBe("[index]");
       expect(indexPositions[0]!.weight).toBe(0.75);
     });
@@ -44,8 +43,8 @@ describe("extractPublicSurface", () => {
       `);
       const props = surface.positions.filter((p) => p.role === "property");
       const indexSigs = surface.positions.filter((p) => p.role === "index-sig");
-      expect(props.length).toBe(1);
-      expect(indexSigs.length).toBe(1);
+      expect(props).toHaveLength(1);
+      expect(indexSigs).toHaveLength(1);
     });
 
     it("extracts from index-signatures fixture", () => {
@@ -53,7 +52,7 @@ describe("extractPublicSurface", () => {
       const surface = extractPublicSurface(sourceFiles);
       const indexPositions = surface.positions.filter((p) => p.role === "index-sig");
       // StringMap(1) + Config(1) + Complex(1) = 3
-      expect(indexPositions.length).toBe(3);
+      expect(indexPositions).toHaveLength(3);
     });
   });
 
@@ -65,10 +64,10 @@ describe("extractPublicSurface", () => {
         }
       `);
       const callSigPositions = surface.positions.filter((p) => p.role === "call-sig");
-      expect(callSigPositions.length).toBe(1);
+      expect(callSigPositions).toHaveLength(1);
       // Params from call signature
       const paramPositions = surface.positions.filter((p) => p.role === "param");
-      expect(paramPositions.length).toBe(1);
+      expect(paramPositions).toHaveLength(1);
       expect(paramPositions[0]!.name).toBe("arg");
     });
 
@@ -77,7 +76,7 @@ describe("extractPublicSurface", () => {
       const surface = extractPublicSurface(sourceFiles);
       const callSigPositions = surface.positions.filter((p) => p.role === "call-sig");
       // Callable(1) + Complex(1) = 2
-      expect(callSigPositions.length).toBe(2);
+      expect(callSigPositions).toHaveLength(2);
     });
   });
 
@@ -89,7 +88,7 @@ describe("extractPublicSurface", () => {
         }
       `);
       const ctorSigPositions = surface.positions.filter((p) => p.role === "construct-sig");
-      expect(ctorSigPositions.length).toBe(1);
+      expect(ctorSigPositions).toHaveLength(1);
     });
 
     it("extracts from index-signatures fixture (Complex + Constructable)", () => {
@@ -97,7 +96,7 @@ describe("extractPublicSurface", () => {
       const surface = extractPublicSurface(sourceFiles);
       const ctorSigPositions = surface.positions.filter((p) => p.role === "construct-sig");
       // Constructable(1) + Complex(1) = 2
-      expect(ctorSigPositions.length).toBe(2);
+      expect(ctorSigPositions).toHaveLength(2);
     });
   });
 
@@ -130,18 +129,24 @@ describe("extractPublicSurface", () => {
         compilerOptions: { module: 99, strict: true, target: 2 },
         useInMemoryFileSystem: true,
       });
-      project.createSourceFile("a.ts", `
+      project.createSourceFile(
+        "a.ts",
+        `
         export interface Shared { x: number; }
-      `);
-      project.createSourceFile("b.ts", `
+      `,
+      );
+      project.createSourceFile(
+        "b.ts",
+        `
         export interface Shared { y: string; }
-      `);
+      `,
+      );
       const surface = extractPublicSurface(project.getSourceFiles());
       // Should merge into a single declaration
       const sharedDecls = surface.declarations.filter((d) => d.name === "Shared");
-      expect(sharedDecls.length).toBe(1);
+      expect(sharedDecls).toHaveLength(1);
       // Should have positions from both
-      expect(sharedDecls[0]!.positions.length).toBe(2);
+      expect(sharedDecls[0]!.positions).toHaveLength(2);
     });
   });
 

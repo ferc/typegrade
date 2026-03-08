@@ -21,7 +21,9 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
 
   for (const decl of surface.declarations) {
     // Enums have no positions and are not safety-checked
-    if (decl.kind === "enum") {continue;}
+    if (decl.kind === "enum") {
+      continue;
+    }
 
     for (const pos of decl.positions) {
       totalPositions++;
@@ -59,10 +61,15 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
   const unknownDensity = unknownPositions / totalPositions;
   const score = Math.max(0, Math.min(100, Math.round(100 - anyDensity * 80 - unknownDensity * 20)));
 
-  if (anyPositions === 0) {positives.push("No 'any' leakage in exported API");}
-  if (anyPositions > 0) {negatives.push(`${anyPositions}/${totalPositions} positions leak 'any'`);}
-  if (unknownPositions > 0)
-    {negatives.push(`${unknownPositions}/${totalPositions} positions contain 'unknown'`);}
+  if (anyPositions === 0) {
+    positives.push("No 'any' leakage in exported API");
+  }
+  if (anyPositions > 0) {
+    negatives.push(`${anyPositions}/${totalPositions} positions leak 'any'`);
+  }
+  if (unknownPositions > 0) {
+    negatives.push(`${unknownPositions}/${totalPositions} positions contain 'unknown'`);
+  }
 
   return {
     enabled: true,
@@ -86,7 +93,9 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
  */
 function pushAnyIssue(pos: SurfacePosition, issues: Issue[]): void {
   // Class positions don't generate issues
-  if (pos.declarationKind === "class") {return;}
+  if (pos.declarationKind === "class") {
+    return;
+  }
 
   let message: string;
   if (pos.role === "param" && pos.declarationKind === "function") {

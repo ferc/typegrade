@@ -8,7 +8,9 @@ import type { ResolvedEntrypoint } from "./types.js";
  */
 export function resolveEntrypoints(pkgDir: string): ResolvedEntrypoint[] {
   const pkgJsonPath = join(pkgDir, "package.json");
-  if (!existsSync(pkgJsonPath)) {return [];}
+  if (!existsSync(pkgJsonPath)) {
+    return [];
+  }
 
   let pkg: Record<string, unknown>;
   try {
@@ -59,9 +61,19 @@ function collectExportsEntrypoints(
     } else if (key.startsWith(".") && value && typeof value === "object" && !Array.isArray(value)) {
       // Subpath export like "./utils" or "."
       collectExportsEntrypoints(value as Record<string, unknown>, pkgDir, entrypoints, key);
-    } else if (!key.startsWith(".") && value && typeof value === "object" && !Array.isArray(value)) {
+    } else if (
+      !key.startsWith(".") &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
       // Condition like "import", "require", "default"
-      collectExportsEntrypoints(value as Record<string, unknown>, pkgDir, entrypoints, currentSubpath);
+      collectExportsEntrypoints(
+        value as Record<string, unknown>,
+        pkgDir,
+        entrypoints,
+        currentSubpath,
+      );
     }
   }
 }

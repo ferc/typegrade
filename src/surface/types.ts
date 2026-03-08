@@ -55,7 +55,7 @@ export interface SurfaceMethod {
   overloadCount: number;
   typeParameters: SurfaceTypeParam[];
   positions: SurfacePosition[];
-  paramTypeNodes: Array<{ name: string; typeNode: TypeNode | undefined }>;
+  paramTypeNodes: { name: string; typeNode: TypeNode | undefined }[];
   returnTypeNode: TypeNode | undefined;
 }
 
@@ -73,7 +73,7 @@ export interface SurfaceDeclaration {
   hasExplicitReturnType?: boolean;
   allParamsTyped?: boolean;
   overloadCount?: number;
-  paramTypeNodes?: Array<{ name: string; typeNode: TypeNode | undefined }>;
+  paramTypeNodes?: { name: string; typeNode: TypeNode | undefined }[];
   returnTypeNode?: TypeNode | undefined;
   // Interface/class-specific
   methods?: SurfaceMethod[];

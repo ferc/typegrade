@@ -31,7 +31,9 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     if (overloadRatio > 3) {
       const penalty = Math.min(25, Math.round((overloadRatio - 3) * 10));
       score -= penalty;
-      negatives.push(`High overload density (${overloadRatio.toFixed(1)} overloads/function, -${penalty})`);
+      negatives.push(
+        `High overload density (${overloadRatio.toFixed(1)} overloads/function, -${penalty})`,
+      );
     }
   }
 
@@ -44,7 +46,7 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
       const params = decl.positions.filter((p) => p.role === "param");
       if (params.length >= 2) {
         const firstParamText = params[0]!.type.getText();
-        const lastParamText = params[params.length - 1]!.type.getText();
+        const lastParamText = params.at(-1)!.type.getText();
         if (firstParamText.includes("any") && !lastParamText.includes("any")) {
           poorlyOrderedOverloads++;
         }
@@ -53,7 +55,9 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
   }
   if (poorlyOrderedOverloads > 0) {
     score -= Math.min(10, poorlyOrderedOverloads * 3);
-    negatives.push(`${poorlyOrderedOverloads} overloaded function(s) with suboptimal signature ordering`);
+    negatives.push(
+      `${poorlyOrderedOverloads} overloaded function(s) with suboptimal signature ordering`,
+    );
   }
 
   // --- Return type explicitness penalty ---
@@ -62,12 +66,16 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
   for (const decl of surface.declarations) {
     if (decl.kind === "function") {
       totalReturnable++;
-      if (decl.hasExplicitReturnType) {explicitReturns++;}
+      if (decl.hasExplicitReturnType) {
+        explicitReturns++;
+      }
     }
     if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
       for (const method of decl.methods) {
         totalReturnable++;
-        if (method.hasExplicitReturnType) {explicitReturns++;}
+        if (method.hasExplicitReturnType) {
+          explicitReturns++;
+        }
       }
     }
   }
@@ -108,8 +116,12 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
   for (const pos of surface.positions) {
     if (pos.role === "return" || pos.role === "property") {
       const typeText = pos.type.getText();
-      if (typeText.includes("null")) {usesNull++;}
-      if (typeText.includes("undefined")) {usesUndefined++;}
+      if (typeText.includes("null")) {
+        usesNull++;
+      }
+      if (typeText.includes("undefined")) {
+        usesUndefined++;
+      }
     }
   }
 
@@ -118,7 +130,9 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     const dominantRatio = Math.max(usesNull, usesUndefined) / total;
     if (dominantRatio < 0.7) {
       score -= 5;
-      negatives.push(`Mixed null/undefined conventions (${usesNull} null, ${usesUndefined} undefined, -5)`);
+      negatives.push(
+        `Mixed null/undefined conventions (${usesNull} null, ${usesUndefined} undefined, -5)`,
+      );
     }
   }
 
@@ -148,10 +162,13 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
 
   const totalGenerics = singleLetterGenerics + descriptiveGenerics;
   if (totalGenerics >= 3) {
-    const dominantGenericRatio = Math.max(singleLetterGenerics, descriptiveGenerics) / totalGenerics;
+    const dominantGenericRatio =
+      Math.max(singleLetterGenerics, descriptiveGenerics) / totalGenerics;
     if (dominantGenericRatio < 0.7) {
       score -= 5;
-      negatives.push(`Mixed generic naming styles (${singleLetterGenerics} single-letter, ${descriptiveGenerics} descriptive, -5)`);
+      negatives.push(
+        `Mixed generic naming styles (${singleLetterGenerics} single-letter, ${descriptiveGenerics} descriptive, -5)`,
+      );
     } else {
       positives.push("Consistent generic parameter naming style");
     }
@@ -167,7 +184,11 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
       for (const pos of decl.positions) {
         if (pos.role === "return") {
           const typeText = pos.type.getText();
-          if (typeText.includes("Result") || typeText.includes("Either") || (typeText.includes("|") && typeText.includes("{"))) {
+          if (
+            typeText.includes("Result") ||
+            typeText.includes("Either") ||
+            (typeText.includes("|") && typeText.includes("{"))
+          ) {
             resultFunctionCount++;
             for (const prop of KNOWN_DISCRIMINANTS) {
               if (typeText.includes(prop)) {
@@ -201,7 +222,8 @@ export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResu
     metrics: {
       descriptiveGenerics,
       explicitReturns,
-      overloadRatio: totalFunctions > 0 ? Math.round((totalOverloads / totalFunctions) * 100) / 100 : 0,
+      overloadRatio:
+        totalFunctions > 0 ? Math.round((totalOverloads / totalFunctions) * 100) / 100 : 0,
       poorlyOrderedOverloads,
       resultFunctionCount,
       singleLetterGenerics,

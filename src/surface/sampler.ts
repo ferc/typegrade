@@ -39,7 +39,10 @@ export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
 
     // Handle `export *` re-exports — resolve target and merge declarations
     for (const exportDecl of sf.getExportDeclarations()) {
-      if (exportDecl.isNamespaceExport() || (!exportDecl.getNamedExports().length && !exportDecl.getModuleSpecifier())) {
+      if (
+        exportDecl.isNamespaceExport() ||
+        (exportDecl.getNamedExports().length === 0 && !exportDecl.getModuleSpecifier())
+      ) {
         const resolved = resolveReExportTarget(exportDecl);
         if (resolved && !visited.has(resolved.getFilePath())) {
           visited.add(resolved.getFilePath());
@@ -50,7 +53,9 @@ export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
 
     // Handle namespace exports
     for (const mod of sf.getModules()) {
-      if (!mod.isExported()) {continue;}
+      if (!mod.isExported()) {
+        continue;
+      }
       extractNamespaceExports(mod, sf.getFilePath(), declarations);
     }
   }
@@ -68,32 +73,44 @@ function extractFromSourceFile(sf: SourceFile, declarations: SurfaceDeclaration[
   const filePath = sf.getFilePath();
 
   for (const fn of sf.getFunctions()) {
-    if (!fn.isExported()) {continue;}
+    if (!fn.isExported()) {
+      continue;
+    }
     declarations.push(extractFunction(fn, filePath));
   }
 
   for (const iface of sf.getInterfaces()) {
-    if (!iface.isExported()) {continue;}
+    if (!iface.isExported()) {
+      continue;
+    }
     declarations.push(extractInterface(iface, filePath));
   }
 
   for (const alias of sf.getTypeAliases()) {
-    if (!alias.isExported()) {continue;}
+    if (!alias.isExported()) {
+      continue;
+    }
     declarations.push(extractTypeAlias(alias, filePath));
   }
 
   for (const cls of sf.getClasses()) {
-    if (!cls.isExported()) {continue;}
+    if (!cls.isExported()) {
+      continue;
+    }
     declarations.push(extractClass(cls, filePath));
   }
 
   for (const en of sf.getEnums()) {
-    if (!en.isExported()) {continue;}
+    if (!en.isExported()) {
+      continue;
+    }
     declarations.push(extractEnum(en, filePath));
   }
 
   for (const varStmt of sf.getVariableStatements()) {
-    if (!varStmt.isExported()) {continue;}
+    if (!varStmt.isExported()) {
+      continue;
+    }
     for (const decl of varStmt.getDeclarations()) {
       declarations.push(extractVariable(decl, varStmt, filePath));
     }
@@ -109,14 +126,22 @@ function resolveReExportTarget(exportDecl: ExportDeclaration): SourceFile | unde
   }
 }
 
-function extractNamespaceExports(mod: ModuleDeclaration, filePath: string, declarations: SurfaceDeclaration[]): void {
+function extractNamespaceExports(
+  mod: ModuleDeclaration,
+  filePath: string,
+  declarations: SurfaceDeclaration[],
+): void {
   const body = mod.getBody();
-  if (!body) {return;}
-  const nsName = mod.getName().replace(/["']/g, "");
+  if (!body) {
+    return;
+  }
+  const nsName = mod.getName().replaceAll(/["']/g, "");
 
   // Extract functions from namespace
   for (const fn of body.getFunctions?.() ?? []) {
-    if (!fn.isExported()) {continue;}
+    if (!fn.isExported()) {
+      continue;
+    }
     const decl = extractFunction(fn, filePath);
     decl.name = `${nsName}.${decl.name}`;
     for (const pos of decl.positions) {
@@ -127,7 +152,9 @@ function extractNamespaceExports(mod: ModuleDeclaration, filePath: string, decla
 
   // Extract interfaces from namespace
   for (const iface of body.getInterfaces?.() ?? []) {
-    if (!iface.isExported()) {continue;}
+    if (!iface.isExported()) {
+      continue;
+    }
     const decl = extractInterface(iface, filePath);
     decl.name = `${nsName}.${decl.name}`;
     for (const pos of decl.positions) {
@@ -138,7 +165,9 @@ function extractNamespaceExports(mod: ModuleDeclaration, filePath: string, decla
 
   // Extract type aliases from namespace
   for (const alias of body.getTypeAliases?.() ?? []) {
-    if (!alias.isExported()) {continue;}
+    if (!alias.isExported()) {
+      continue;
+    }
     const decl = extractTypeAlias(alias, filePath);
     decl.name = `${nsName}.${decl.name}`;
     for (const pos of decl.positions) {
@@ -159,7 +188,11 @@ function deduplicateMergedDeclarations(declarations: SurfaceDeclaration[]): Surf
       // Merge positions and methods from duplicate declaration
       for (const pos of decl.positions) {
         const isDuplicate = existing.positions.some(
-          (ep) => ep.name === pos.name && ep.role === pos.role && ep.filePath === pos.filePath && ep.line === pos.line,
+          (ep) =>
+            ep.name === pos.name &&
+            ep.role === pos.role &&
+            ep.filePath === pos.filePath &&
+            ep.line === pos.line,
         );
         if (!isDuplicate) {
           existing.positions.push(pos);
@@ -257,11 +290,19 @@ function extractFunction(fn: FunctionDeclaration, filePath: string): SurfaceDecl
   const positions: SurfacePosition[] = [];
 
   for (const param of fn.getParameters()) {
-    positions.push(makePosition(param, "param", param.getName(), name, "function", filePath, 1.0));
+    positions.push(makePosition(param, "param", param.getName(), name, "function", filePath, 1));
   }
 
   positions.push(
-    makeReturnPosition(fn, fn.getReturnType(), fn.getReturnTypeNode(), name, "function", filePath, 1.25),
+    makeReturnPosition(
+      fn,
+      fn.getReturnType(),
+      fn.getReturnTypeNode(),
+      name,
+      "function",
+      filePath,
+      1.25,
+    ),
   );
 
   const overloads = fn.getOverloads();
@@ -290,7 +331,9 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
   const positions: SurfacePosition[] = [];
 
   for (const prop of iface.getProperties()) {
-    positions.push(makePosition(prop, "property", prop.getName(), name, "interface", filePath, 0.75));
+    positions.push(
+      makePosition(prop, "property", prop.getName(), name, "interface", filePath, 0.75),
+    );
   }
 
   // Index signatures: e.g., [key: string]: ValueType
@@ -316,25 +359,45 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
   // Call signatures: e.g., (arg: string): number
   for (const callSig of iface.getCallSignatures()) {
     for (const param of callSig.getParameters()) {
-      positions.push(makePosition(param, "param", param.getName(), `${name}()`, "interface", filePath, 1.0));
+      positions.push(
+        makePosition(param, "param", param.getName(), `${name}()`, "interface", filePath, 1),
+      );
     }
     positions.push(
-      makeReturnPosition(callSig, callSig.getReturnType(), callSig.getReturnTypeNode(), `${name}()`, "interface", filePath, 1.25),
+      makeReturnPosition(
+        callSig,
+        callSig.getReturnType(),
+        callSig.getReturnTypeNode(),
+        `${name}()`,
+        "interface",
+        filePath,
+        1.25,
+      ),
     );
     // Override role to call-sig for the return position
-    positions[positions.length - 1]!.role = "call-sig";
+    positions.at(-1)!.role = "call-sig";
   }
 
   // Construct signatures: e.g., new (arg: string): Instance
   for (const ctorSig of iface.getConstructSignatures()) {
     for (const param of ctorSig.getParameters()) {
-      positions.push(makePosition(param, "param", param.getName(), `new ${name}()`, "interface", filePath, 1.0));
+      positions.push(
+        makePosition(param, "param", param.getName(), `new ${name}()`, "interface", filePath, 1),
+      );
     }
     positions.push(
-      makeReturnPosition(ctorSig, ctorSig.getReturnType(), ctorSig.getReturnTypeNode(), `new ${name}()`, "interface", filePath, 1.25),
+      makeReturnPosition(
+        ctorSig,
+        ctorSig.getReturnType(),
+        ctorSig.getReturnTypeNode(),
+        `new ${name}()`,
+        "interface",
+        filePath,
+        1.25,
+      ),
     );
     // Override role to construct-sig for the return position
-    positions[positions.length - 1]!.role = "construct-sig";
+    positions.at(-1)!.role = "construct-sig";
   }
 
   const methods: SurfaceMethod[] = [];
@@ -355,17 +418,31 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
   };
 }
 
-function extractMethodSignature(method: MethodSignature, parentName: string, filePath: string): SurfaceMethod {
+function extractMethodSignature(
+  method: MethodSignature,
+  parentName: string,
+  filePath: string,
+): SurfaceMethod {
   const name = method.getName();
   const qualifiedName = `${parentName}.${name}`;
   const positions: SurfacePosition[] = [];
 
   for (const param of method.getParameters()) {
-    positions.push(makePosition(param, "param", param.getName(), qualifiedName, "interface", filePath, 1.0));
+    positions.push(
+      makePosition(param, "param", param.getName(), qualifiedName, "interface", filePath, 1),
+    );
   }
 
   positions.push(
-    makeReturnPosition(method, method.getReturnType(), method.getReturnTypeNode(), qualifiedName, "interface", filePath, 1.25),
+    makeReturnPosition(
+      method,
+      method.getReturnType(),
+      method.getReturnTypeNode(),
+      qualifiedName,
+      "interface",
+      filePath,
+      1.25,
+    ),
   );
 
   return {
@@ -426,13 +503,17 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
   // Constructors
   for (const ctor of cls.getConstructors()) {
     for (const param of ctor.getParameters()) {
-      positions.push(makePosition(param, "ctor-param", param.getName(), name, "class", filePath, 1.0));
+      positions.push(
+        makePosition(param, "ctor-param", param.getName(), name, "class", filePath, 1),
+      );
     }
   }
 
   // Methods
   for (const method of cls.getMethods()) {
-    if (!method.getScope || method.getScope() === "private") {continue;}
+    if (!method.getScope || method.getScope() === "private") {
+      continue;
+    }
     const m = extractClassMethod(method, name, filePath);
     methods.push(m);
     positions.push(...m.positions);
@@ -440,25 +521,41 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
 
   // Properties
   for (const prop of cls.getProperties()) {
-    if (prop.getScope() === "private") {continue;}
+    if (prop.getScope() === "private") {
+      continue;
+    }
     positions.push(makePosition(prop, "property", prop.getName(), name, "class", filePath, 0.75));
   }
 
   // Getters
   for (const getter of cls.getGetAccessors()) {
-    if (getter.getScope() === "private") {continue;}
+    if (getter.getScope() === "private") {
+      continue;
+    }
     positions.push(
-      makeReturnPosition(getter, getter.getReturnType(), getter.getReturnTypeNode(), name, "class", filePath, 1.0),
+      makeReturnPosition(
+        getter,
+        getter.getReturnType(),
+        getter.getReturnTypeNode(),
+        name,
+        "class",
+        filePath,
+        1,
+      ),
     );
     // Override role to "getter" (makeReturnPosition uses "return")
-    positions[positions.length - 1]!.role = "getter";
+    positions.at(-1)!.role = "getter";
   }
 
   // Setters
   for (const setter of cls.getSetAccessors()) {
-    if (setter.getScope() === "private") {continue;}
+    if (setter.getScope() === "private") {
+      continue;
+    }
     for (const param of setter.getParameters()) {
-      positions.push(makePosition(param, "setter-param", param.getName(), name, "class", filePath, 1.0));
+      positions.push(
+        makePosition(param, "setter-param", param.getName(), name, "class", filePath, 1),
+      );
     }
   }
 
@@ -475,17 +572,31 @@ function extractClass(cls: ClassDeclaration, filePath: string): SurfaceDeclarati
   };
 }
 
-function extractClassMethod(method: MethodDeclaration, className: string, filePath: string): SurfaceMethod {
+function extractClassMethod(
+  method: MethodDeclaration,
+  className: string,
+  filePath: string,
+): SurfaceMethod {
   const name = method.getName();
   const qualifiedName = `${className}.${name}`;
   const positions: SurfacePosition[] = [];
 
   for (const param of method.getParameters()) {
-    positions.push(makePosition(param, "param", param.getName(), qualifiedName, "class", filePath, 1.0));
+    positions.push(
+      makePosition(param, "param", param.getName(), qualifiedName, "class", filePath, 1),
+    );
   }
 
   positions.push(
-    makeReturnPosition(method, method.getReturnType(), method.getReturnTypeNode(), qualifiedName, "class", filePath, 1.25),
+    makeReturnPosition(
+      method,
+      method.getReturnType(),
+      method.getReturnTypeNode(),
+      qualifiedName,
+      "class",
+      filePath,
+      1.25,
+    ),
   );
 
   const overloads = method.getOverloads();
@@ -519,7 +630,11 @@ function extractEnum(en: EnumDeclaration, filePath: string): SurfaceDeclaration 
   };
 }
 
-function extractVariable(decl: VariableDeclaration, stmt: VariableStatement, filePath: string): SurfaceDeclaration {
+function extractVariable(
+  decl: VariableDeclaration,
+  stmt: VariableStatement,
+  filePath: string,
+): SurfaceDeclaration {
   const name = decl.getName();
   return {
     filePath,
@@ -528,7 +643,7 @@ function extractVariable(decl: VariableDeclaration, stmt: VariableStatement, fil
     line: decl.getStartLineNumber(),
     name,
     node: decl,
-    positions: [makePosition(decl, "variable", name, name, "variable", filePath, 1.0)],
+    positions: [makePosition(decl, "variable", name, name, "variable", filePath, 1)],
     typeParameters: [],
   };
 }
@@ -549,15 +664,17 @@ function computeStats(declarations: SurfaceDeclaration[]): SurfaceStats {
   for (const d of declarations) {
     totalPositions += d.positions.length;
     switch (d.kind) {
-      case "function":
+      case "function": {
         functionCount++;
         totalOverloads += d.overloadCount ?? 0;
         break;
-      case "interface":
+      }
+      case "interface": {
         interfaceCount++;
         totalMethods += d.methods?.length ?? 0;
         break;
-      case "class":
+      }
+      case "class": {
         classCount++;
         if (d.methods) {
           totalMethods += d.methods.length;
@@ -566,15 +683,19 @@ function computeStats(declarations: SurfaceDeclaration[]): SurfaceStats {
           }
         }
         break;
-      case "type-alias":
+      }
+      case "type-alias": {
         typeAliasCount++;
         break;
-      case "enum":
+      }
+      case "enum": {
         enumCount++;
         break;
-      case "variable":
+      }
+      case "variable": {
         variableCount++;
         break;
+      }
     }
   }
 

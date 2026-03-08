@@ -1,7 +1,16 @@
 import type { PublicSurface } from "./surface/index.js";
 import { DOMAIN_PATTERNS } from "./constants.js";
 
-export type DomainType = "validation" | "result" | "utility" | "router" | "orm" | "schema" | "frontend" | "stream" | "general";
+export type DomainType =
+  | "validation"
+  | "result"
+  | "utility"
+  | "router"
+  | "orm"
+  | "schema"
+  | "frontend"
+  | "stream"
+  | "general";
 
 export interface DomainAdjustment {
   dimension: string;
@@ -11,7 +20,12 @@ export interface DomainAdjustment {
 
 export interface DomainRule {
   name: string;
-  category: "package-name" | "declaration-shape" | "symbol-role" | "generic-structure" | "issue-pattern";
+  category:
+    | "package-name"
+    | "declaration-shape"
+    | "symbol-role"
+    | "generic-structure"
+    | "issue-pattern";
   score: number;
 }
 
@@ -36,7 +50,9 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   function addRule(domain: string, rule: DomainRule): void {
     scores[domain] = (scores[domain] ?? 0) + rule.score;
     matchedRules.push(`${domain}:${rule.name}`);
-    if (!rulesByDomain[domain]) rulesByDomain[domain] = [];
+    if (!rulesByDomain[domain]) {
+      rulesByDomain[domain] = [];
+    }
     rulesByDomain[domain]!.push(rule);
   }
 
@@ -44,8 +60,12 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   if (packageName) {
     for (const [domain, libs] of Object.entries(DOMAIN_PATTERNS)) {
       for (const lib of libs) {
-        if (packageName === lib || packageName.startsWith(`${lib}/`) || packageName.startsWith(`@${lib}/`)) {
-          addRule(domain, { name: `pkg-name:${lib}`, category: "package-name", score: 0.6 });
+        if (
+          packageName === lib ||
+          packageName.startsWith(`${lib}/`) ||
+          packageName.startsWith(`@${lib}/`)
+        ) {
+          addRule(domain, { category: "package-name", name: `pkg-name:${lib}`, score: 0.6 });
           signals.push(`package name matches ${domain} library '${lib}'`);
           break;
         }
@@ -68,7 +88,11 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (totalFunctions > 0 && unknownParamFunctions / totalFunctions > 0.3) {
-    addRule("validation", { name: "unknown-param-density", category: "declaration-shape", score: 0.3 });
+    addRule("validation", {
+      category: "declaration-shape",
+      name: "unknown-param-density",
+      score: 0.3,
+    });
     signals.push(`${unknownParamFunctions}/${totalFunctions} functions accept 'unknown' params`);
   }
 
@@ -77,14 +101,22 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     if (decl.kind === "type-alias") {
       const name = decl.name.toLowerCase();
       if (name === "result" || name === "either" || name === "ok" || name === "err") {
-        addRule("result", { name: `symbol:${decl.name}`, category: "symbol-role", score: 0.3 });
+        addRule("result", { category: "symbol-role", name: `symbol:${decl.name}`, score: 0.3 });
         signals.push(`type alias '${decl.name}' suggests result pattern`);
       }
     }
   }
 
   // Rule 4: Declaration shape — router patterns
-  const routerNames = ["route", "handler", "middleware", "request", "response", "router", "endpoint"];
+  const routerNames = [
+    "route",
+    "handler",
+    "middleware",
+    "request",
+    "response",
+    "router",
+    "endpoint",
+  ];
   let routerMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
@@ -94,7 +126,11 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
   if (routerMatchCount >= 3) {
     const routerSignal = Math.min(0.6, 0.2 + routerMatchCount * 0.1);
-    addRule("router", { name: "router-symbol-density", category: "declaration-shape", score: routerSignal });
+    addRule("router", {
+      category: "declaration-shape",
+      name: "router-symbol-density",
+      score: routerSignal,
+    });
     signals.push(`${routerMatchCount} declarations match router patterns`);
   }
 
@@ -109,12 +145,20 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
   if (ormMatchCount >= 3) {
     const ormSignal = Math.min(0.6, 0.2 + ormMatchCount * 0.1);
-    addRule("orm", { name: "orm-symbol-density", category: "declaration-shape", score: ormSignal });
+    addRule("orm", { category: "declaration-shape", name: "orm-symbol-density", score: ormSignal });
     signals.push(`${ormMatchCount} declarations match ORM patterns`);
   }
 
   // Rule 6: Declaration shape — stream/reactive patterns
-  const streamNames = ["observable", "subject", "stream", "subscription", "pipe", "operator", "subscriber"];
+  const streamNames = [
+    "observable",
+    "subject",
+    "stream",
+    "subscription",
+    "pipe",
+    "operator",
+    "subscriber",
+  ];
   let streamMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
@@ -124,7 +168,11 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   }
   if (streamMatchCount >= 3) {
     const streamSignal = Math.min(0.6, 0.2 + streamMatchCount * 0.1);
-    addRule("stream", { name: "stream-symbol-density", category: "declaration-shape", score: streamSignal });
+    addRule("stream", {
+      category: "declaration-shape",
+      name: "stream-symbol-density",
+      score: streamSignal,
+    });
     signals.push(`${streamMatchCount} declarations match stream/reactive patterns`);
   }
 
@@ -132,7 +180,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   const typeAliases = surface.declarations.filter((d) => d.kind === "type-alias").length;
   const totalDecls = surface.declarations.length;
   if (totalDecls > 0 && typeAliases / totalDecls > 0.6) {
-    addRule("schema", { name: "type-alias-density", category: "generic-structure", score: 0.3 });
+    addRule("schema", { category: "generic-structure", name: "type-alias-density", score: 0.3 });
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases`);
   }
 
@@ -145,9 +193,19 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       }
     }
     if (multiGenericFunctions / totalFunctions > 0.3) {
-      addRule("schema", { name: "multi-generic-fn-density", category: "generic-structure", score: 0.2 });
-      addRule("utility", { name: "multi-generic-fn-density", category: "generic-structure", score: 0.2 });
-      signals.push(`${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type parameters`);
+      addRule("schema", {
+        category: "generic-structure",
+        name: "multi-generic-fn-density",
+        score: 0.2,
+      });
+      addRule("utility", {
+        category: "generic-structure",
+        name: "multi-generic-fn-density",
+        score: 0.2,
+      });
+      signals.push(
+        `${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type parameters`,
+      );
     }
   }
 
@@ -159,7 +217,11 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
   if (genericTypeAliases > 5) {
-    addRule("schema", { name: "generic-type-alias-count", category: "generic-structure", score: 0.2 });
+    addRule("schema", {
+      category: "generic-structure",
+      name: "generic-type-alias-count",
+      score: 0.2,
+    });
     signals.push(`${genericTypeAliases} generic type aliases detected`);
   }
 

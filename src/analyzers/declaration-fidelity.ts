@@ -101,7 +101,9 @@ export function analyzeDeclarationFidelity(
   let constraintLoss = 0;
   for (const [name, srcInfo] of sourceExports) {
     const declInfo = declExports.get(name);
-    if (!declInfo) {continue;}
+    if (!declInfo) {
+      continue;
+    }
 
     if (srcInfo.typeParamCount > 0 && declInfo.typeParamCount < srcInfo.typeParamCount) {
       genericLoss++;

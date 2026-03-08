@@ -50,8 +50,12 @@ export function analyzeConfigDiscipline(
     const fullText = sf.getFullText();
     const lines = fullText.split("\n");
     for (const line of lines) {
-      if (line.includes("@ts-ignore")) {tsIgnoreCount++;}
-      if (line.includes("@ts-expect-error")) {tsExpectErrorCount++;}
+      if (line.includes("@ts-ignore")) {
+        tsIgnoreCount++;
+      }
+      if (line.includes("@ts-expect-error")) {
+        tsExpectErrorCount++;
+      }
     }
   }
 

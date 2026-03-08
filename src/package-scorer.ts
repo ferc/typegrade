@@ -19,7 +19,11 @@ function makeFallbackGraphStats(): GraphStats {
   };
 }
 
-function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResult {
+function scoreLocalPackage(
+  localPath: string,
+  pkgJsonPath: string,
+  domain?: "auto" | "off" | string,
+): AnalysisResult {
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
   const packageName = pkgJson.name ?? "local-package";
 
@@ -29,6 +33,7 @@ function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResu
   if (!hasTypeEntries) {
     // No type entrypoints — fall back to analyzing all files
     return analyzeProject(localPath, {
+      domain: domain as any,
       mode: "package",
       packageContext: {
         graphStats: makeFallbackGraphStats(),
@@ -63,6 +68,7 @@ function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResu
   };
 
   return analyzeProject(localPath, {
+    domain: domain as any,
     fileFilter,
     mode: "package",
     packageContext,
@@ -96,6 +102,7 @@ function parsePackageSpec(spec: string): { name: string; version: string } {
 
 export interface ScorePackageOptions {
   typesVersion?: string;
+  domain?: "auto" | "off" | string;
 }
 
 export function scorePackage(nameOrPath: string, options?: ScorePackageOptions): AnalysisResult {
@@ -106,10 +113,11 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
 
     // If local path has a package.json, use declaration graph for proper entrypoint resolution
     if (existsSync(localPkgJsonPath)) {
-      return scoreLocalPackage(localPath, localPkgJsonPath);
+      return scoreLocalPackage(localPath, localPkgJsonPath, options?.domain);
     }
 
     return analyzeProject(localPath, {
+      domain: options?.domain as any,
       mode: "package",
       packageContext: {
         graphStats: makeFallbackGraphStats(),
@@ -226,6 +234,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     };
 
     return analyzeProject(tmpDir, {
+      domain: options?.domain as any,
       fileFilter,
       mode: "package",
       packageContext,

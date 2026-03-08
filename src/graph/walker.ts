@@ -18,14 +18,18 @@ export function walkDeclarationGraph(
   const normalizedPkgDir = pkgDir.endsWith("/") ? pkgDir : `${pkgDir}/`;
 
   // Initialize BFS queue with entrypoints
-  const queue: Array<{ filePath: string; depth: number; subpath: string }> = [];
+  const queue: { filePath: string; depth: number; subpath: string }[] = [];
 
   for (const ep of entrypoints) {
     const sf = project.getSourceFile(ep.filePath);
-    if (!sf) {continue;}
+    if (!sf) {
+      continue;
+    }
 
     const absPath = sf.getFilePath();
-    if (!absPath.startsWith(normalizedPkgDir)) {continue;}
+    if (!absPath.startsWith(normalizedPkgDir)) {
+      continue;
+    }
 
     if (!nodes.has(absPath)) {
       nodes.set(absPath, {
@@ -50,7 +54,9 @@ export function walkDeclarationGraph(
     head++;
 
     const sf = project.getSourceFile(filePath);
-    if (!sf) {continue;}
+    if (!sf) {
+      continue;
+    }
 
     // Collect all referenced files: imports/exports + reference path directives
     const referencedFiles = collectAllReferences(sf, project, normalizedPkgDir);

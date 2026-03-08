@@ -1,4 +1,3 @@
-
 import { Project } from "ts-morph";
 import { analyzeConfigDiscipline } from "../src/analyzers/config-discipline.js";
 

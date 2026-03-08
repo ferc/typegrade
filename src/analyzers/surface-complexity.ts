@@ -37,7 +37,9 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
 
   if (totalTypeParams > 0 && nonConventional > 0) {
     score -= 10;
-    negatives.push(`${nonConventional}/${totalTypeParams} generic params use non-conventional names (-10)`);
+    negatives.push(
+      `${nonConventional}/${totalTypeParams} generic params use non-conventional names (-10)`,
+    );
   } else if (totalTypeParams > 0) {
     positives.push("All generic parameters use conventional naming");
   }
@@ -141,7 +143,9 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
       avgChainDepth = totalChainDepth / chainedAliasCount;
       if (avgChainDepth > 2) {
         score -= 5;
-        negatives.push(`High type alias chain depth (avg ${avgChainDepth.toFixed(1)} references, -5)`);
+        negatives.push(
+          `High type alias chain depth (avg ${avgChainDepth.toFixed(1)} references, -5)`,
+        );
       }
     }
   }

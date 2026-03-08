@@ -1,5 +1,20 @@
 export type AnalysisMode = "source" | "package";
-export type CompositeKey = "consumerApi" | "implementationQuality" | "agentReadiness" | "typeSafety";
+export type CompositeKey =
+  | "consumerApi"
+  | "implementationQuality"
+  | "agentReadiness"
+  | "typeSafety";
+export type DomainKey =
+  | "validation"
+  | "result"
+  | "utility"
+  | "router"
+  | "orm"
+  | "schema"
+  | "frontend"
+  | "stream"
+  | "general";
+export type ScoreComparability = "global" | "domain" | "scenario";
 
 export interface CompositeScore {
   key: CompositeKey;
@@ -42,6 +57,39 @@ export interface Issue {
   dimension: string;
 }
 
+/** Domain-adjusted score — only comparable within the same domain */
+export interface DomainScore {
+  domain: DomainKey;
+  score: number;
+  grade: Grade;
+  adjustments: { dimension: string; adjustment: string; effect: number; reason: string }[];
+  confidence: number;
+}
+
+/** Scenario-based score — from consumer benchmark apps */
+export interface ScenarioScore {
+  scenario: string;
+  domain: DomainKey;
+  score: number;
+  grade: Grade;
+  passedScenarios: number;
+  totalScenarios: number;
+  results: ScenarioResult[];
+}
+
+export interface ScenarioResult {
+  name: string;
+  passed: boolean;
+  score: number;
+  reason: string;
+}
+
+export interface GlobalScores {
+  consumerApi: CompositeScore;
+  agentReadiness: CompositeScore;
+  typeSafety: CompositeScore;
+}
+
 export interface AnalysisResult {
   mode: AnalysisMode;
   scoreProfile: "source-project" | "published-declarations";
@@ -52,20 +100,32 @@ export interface AnalysisResult {
   dimensions: DimensionResult[];
   caveats: string[];
   topIssues: Issue[];
+  /** Structured global scores for JSON output */
+  globalScores?: GlobalScores;
+  /** Domain-adjusted score, only comparable within domain */
+  domainScore?: DomainScore;
+  /** Scenario-based score from benchmark apps */
+  scenarioScore?: ScenarioScore;
+  /** Indicates which score layer is primary for this result */
+  scoreComparability: ScoreComparability;
   domainInference?: {
     domain: string;
     confidence: number;
     signals: string[];
     falsePositiveRisk?: number;
     matchedRules?: string[];
-    adjustments?: Array<{ dimension: string; adjustment: string; reason: string }>;
+    adjustments?: { dimension: string; adjustment: string; reason: string }[];
   };
   graphStats?: import("./graph/types.js").GraphStats;
   dedupStats?: { groups: number; filesRemoved: number };
   explainability?: ExplainabilityReport;
   benchmarkDiagnostics?: {
-    assertionMargins: Array<{ assertion: string; delta: number; minDelta?: number }>;
+    assertionMargins: { assertion: string; delta: number; minDelta?: number }[];
     rankingLoss?: number;
+  };
+  scenarioDiagnostics?: {
+    scenarioPack: string;
+    failures: { scenario: string; expected: string; actual: string }[];
   };
 }
 
@@ -94,8 +154,10 @@ export interface ExplainabilityReport {
   safetyLeaks: ExplainabilityEntry[];
   lowestUsability: ExplainabilityEntry[];
   highestSpecificity: ExplainabilityEntry[];
-  domainSuppressions: Array<{ name: string; reason: string }>;
-  domainAmbiguities: Array<{ domain: string; confidence: number; competingDomain?: string }>;
+  domainSuppressions: { name: string; reason: string }[];
+  domainAmbiguities: { domain: string; confidence: number; competingDomain?: string }[];
+  /** Scenario failure explanations */
+  scenarioFailures?: { scenario: string; reason: string }[];
 }
 
 export interface PackageAnalysisContext {

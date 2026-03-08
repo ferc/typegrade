@@ -2,8 +2,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
-import type { AnalysisResult } from "../src/types.js";
+import type { AnalysisResult, ScenarioScore } from "../src/types.js";
 import { PAIRWISE_ASSERTIONS } from "./assertions.js";
+import type { DomainKey } from "../src/types.js";
 
 const manifestPath = join(import.meta.dirname, "manifest.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -20,6 +21,8 @@ interface BenchmarkEntry {
   consumerApi: number | null;
   agentReadiness: number | null;
   typeSafety: number | null;
+  domainFitScore: number | null;
+  scenarioScore: ScenarioScore | null;
 }
 
 function parseManifestEntry(entry: string | { spec: string; typesVersion?: string }): ManifestEntry {
@@ -43,15 +46,23 @@ async function main() {
       console.log(`Scoring ${spec}...`);
       try {
         const result = scorePackage(spec, typesVersion ? { typesVersion } : undefined);
+
+        // Extract domain and scenario scores (now computed inside analyzer with actual surface)
+        const domainFitScore = result.domainScore?.score ?? null;
+        const scenarioScore: ScenarioScore | null = result.scenarioScore ?? null;
+
         entries.push({
           agentReadiness: getCompositeScore(result, "agentReadiness"),
           consumerApi: getCompositeScore(result, "consumerApi"),
+          domainFitScore,
           name,
           result,
+          scenarioScore,
           tier,
           typeSafety: getCompositeScore(result, "typeSafety"),
         });
-        console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}`);
+        const domainStr = domainFitScore !== null ? ` | domainFit: ${domainFitScore}` : "";
+        console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}`);
       } catch (err) {
         console.error(`  FAILED: ${err}`);
       }
@@ -60,17 +71,22 @@ async function main() {
 
   // Print ranking table
   console.log("\n=== Benchmark Results ===\n");
-  console.log("Package".padEnd(25) + "Tier".padEnd(12) + "ConsumerAPI".padEnd(14) + "AgentReady".padEnd(14) + "TypeSafety");
-  console.log("-".repeat(79));
+  console.log("Package".padEnd(25) + "Tier".padEnd(12) + "ConsumerAPI".padEnd(14) + "AgentReady".padEnd(14) + "TypeSafety".padEnd(14) + "DomainFit".padEnd(14) + "Scenario");
+  console.log("-".repeat(107));
 
   const sorted = entries.toSorted((a, b) => (b.consumerApi ?? 0) - (a.consumerApi ?? 0));
   for (const entry of sorted) {
+    const scenarioStr = entry.scenarioScore
+      ? `${entry.scenarioScore.score} (${entry.scenarioScore.passedScenarios}/${entry.scenarioScore.totalScenarios})`
+      : "n/a";
     console.log(
       entry.name.padEnd(25) +
       entry.tier.padEnd(12) +
       String(entry.consumerApi ?? "n/a").padEnd(14) +
       String(entry.agentReadiness ?? "n/a").padEnd(14) +
-      String(entry.typeSafety ?? "n/a"),
+      String(entry.typeSafety ?? "n/a").padEnd(14) +
+      String(entry.domainFitScore ?? "n/a").padEnd(14) +
+      scenarioStr,
     );
   }
 
@@ -164,6 +180,8 @@ async function main() {
       consumerApi: e.consumerApi,
       agentReadiness: e.agentReadiness,
       typeSafety: e.typeSafety,
+      domainFitScore: e.domainFitScore,
+      domain: e.result.domainInference?.domain ?? null,
       dimensions: e.result.dimensions.map((d) => ({
         key: d.key,
         score: d.score,
@@ -174,6 +192,7 @@ async function main() {
       dedupStats: e.result.dedupStats ?? null,
       domainInference: e.result.domainInference ?? null,
       topIssues: e.result.topIssues.slice(0, 5),
+      scenarioScore: e.scenarioScore ?? null,
       explainability: e.result.explainability ?? null,
       caveats: e.result.caveats,
     })),

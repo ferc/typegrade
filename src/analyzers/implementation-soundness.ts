@@ -21,7 +21,9 @@ function analyzeSourceFile(sf: SourceFile): FileAnalysisResult {
 
   sf.forEachDescendant((node) => {
     if (Node.isAsExpression(node)) {
-      if (handledPositions.has(node.getStart())) {return;}
+      if (handledPositions.has(node.getStart())) {
+        return;
+      }
 
       const targetType = node.getType();
       const line = node.getStartLineNumber();
@@ -85,7 +87,9 @@ function analyzeSourceFile(sf: SourceFile): FileAnalysisResult {
   const lines = fullText.split("\n");
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
-    if (line === undefined) {continue;}
+    if (line === undefined) {
+      continue;
+    }
     if (line.includes("@ts-ignore")) {
       errorCount++;
       issues.push({
@@ -143,8 +147,12 @@ export function analyzeImplementationSoundness(sourceFiles: SourceFile[]): Dimen
   if (errorCount === 0 && warningCount === 0) {
     positives.push("No type assertions or unsafe patterns");
   }
-  if (errorCount > 0) {negatives.push(`${errorCount} error-level unsoundness issues`);}
-  if (warningCount > 0) {negatives.push(`${warningCount} warning-level assertions`);}
+  if (errorCount > 0) {
+    negatives.push(`${errorCount} error-level unsoundness issues`);
+  }
+  if (warningCount > 0) {
+    negatives.push(`${warningCount} warning-level assertions`);
+  }
 
   return {
     enabled: true,

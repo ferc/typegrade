@@ -10,23 +10,37 @@ function renderBar(score: number): string {
   const emptyStr = "\u2591".repeat(empty);
 
   let color: (str: string) => string = pc.red;
-  if (score >= 80) {color = pc.green;}
-  else if (score >= 60) {color = pc.yellow;}
-  else if (score >= 40) {color = pc.magenta;}
+  if (score >= 80) {
+    color = pc.green;
+  } else if (score >= 60) {
+    color = pc.yellow;
+  } else if (score >= 40) {
+    color = pc.magenta;
+  }
 
   return color(filledStr) + pc.dim(emptyStr);
 }
 
 function gradeColor(grade: string): (str: string) => string {
-  if (grade.startsWith("A")) {return pc.green;}
-  if (grade === "B") {return pc.yellow;}
-  if (grade === "C") {return pc.magenta;}
+  if (grade.startsWith("A")) {
+    return pc.green;
+  }
+  if (grade === "B") {
+    return pc.yellow;
+  }
+  if (grade === "C") {
+    return pc.magenta;
+  }
   return pc.red;
 }
 
 function severityIcon(severity: string): string {
-  if (severity === "error") {return pc.red("\u2716");}
-  if (severity === "warning") {return pc.yellow("\u26A0");}
+  if (severity === "error") {
+    return pc.red("\u2716");
+  }
+  if (severity === "warning") {
+    return pc.yellow("\u26A0");
+  }
   return pc.blue("\u2139");
 }
 
@@ -41,6 +55,9 @@ function compositeLabel(key: string): string {
     case "implementationQuality": {
       return "Implementation";
     }
+    case "typeSafety": {
+      return "Type Safety";
+    }
     default: {
       return key;
     }
@@ -48,21 +65,21 @@ function compositeLabel(key: string): string {
 }
 
 export function renderReport(result: AnalysisResult): string {
-  const lines: string[] = [
-    "",
-    pc.bold("  typegrade v0.4.0"),
-    "",
-  ];
+  const lines: string[] = ["", pc.bold("  typegrade v0.5.0"), ""];
 
   const modeLabel = result.mode === "package" ? "package analysis" : "source analysis";
   lines.push(`  Project: ${pc.bold(result.projectName)} (${modeLabel})`);
   lines.push(`  Files: ${result.filesAnalyzed} analyzed in ${(result.timeMs / 1000).toFixed(1)}s`);
   if (result.domainInference && result.domainInference.confidence >= 0.5) {
-    lines.push(`  Domain: ${result.domainInference.domain} (${Math.round(result.domainInference.confidence * 100)}% confidence)`);
+    lines.push(
+      `  Domain: ${result.domainInference.domain} (${Math.round(result.domainInference.confidence * 100)}% confidence)`,
+    );
   }
   if (result.graphStats) {
     const gs = result.graphStats;
-    lines.push(`  Graph: ${gs.totalEntrypoints} entrypoint(s), ${gs.totalReachable} reachable, ${gs.totalAfterDedup} after dedup`);
+    lines.push(
+      `  Graph: ${gs.totalEntrypoints} entrypoint(s), ${gs.totalReachable} reachable, ${gs.totalAfterDedup} after dedup`,
+    );
   }
   lines.push("");
 
@@ -78,6 +95,34 @@ export function renderReport(result: AnalysisResult): string {
     lines.push(`  \u2551  ${gc(line.padEnd(boxWidth - 2))}\u2551`);
   }
   lines.push(`  \u255A${"═".repeat(boxWidth)}\u255D`);
+
+  // Domain score if available
+  if (result.domainScore) {
+    const ds = result.domainScore;
+    const gc = gradeColor(ds.grade);
+    lines.push(`  Domain Fit (${ds.domain}): ${gc(`${ds.score}/100 (${ds.grade})`)}`);
+    if (ds.adjustments.length > 0) {
+      for (const adj of ds.adjustments) {
+        const sign = adj.effect > 0 ? "+" : "";
+        lines.push(
+          `    ${pc.dim(`${adj.dimension}: ${adj.adjustment} (${sign}${adj.effect}) — ${adj.reason}`)}`,
+        );
+      }
+    }
+  }
+
+  // Scenario score if available
+  if (result.scenarioScore) {
+    const ss = result.scenarioScore;
+    const gc = gradeColor(ss.grade);
+    lines.push(
+      `  Scenario (${ss.scenario}): ${gc(`${ss.score}/100 (${ss.grade})`)} — ${ss.passedScenarios}/${ss.totalScenarios} passed`,
+    );
+    for (const sr of ss.results) {
+      const icon = sr.passed ? pc.green("\u2714") : pc.red("\u2716");
+      lines.push(`    ${icon} ${sr.name}: ${sr.score}/100 — ${pc.dim(sr.reason)}`);
+    }
+  }
   lines.push("");
 
   // Split into consumer and implementation
@@ -154,7 +199,9 @@ function renderDimLine(lines: string[], dim: DimensionResult): void {
 export function renderDimensionTable(dimensions: DimensionResult[]): string {
   const lines: string[] = [];
   for (const dim of dimensions) {
-    if (!dim.enabled) {continue;}
+    if (!dim.enabled) {
+      continue;
+    }
     lines.push(
       `\n  ${pc.bold(dim.label)} (${dim.score === null ? "n/a" : Math.round(dim.score)}/100)`,
     );
@@ -169,7 +216,9 @@ export function renderDimensionTable(dimensions: DimensionResult[]): string {
 }
 
 export function renderExplainability(result: AnalysisResult): string {
-  if (!result.explainability) {return "";}
+  if (!result.explainability) {
+    return "";
+  }
   const lines: string[] = [];
   const ex = result.explainability;
 
@@ -203,7 +252,9 @@ export function renderExplainability(result: AnalysisResult): string {
     }
   }
 
-  if (lines.length > 0) {lines.push("");}
+  if (lines.length > 0) {
+    lines.push("");
+  }
   return lines.join("\n");
 }
 

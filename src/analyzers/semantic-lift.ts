@@ -25,38 +25,38 @@ const ADVANCED_FEATURES = new Set([
 
 /** Per-feature widened baselines — what the score would be without the feature */
 const FEATURE_BASELINES: Record<string, number> = {
-  "branded": 40,            // unbranded primitive
+  branded: 40, // Unbranded primitive
   "conditional-type": 40,
-  "constrained-generic": 35, // unconstrained generic equivalent
+  "constrained-generic": 35, // Unconstrained generic equivalent
   "constraint-basic": 35,
   "constraint-strong": 35,
   "constraint-structural": 35,
-  "discriminated-union": 40, // avg-of-members-without-discriminant approx
+  "discriminated-union": 40, // Avg-of-members-without-discriminant approx
   "indexed-access": 40,
-  "infer": 40,
-  "literal-union": 40,      // wide primitive equivalent
+  infer: 40,
+  "literal-union": 40, // Wide primitive equivalent
   "mapped-type": 40,
-  "template-literal": 40,   // wide string equivalent
-  "tuple": 40,
+  "template-literal": 40, // Wide string equivalent
+  tuple: 40,
 };
 
 const DEFAULT_BASELINE = 40;
 
 /** Per-feature scaling — how much actual semantic benefit each feature provides */
 const FEATURE_LIFT_SCALE: Record<string, number> = {
-  "branded": 1.2,           // High: fully eliminates type confusion
-  "conditional-type": 0.9,   // Medium: can be opaque
-  "constrained-generic": 1.0, // Standard
-  "constraint-basic": 0.7,   // Low: minimal narrowing
-  "constraint-strong": 1.1,  // Above standard
+  branded: 1.2, // High: fully eliminates type confusion
+  "conditional-type": 0.9, // Medium: can be opaque
+  "constrained-generic": 1, // Standard
+  "constraint-basic": 0.7, // Low: minimal narrowing
+  "constraint-strong": 1.1, // Above standard
   "constraint-structural": 0.9,
   "discriminated-union": 1.3, // High: enables exhaustive matching
   "indexed-access": 0.8,
-  "infer": 1.0,
-  "literal-union": 1.1,      // High: very specific
-  "mapped-type": 0.8,        // Medium: can be complex without benefit
+  infer: 1,
+  "literal-union": 1.1, // High: very specific
+  "mapped-type": 0.8, // Medium: can be complex without benefit
   "template-literal": 0.9,
-  "tuple": 0.9,
+  tuple: 0.9,
 };
 
 interface PerFeatureLiftStats {
@@ -89,8 +89,10 @@ function getPrimaryFeature(features: string[]): string | undefined {
   let best: string | undefined;
   let bestScale = -1;
   for (const f of features) {
-    if (!ADVANCED_FEATURES.has(f)) {continue;}
-    const scale = FEATURE_LIFT_SCALE[f] ?? 1.0;
+    if (!ADVANCED_FEATURES.has(f)) {
+      continue;
+    }
+    const scale = FEATURE_LIFT_SCALE[f] ?? 1;
     if (scale > bestScale) {
       bestScale = scale;
       best = f;
@@ -101,17 +103,19 @@ function getPrimaryFeature(features: string[]): string | undefined {
 
 function countGenericCorrelation(
   typeParams: SurfaceTypeParam[],
-  paramTypeNodes: Array<{ name: string; typeNode: TypeNode | undefined }>,
+  paramTypeNodes: { name: string; typeNode: TypeNode | undefined }[],
   returnTypeNode: TypeNode | undefined,
 ): number {
-  if (typeParams.length === 0 || !returnTypeNode) {return 0;}
+  if (typeParams.length === 0 || !returnTypeNode) {
+    return 0;
+  }
   let count = 0;
   const paramNames = new Set(typeParams.map((tp) => tp.name));
   const returnText = returnTypeNode.getText();
   for (const name of paramNames) {
-    const usedInParams = paramTypeNodes.some((p) => {
-      return p.typeNode && p.typeNode.getText().includes(name);
-    });
+    const usedInParams = paramTypeNodes.some(
+      (p) => p.typeNode && p.typeNode.getText().includes(name),
+    );
     if (usedInParams && returnText.includes(name)) {
       count++;
     }
@@ -131,23 +135,40 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   const featuresSeen = new Set<string>();
   const perFeatureLift = new Map<string, PerFeatureLiftStats>();
 
+  // Instantiated baseline: for generic declarations, check if the generic
+  // Structure adds real value when instantiated (not just type-level complexity)
+  let instantiatedLiftPositions = 0;
+
   function processPosition(pos: SurfacePosition): void {
     totalPositions++;
     const result = analyzePrecision(pos.type);
     const widenedBaseline = computeWidenedBaseline(result.features);
 
-    if (widenedBaseline >= 0 && result.score > widenedBaseline) {
+    // Baseline A: widened (erase advanced typing)
+    const baselineA = widenedBaseline >= 0 ? widenedBaseline : -1;
+
+    // Baseline B: instantiated — for generic positions, check if the type
+    // Would still be meaningful when generics are specialized.
+    // A generic that constrains well lifts more than one that stays opaque.
+    const baselineB = computeInstantiatedBaseline(pos, result.features);
+
+    // Use the better (higher) baseline — lift must exceed both
+    const effectiveBaseline = Math.max(baselineA, baselineB);
+
+    if (effectiveBaseline >= 0 && result.score > effectiveBaseline) {
       liftedPositions++;
-      const rawLift = result.score - widenedBaseline;
+      if (baselineB > baselineA && baselineB >= 0) {
+        instantiatedLiftPositions++;
+      }
+      const rawLift = result.score - effectiveBaseline;
       const primaryFeature = getPrimaryFeature(result.features);
-      const scale = primaryFeature ? (FEATURE_LIFT_SCALE[primaryFeature] ?? 1.0) : 1.0;
+      const scale = primaryFeature ? (FEATURE_LIFT_SCALE[primaryFeature] ?? 1) : 1;
       const scaledLift = rawLift * scale;
       totalScaledLift += scaledLift;
 
       for (const f of result.features) {
         if (ADVANCED_FEATURES.has(f)) {
           featuresSeen.add(f);
-          // Track per-feature lift stats (attribute lift to the primary feature)
           if (f === primaryFeature) {
             const existing = perFeatureLift.get(f);
             if (existing) {
@@ -164,7 +185,9 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   }
 
   for (const decl of surface.declarations) {
-    if (decl.kind === "enum") {continue;}
+    if (decl.kind === "enum") {
+      continue;
+    }
 
     // Process declaration positions
     for (const pos of decl.positions) {
@@ -213,7 +236,13 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
       issues: [],
       key: CONFIG.key,
       label: CONFIG.label,
-      metrics: { correlationCount: 0, diversityBonus: 0, featureCount: 0, liftedPositions: 0, totalPositions: 0 },
+      metrics: {
+        correlationCount: 0,
+        diversityBonus: 0,
+        featureCount: 0,
+        liftedPositions: 0,
+        totalPositions: 0,
+      },
       negatives: ["No exported type positions found"],
       positives: [],
       score: 0,
@@ -230,26 +259,37 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   score = Math.max(0, Math.min(100, score));
 
   // Build positives/negatives — include top features by lift contribution
-  const sortedFeatures = [...perFeatureLift.entries()]
-    .sort((a, b) => b[1].totalLift - a[1].totalLift);
+  const sortedFeatures = [...perFeatureLift.entries()].toSorted(
+    (a, b) => b[1].totalLift - a[1].totalLift,
+  );
 
   if (sortedFeatures.length > 0) {
-    const topFeatures = sortedFeatures.slice(0, 3).map(
-      ([name, stats]) => `${name} (${stats.count}x, avg lift ${Math.round(stats.avgLift * 10) / 10})`,
-    );
+    const topFeatures = sortedFeatures
+      .slice(0, 3)
+      .map(
+        ([name, stats]) =>
+          `${name} (${stats.count}x, avg lift ${Math.round(stats.avgLift * 10) / 10})`,
+      );
     positives.push(`Top features by lift: ${topFeatures.join(", ")}`);
   }
   if (featuresSeen.size > 0) {
-    positives.push(`Advanced features: ${[...featuresSeen].sort().join(", ")}`);
+    positives.push(`Advanced features: ${[...featuresSeen].toSorted().join(", ")}`);
   }
   if (liftedPositions > 0) {
-    positives.push(`${liftedPositions}/${totalPositions} positions use advanced typing above baseline`);
+    positives.push(
+      `${liftedPositions}/${totalPositions} positions use advanced typing above baseline`,
+    );
   }
   if (correlationCount > 0) {
     positives.push(`${correlationCount} correlated generic(s)`);
   }
   if (featuresSeen.size >= 3) {
-    positives.push(`Feature diversity bonus: +${diversityBonus} (${featuresSeen.size} distinct features)`);
+    positives.push(
+      `Feature diversity bonus: +${diversityBonus} (${featuresSeen.size} distinct features)`,
+    );
+  }
+  if (instantiatedLiftPositions > 0) {
+    positives.push(`${instantiatedLiftPositions} positions with lift above instantiated baseline`);
   }
   if (score < 15) {
     negatives.push("Limited use of advanced type-system features for semantic lift");
@@ -258,12 +298,17 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   // Build per-feature lift metrics for reporting
   const perFeatureMetrics: Record<string, string> = {};
   for (const [feature, stats] of perFeatureLift) {
-    perFeatureMetrics[`lift_${feature}`] = `${stats.count}x, avg=${Math.round(stats.avgLift * 10) / 10}`;
+    perFeatureMetrics[`lift_${feature}`] =
+      `${stats.count}x, avg=${Math.round(stats.avgLift * 10) / 10}`;
   }
 
   const confidence = Math.min(1, totalPositions / 20);
   const confidenceSignals: ConfidenceSignal[] = [
-    { reason: `${totalPositions} positions analyzed (20 = full confidence)`, source: "sample-coverage", value: confidence },
+    {
+      reason: `${totalPositions} positions analyzed (20 = full confidence)`,
+      source: "sample-coverage",
+      value: confidence,
+    },
   ];
 
   return {
@@ -278,6 +323,7 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
       correlationCount,
       diversityBonus,
       featureCount: featuresSeen.size,
+      instantiatedLiftPositions,
       liftRatio: Math.round(liftRatio * 100) / 100,
       liftedPositions,
       scaledMeanLift: Math.round(scaledMeanLift * 100) / 100,
@@ -289,4 +335,56 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
     score,
     weights: CONFIG.weights,
   };
+}
+
+/**
+ * Compute instantiated baseline for a position.
+ * For generic positions, this estimates the precision score
+ * the type would have if generics were instantiated with concrete types.
+ *
+ * A constrained generic that specializes well should have a high
+ * instantiated baseline (meaning the lift from features must be real,
+ * not just type-level complexity).
+ *
+ * Returns -1 if no instantiated baseline applies.
+ */
+function computeInstantiatedBaseline(pos: SurfacePosition, features: string[]): number {
+  const typeText = pos.type.getText();
+
+  // Check if this position involves generic type parameters
+  const hasGenericRef = /\b[A-Z]\b/.test(typeText) || /\b[A-Z][a-z]+[A-Z]/.test(typeText);
+  if (!hasGenericRef) {
+    return -1;
+  }
+
+  // If the type is just a raw generic T without features, no lift to measure
+  if (features.length === 0) {
+    return -1;
+  }
+
+  // For constrained generics, the instantiated version would typically score
+  // At the constraint's precision level
+  const hasConstraint = features.some(
+    (f) =>
+      f === "constraint-basic" ||
+      f === "constraint-strong" ||
+      f === "constraint-structural" ||
+      f === "constrained-generic",
+  );
+
+  if (hasConstraint) {
+    // Constrained generic: instantiated baseline is higher because
+    // The constraint already narrows the type significantly
+    if (features.includes("constraint-strong")) {
+      return 50;
+    }
+    if (features.includes("constraint-structural")) {
+      return 45;
+    }
+    return 42;
+  }
+
+  // Unconstrained generic with advanced features: check if the features
+  // Add real semantic value beyond what instantiation alone provides
+  return -1;
 }

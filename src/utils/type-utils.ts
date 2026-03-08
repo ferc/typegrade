@@ -20,7 +20,7 @@ export function analyzePrecision(
   }
 
   // Cache by compiler type id
-  const {compilerType} = (type as any);
+  const { compilerType } = type as any;
   const typeId: number | undefined = compilerType?.id;
   if (typeId !== undefined && visited.has(typeId)) {
     return visited.get(typeId)!;
@@ -243,7 +243,11 @@ function analyzeUnion(
   const containsUnknown = childResults.some((cr) => cr.containsUnknown);
 
   // All literal members bonus
-  if (members.every((member) => member.isStringLiteral() || member.isNumberLiteral() || member.isBooleanLiteral())) {
+  if (
+    members.every(
+      (member) => member.isStringLiteral() || member.isNumberLiteral() || member.isBooleanLiteral(),
+    )
+  ) {
     score += 10;
     features.push("literal-union");
     reasons.push("+10 all literal members");
@@ -265,10 +269,14 @@ function analyzeUnion(
   // Mix of broad primitives + broad objects
   const hasBroadPrimitive = members.some((member) => {
     const flags = member.getFlags();
-    return Boolean(flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.Boolean | TypeFlags.BigInt));
+    return Boolean(
+      flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.Boolean | TypeFlags.BigInt),
+    );
   });
   const hasBroadObject = members.some((member) => {
-    if (!member.isObject()) {return false;}
+    if (!member.isObject()) {
+      return false;
+    }
     const props = member.getProperties();
     return props.length === 0;
   });
@@ -296,11 +304,15 @@ function analyzeIntersection(
   const containsUnknown = childResults.some((cr) => cr.containsUnknown);
 
   // Branded type detection: primitive + object with __brand
-  const hasPrimitive = members.some((member) => member.getFlags() & (TypeFlags.String | TypeFlags.Number));
+  const hasPrimitive = members.some(
+    (member) => member.getFlags() & (TypeFlags.String | TypeFlags.Number),
+  );
   const hasBrand = members.some(
     (member) =>
       member.isObject() &&
-      member.getProperties().some((prop) => prop.getName().startsWith("__") || prop.getName() === "_brand"),
+      member
+        .getProperties()
+        .some((prop) => prop.getName().startsWith("__") || prop.getName() === "_brand"),
   );
   if (hasPrimitive && hasBrand) {
     score += 25;
@@ -563,16 +575,20 @@ function analyzeObject(
   if (properties.length > 0 && !syntaxResult.hasAdvancedSyntax) {
     const allPrimitive = properties.every((prop) => {
       const propType = getPropertyType(prop);
-      if (!propType) {return false;}
+      if (!propType) {
+        return false;
+      }
       const propFlags = propType.getFlags();
-      return Boolean(propFlags &
+      return Boolean(
+        propFlags &
         (TypeFlags.String |
           TypeFlags.Number |
           TypeFlags.Boolean |
           TypeFlags.BigInt |
           TypeFlags.StringLiteral |
           TypeFlags.NumberLiteral |
-          TypeFlags.BooleanLiteral));
+          TypeFlags.BooleanLiteral),
+      );
     });
     if (allPrimitive) {
       shapeBonus -= 10;
@@ -596,14 +612,23 @@ function detectAdvancedSyntaxInDecl(decl: Node): string[] {
         features.push("key-remapping");
       }
     }
-    if (Node.isConditionalTypeNode(node)) {features.push("conditional-type");}
-    if (Node.isIndexedAccessTypeNode(node)) {features.push("indexed-access");}
-    if (Node.isInferTypeNode(node)) {features.push("infer");}
+    if (Node.isConditionalTypeNode(node)) {
+      features.push("conditional-type");
+    }
+    if (Node.isIndexedAccessTypeNode(node)) {
+      features.push("indexed-access");
+    }
+    if (Node.isInferTypeNode(node)) {
+      features.push("infer");
+    }
   });
   return features;
 }
 
-function detectAdvancedSyntax(declarations: Node[]): { hasAdvancedSyntax: boolean; features: string[] } {
+function detectAdvancedSyntax(declarations: Node[]): {
+  hasAdvancedSyntax: boolean;
+  features: string[];
+} {
   const features = declarations.flatMap((decl) => detectAdvancedSyntaxInDecl(decl));
 
   // Recursive type detection: check if a type alias references itself in its body
@@ -625,14 +650,20 @@ function detectAdvancedSyntax(declarations: Node[]): { hasAdvancedSyntax: boolea
 function getTypeDeclarations(type: Type): Node[] {
   const nodes: Node[] = [];
   const aliasDecls = type.getAliasSymbol()?.getDeclarations();
-  if (aliasDecls) {nodes.push(...aliasDecls);}
+  if (aliasDecls) {
+    nodes.push(...aliasDecls);
+  }
   const symDecls = type.getSymbol()?.getDeclarations();
-  if (symDecls) {nodes.push(...symDecls);}
+  if (symDecls) {
+    nodes.push(...symDecls);
+  }
   // For instantiated generics, check target type
   const targetType = (type as any).getTargetType?.();
   if (targetType) {
     const targetDecls = targetType.getSymbol?.()?.getDeclarations?.();
-    if (targetDecls) {nodes.push(...targetDecls);}
+    if (targetDecls) {
+      nodes.push(...targetDecls);
+    }
   }
   return nodes;
 }
@@ -660,19 +691,29 @@ function getPropertyType(prop: MorphSymbol): Type | undefined {
 }
 
 export function isDiscriminatedUnion(members: Type[]): boolean {
-  if (members.length < 2) {return false;}
-  if (!members.every((member) => member.isObject())) {return false;}
+  if (members.length < 2) {
+    return false;
+  }
+  if (!members.every((member) => member.isObject())) {
+    return false;
+  }
 
   const [firstMember] = members;
-  if (!firstMember) {return false;}
+  if (!firstMember) {
+    return false;
+  }
   const firstProps = firstMember.getProperties().map((prop) => prop.getName());
 
   for (const propName of firstProps) {
     const allHaveLiteral = members.every((member) => {
       const prop = member.getProperty(propName);
-      if (!prop) {return false;}
+      if (!prop) {
+        return false;
+      }
       const decl = prop.getValueDeclaration();
-      if (!decl) {return false;}
+      if (!decl) {
+        return false;
+      }
       const propType = decl.getType();
       return propType.isStringLiteral() || propType.isNumberLiteral();
     });
@@ -683,7 +724,9 @@ export function isDiscriminatedUnion(members: Type[]): boolean {
         const decl = prop?.getValueDeclaration();
         return decl?.getType()?.getLiteralValue?.();
       });
-      if (new Set(values).size === members.length) {return true;}
+      if (new Set(values).size === members.length) {
+        return true;
+      }
     }
   }
   return false;

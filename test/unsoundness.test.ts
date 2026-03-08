@@ -1,4 +1,3 @@
-
 import { Project } from "ts-morph";
 import { analyzeImplementationSoundness } from "../src/analyzers/implementation-soundness.js";
 
@@ -57,7 +56,9 @@ describe(analyzeImplementationSoundness, () => {
       "// @ts-expect-error\nconst x: number = 'string' as any;",
     );
     const result = analyzeImplementationSoundness(project.getSourceFiles());
-    const expectErrors = result.issues.filter((issue) => issue.message.includes("@ts-expect-error"));
+    const expectErrors = result.issues.filter((issue) =>
+      issue.message.includes("@ts-expect-error"),
+    );
     expect(expectErrors.length).toBeGreaterThanOrEqual(1);
     expect(expectErrors[0].severity).toBe("info");
   });
