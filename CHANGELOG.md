@@ -1,3 +1,9 @@
+## [0.7.4](https://github.com/ferc/typegrade/compare/v0.7.3...v0.7.4) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** enable npm provenance in publishConfig for OIDC auth ([6746dab](https://github.com/ferc/typegrade/commit/6746dab1783f0964bf6291329f9c6668188743be))
+
 ## [0.7.3](https://github.com/ferc/typegrade/compare/v0.7.2...v0.7.3) (2026-03-08)
 
 ### Bug Fixes
