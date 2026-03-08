@@ -54,7 +54,7 @@
     "perf:cli": "tsx perf/run.ts cli",
     "perf:score": "tsx perf/run.ts score",
     "perf:benchmark": "tsx perf/run.ts benchmark",
-    "release:dry-run": "semantic-release --dry-run"
+    "release:dry-run": "tsx node_modules/.bin/semantic-release --dry-run"
   },
   "dependencies": {
     "commander": "^14.0.3",
