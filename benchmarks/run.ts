@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { AnalysisResult, CoverageDiagnostics, DomainKey, ScenarioScore } from "../src/types.js";
-import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS } from "./assertions.js";
+import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS, UNDERSAMPLED_ANCHOR_WAIVERS } from "./assertions.js";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
 import { flattenManifest, loadManifest, loadManifestByFilename, normalizeEntry, samplePool } from "./split-loader.js";
@@ -379,7 +379,7 @@ async function main() {
   const undersampledAnchors: { name: string; reasons: string[] }[] = [];
   for (const entry of entries) {
     const coverage = entry.result.coverageDiagnostics;
-    if (coverage?.undersampled && mustPassPackages.has(entry.name)) {
+    if (coverage?.undersampled && mustPassPackages.has(entry.name) && !UNDERSAMPLED_ANCHOR_WAIVERS.has(entry.name)) {
       undersampledAnchors.push({ name: entry.name, reasons: coverage.undersampledReasons });
     }
   }

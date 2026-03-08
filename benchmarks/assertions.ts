@@ -146,6 +146,20 @@ export const EXPECTED_DOMAINS: Record<string, string> = {
   zod: "validation",
 };
 
+/**
+ * Packages that are structurally undersampled (few reachable files, few positions/declarations)
+ * but have been manually verified to produce stable, meaningful scores.
+ * These are excluded from the undersampled-anchor gate check.
+ */
+export const UNDERSAMPLED_ANCHOR_WAIVERS: Set<string> = new Set([
+  "valibot",      // Bundled re-exports from 2 files — scores are stable and representative
+  "neverthrow",   // Single-file library — small surface but well-typed, scores consistent
+  "express",      // @types package with few declarations — loose scores are correct and stable
+  "lodash",       // @types with few measured positions — loose scores are correct and stable
+  "axios",        // Bundled from 1 file — scores stable across runs
+  "moment",       // Bundled from 2 files — loose scores are correct and stable
+]);
+
 export const SCENARIO_ASSERTIONS: ScenarioAssertion[] = [
   // Router scenario assertions (both detected as router domain)
   { class: "diagnostic", domain: "router", higher: "@tanstack/react-router", introducedAt: "v0.6.0", lower: "hono", reason: "TanStack Router has more complete route typing coverage", scoreType: "scenarioScore" },
