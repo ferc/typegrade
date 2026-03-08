@@ -103,22 +103,15 @@ export function buildDeclarationGraph(
   const { nodes, crossPackageTypeRefs } = walkResult;
 
   // Deduplicate
-  const { groups, filesToRemove } = deduplicateGraph(
-    nodes,
-    entrypoints,
-    project,
-  );
+  const { groups, filesToRemove } = deduplicateGraph(nodes, entrypoints, project);
 
   // Final file list: all reachable minus deduped
-  const filesToAnalyze = [...nodes.keys()].filter(
-    (fp) => !filesToRemove.has(fp),
-  );
+  const filesToAnalyze = [...nodes.keys()].filter((fp) => !filesToRemove.has(fp));
 
   // Compute stats
   const dedupByStrategy: Record<string, number> = {};
   for (const grp of groups) {
-    dedupByStrategy[grp.reason] =
-      (dedupByStrategy[grp.reason] ?? 0) + grp.duplicates.length;
+    dedupByStrategy[grp.reason] = (dedupByStrategy[grp.reason] ?? 0) + grp.duplicates.length;
   }
 
   const stats: GraphStats = {
@@ -169,8 +162,7 @@ function findSiblingTypePackages(pkgDir: string): string[] {
     const parentName = basename(parentDir);
 
     // For scoped packages (node_modules/@scope/pkg), go up two levels
-    const nodeModulesRoot =
-      parentName === "node_modules" ? parentDir : dirname(parentDir);
+    const nodeModulesRoot = parentName === "node_modules" ? parentDir : dirname(parentDir);
     if (basename(nodeModulesRoot) !== "node_modules") {
       return [];
     }
@@ -178,9 +170,7 @@ function findSiblingTypePackages(pkgDir: string): string[] {
     // Convert package name to @types convention:
     //   "express"      -> "express"
     //   "@scope/pkg"   -> "scope__pkg"
-    const typesName = pkg.name.startsWith("@")
-      ? pkg.name.slice(1).replace("/", "__")
-      : pkg.name;
+    const typesName = pkg.name.startsWith("@") ? pkg.name.slice(1).replace("/", "__") : pkg.name;
 
     const typePkgDir = join(nodeModulesRoot, "@types", typesName);
     if (existsSync(typePkgDir)) {

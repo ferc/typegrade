@@ -409,8 +409,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   // Compute coverage diagnostics (use derivedIndex totals for consistency)
   const typesSource = options?.packageContext?.typesSource ?? "unknown";
-  const totalPositions =
-    Object.values(derivedIndex.roleCounts).reduce((sum, count) => sum + count, 0);
+  const totalPositions = Object.values(derivedIndex.roleCounts).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
   const coverageDiagnostics = computeCoverageDiagnostics({
     graphStats,
     surfaceDeclarations: consumerSurface.stats.totalDeclarations,
@@ -471,7 +473,11 @@ function computeUndersampleConfidenceCap(diagnostics: CoverageDiagnostics): numb
   const reasonCount = diagnostics.undersampledReasons.length;
 
   // Severe: 3+ reasons or zero positions/declarations
-  if (reasonCount >= 3 || diagnostics.measuredPositions === 0 || diagnostics.measuredDeclarations === 0) {
+  if (
+    reasonCount >= 3 ||
+    diagnostics.measuredPositions === 0 ||
+    diagnostics.measuredDeclarations === 0
+  ) {
     return 0.4;
   }
 

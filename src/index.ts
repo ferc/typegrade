@@ -2,7 +2,12 @@
 export { analyzeProject } from "./analyzer.js";
 export { scorePackage } from "./package-scorer.js";
 export type { ScorePackageOptions } from "./package-scorer.js";
-export { renderDimensionTable, renderExplainability, renderJson, renderReport } from "./utils/format.js";
+export {
+  renderDimensionTable,
+  renderExplainability,
+  renderJson,
+  renderReport,
+} from "./utils/format.js";
 export { comparePackages } from "./compare.js";
 export type { CompareResult, CompareOptions } from "./compare.js";
 

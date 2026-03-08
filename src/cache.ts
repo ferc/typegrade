@@ -40,7 +40,12 @@ export interface ResultCacheKey {
 }
 
 export function computeResultCacheKey(opts: ResultCacheKey): string {
-  const parts = [TOOL_VERSION, opts.packageCacheKey, opts.scoringConfigHash, String(opts.nodeMajor)].join("|");
+  const parts = [
+    TOOL_VERSION,
+    opts.packageCacheKey,
+    opts.scoringConfigHash,
+    String(opts.nodeMajor),
+  ].join("|");
   return createHash("sha256").update(parts).digest("hex").slice(0, 16);
 }
 
