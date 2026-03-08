@@ -1,3 +1,10 @@
+## [0.7.2](https://github.com/ferc/typegrade/compare/v0.7.1...v0.7.2) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** remove NPM_TOKEN env vars to enable OIDC trusted publishing ([ce7b058](https://github.com/ferc/typegrade/commit/ce7b058a4ce7270e2d50361db50d440434893115))
+* **ci:** reorder release plugins so GitHub release is created before npm ([c313ece](https://github.com/ferc/typegrade/commit/c313ece03f6d28fe5b7f0f36766ff80d0aff7d88))
+
 ## [0.7.1](https://github.com/ferc/typegrade/compare/v0.7.0...v0.7.1) (2026-03-08)
 
 ### Bug Fixes
