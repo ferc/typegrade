@@ -81,6 +81,70 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     negatives.push(`${wideUnionCount} overly broad union/intersection types (-${penalty})`);
   }
 
+  // --- Overload explosion ---
+  let overloadCount = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function") {
+      overloadCount += decl.overloadCount ?? 0;
+    }
+    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
+      for (const method of decl.methods) {
+        overloadCount += method.overloadCount;
+      }
+    }
+  }
+
+  if (overloadCount > 50) {
+    const penalty = Math.min(15, Math.round((overloadCount - 50) / 5));
+    score -= penalty;
+    negatives.push(`Overload explosion (${overloadCount} total overloads, -${penalty})`);
+  }
+
+  // --- Declaration sprawl ---
+  const totalDeclarations = surface.declarations.length;
+  if (totalDeclarations > 200) {
+    const penalty = Math.min(10, Math.round((totalDeclarations - 200) / 20));
+    score -= penalty;
+    negatives.push(`Declaration sprawl (${totalDeclarations} declarations, -${penalty})`);
+  }
+
+  // --- Helper-chain depth estimation ---
+  const typeAliasNames = new Set<string>();
+  for (const decl of surface.declarations) {
+    if (decl.kind === "type-alias") {
+      typeAliasNames.add(decl.name);
+    }
+  }
+
+  if (typeAliasNames.size > 0) {
+    let totalChainDepth = 0;
+    let chainedAliasCount = 0;
+
+    for (const decl of surface.declarations) {
+      if (decl.kind === "type-alias" && decl.bodyTypeNode) {
+        const bodyText = decl.bodyTypeNode.getText();
+        let depth = 0;
+        for (const otherName of typeAliasNames) {
+          if (otherName !== decl.name && bodyText.includes(otherName)) {
+            depth++;
+          }
+        }
+        if (depth > 0) {
+          totalChainDepth += depth;
+          chainedAliasCount++;
+        }
+      }
+    }
+
+    if (chainedAliasCount > 0) {
+      const avgChainDepth = totalChainDepth / chainedAliasCount;
+      if (avgChainDepth > 2) {
+        score -= 5;
+        negatives.push(`High type alias chain depth (avg ${avgChainDepth.toFixed(1)} references, -5)`);
+      }
+    }
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   if (positives.length === 0 && negatives.length === 0) {
@@ -95,6 +159,8 @@ export function analyzeSurfaceComplexity(surface: PublicSurface): DimensionResul
     metrics: {
       deeplyNestedCount,
       nonConventionalTypeParams: nonConventional,
+      overloadCount,
+      totalDeclarations,
       totalTypeParams,
       wideUnionCount,
     },

@@ -1,28 +1,67 @@
 #!/usr/bin/env tsx
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DIMENSION_CONFIGS } from "../src/constants.js";
 import { PAIRWISE_ASSERTIONS } from "./assertions.js";
+
+// Build consumer weights dynamically from DIMENSION_CONFIGS
+const CONSUMER_WEIGHTS: Record<string, number> = {};
+for (const cfg of DIMENSION_CONFIGS) {
+  if (cfg.weights.consumerApi) {
+    CONSUMER_WEIGHTS[cfg.key] = cfg.weights.consumerApi;
+  }
+}
+
+interface DimensionSnapshot {
+  key: string;
+  score: number | null;
+  confidence: number | null;
+}
+
+interface GraphStatsSnapshot {
+  totalEntrypoints: number;
+  totalReachable: number;
+  totalAfterDedup: number;
+  filesDeduped: number;
+  dedupByStrategy: Record<string, number>;
+  usedFallbackGlob: boolean;
+}
+
+interface DomainInferenceSnapshot {
+  domain: string;
+  confidence: number;
+  signals: string[];
+}
 
 interface ResultEntry {
   name: string;
   tier: string;
   consumerApi: number | null;
   agentReadiness: number | null;
+  dimensions?: DimensionSnapshot[];
+  graphStats?: GraphStatsSnapshot | null;
+  domainInference?: DomainInferenceSnapshot | null;
+  caveats?: string[];
 }
 
 interface BenchmarkSnapshot {
   timestamp: string;
   entries: ResultEntry[];
-  assertions: { assertion: string; result: string; higherScore?: number | null; lowerScore?: number | null }[];
-  summary: { passed: number; failed: number; total: number };
+  assertions: { assertion: string; class: string; result: string; higherScore?: number | null; lowerScore?: number | null; delta?: number | null; minDelta?: number }[];
+  summary: {
+    mustPass: { passed: number; failed: number; total: number };
+    diagnostic: { passed: number; failed: number; total: number };
+  };
 }
 
 interface AssertionEval {
   assertion: string;
+  class: "must-pass" | "diagnostic";
   result: "pass" | "fail" | "skip";
   higherScore: number | null;
   lowerScore: number | null;
   delta: number | null;
+  minDelta?: number;
 }
 
 function findLatestResults(): BenchmarkSnapshot | null {
@@ -57,20 +96,27 @@ function evaluateAssertions(snapshot: BenchmarkSnapshot): AssertionEval[] {
     if (higherScore === null || lowerScore === null) {
       return {
         assertion: `${a.higher} > ${a.lower}`,
+        class: a.class,
         delta: null,
         higherScore,
         lowerScore,
+        minDelta: a.minDelta,
         result: "skip" as const,
       };
     }
 
     const delta = higherScore - lowerScore;
+    const meetsMinDelta = a.minDelta ? delta >= a.minDelta : true;
+    const passes = delta > 0 && meetsMinDelta;
+
     return {
       assertion: `${a.higher} > ${a.lower}`,
+      class: a.class,
       delta,
       higherScore,
       lowerScore,
-      result: delta > 0 ? ("pass" as const) : ("fail" as const),
+      minDelta: a.minDelta,
+      result: passes ? ("pass" as const) : ("fail" as const),
     };
   });
 }
@@ -122,62 +168,220 @@ function suggestWeightAdjustments(evals: AssertionEval[], entries: ResultEntry[]
   return suggestions;
 }
 
-// Current consumer-API weights
-const CONSUMER_WEIGHTS: Record<string, number> = {
-  apiSpecificity: 0.35,
-  apiSafety: 0.20,
-  semanticLift: 0.15,
-  publishQuality: 0.08,
-  surfaceConsistency: 0.05,
-  surfaceComplexity: 0.05,
-  agentUsability: 0.02,
-  declarationFidelity: 0.10,
-};
+function getDimensionScore(entry: ResultEntry, dimensionKey: string): number | null {
+  if (!entry.dimensions) return null;
+  const dim = entry.dimensions.find((d) => d.key === dimensionKey);
+  return dim?.score ?? null;
+}
 
 function computePerDimensionConcordance(
   snapshot: BenchmarkSnapshot,
-  evals: AssertionEval[],
 ): Record<string, { concordant: number; discordant: number; total: number; rate: number }> {
-  // Per-dimension concordance: for each dimension, check how many pairwise
-  // assertions would pass if scoring was based on that dimension alone
   const results: Record<string, { concordant: number; discordant: number; total: number; rate: number }> = {};
 
-  // We need dimension scores from the full results, but the snapshot only has
-  // consumerApi composite. For calibration, we analyze the assertion evals and
-  // report concordance based on available data.
+  const entryMap = new Map<string, ResultEntry>();
+  for (const entry of snapshot.entries) {
+    entryMap.set(entry.name, entry);
+  }
+
+  // Check if dimension data is available
+  const hasDimensions = snapshot.entries.some((e) => e.dimensions && e.dimensions.length > 0);
+
+  if (hasDimensions) {
+    // Per-dimension concordance: for each dimension, check how many pairwise
+    // assertions would pass if scoring was based on that dimension alone
+    const dimensionKeys = new Set<string>();
+    for (const entry of snapshot.entries) {
+      if (entry.dimensions) {
+        for (const d of entry.dimensions) {
+          dimensionKeys.add(d.key);
+        }
+      }
+    }
+
+    for (const dimKey of dimensionKeys) {
+      // Only check consumer dimensions
+      if (!CONSUMER_WEIGHTS[dimKey]) continue;
+
+      let concordant = 0;
+      let discordant = 0;
+      let total = 0;
+
+      for (const assertion of PAIRWISE_ASSERTIONS) {
+        if (assertion.composite !== "consumerApi") continue;
+
+        const higherEntry = entryMap.get(assertion.higher);
+        const lowerEntry = entryMap.get(assertion.lower);
+        if (!higherEntry || !lowerEntry) continue;
+
+        const higherDimScore = getDimensionScore(higherEntry, dimKey);
+        const lowerDimScore = getDimensionScore(lowerEntry, dimKey);
+        if (higherDimScore === null || lowerDimScore === null) continue;
+
+        total++;
+        if (higherDimScore > lowerDimScore) {
+          concordant++;
+        } else {
+          discordant++;
+        }
+      }
+
+      results[dimKey] = {
+        concordant,
+        discordant,
+        rate: total > 0 ? concordant / total : 0,
+        total,
+      };
+    }
+  }
+
+  // Overall concordance based on composite scores
   const scoreMap = new Map<string, number | null>();
   for (const entry of snapshot.entries) {
     scoreMap.set(entry.name, entry.consumerApi);
   }
 
-  // Overall concordance rate across all evaluated assertions
-  const evaluated = evals.filter((e) => e.result !== "skip");
-  const concordant = evaluated.filter((e) => e.result === "pass").length;
-  const discordant = evaluated.filter((e) => e.result === "fail").length;
+  let overallConcordant = 0;
+  let overallDiscordant = 0;
+  let overallTotal = 0;
 
-  results["overall"] = {
-    concordant,
-    discordant,
-    rate: evaluated.length > 0 ? concordant / evaluated.length : 0,
-    total: evaluated.length,
+  for (const assertion of PAIRWISE_ASSERTIONS) {
+    if (assertion.composite !== "consumerApi") continue;
+    const higherScore = scoreMap.get(assertion.higher) ?? null;
+    const lowerScore = scoreMap.get(assertion.lower) ?? null;
+    if (higherScore === null || lowerScore === null) continue;
+
+    overallTotal++;
+    if (higherScore > lowerScore) {
+      overallConcordant++;
+    } else {
+      overallDiscordant++;
+    }
+  }
+
+  results["composite"] = {
+    concordant: overallConcordant,
+    discordant: overallDiscordant,
+    rate: overallTotal > 0 ? overallConcordant / overallTotal : 0,
+    total: overallTotal,
   };
 
   return results;
 }
 
+function computeTieAnalysis(entries: ResultEntry[]): Array<{ pkgA: string; pkgB: string; scoreA: number; scoreB: number; delta: number }> {
+  const ties: Array<{ pkgA: string; pkgB: string; scoreA: number; scoreB: number; delta: number }> = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const a = entries[i];
+      const b = entries[j];
+      if (a.consumerApi === null || b.consumerApi === null) continue;
+
+      const delta = Math.abs(a.consumerApi - b.consumerApi);
+      if (delta < 2) {
+        ties.push({
+          delta,
+          pkgA: a.name,
+          pkgB: b.name,
+          scoreA: a.consumerApi,
+          scoreB: b.consumerApi,
+        });
+      }
+    }
+  }
+
+  return ties.sort((a, b) => a.delta - b.delta);
+}
+
+function computeMarginAnalysis(evals: AssertionEval[]): Array<{ assertion: string; class: string; delta: number }> {
+  return evals
+    .filter((ev) => ev.result !== "skip" && ev.delta !== null && ev.delta > 0 && ev.delta < 5 && ev.class === "must-pass")
+    .map((ev) => ({
+      assertion: ev.assertion,
+      class: ev.class,
+      delta: ev.delta!,
+    }))
+    .sort((a, b) => a.delta - b.delta);
+}
+
+function recomputeConsumerApi(entry: ResultEntry, weightOverrides: Record<string, number>): number | null {
+  if (!entry.dimensions) return entry.consumerApi;
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+
+  for (const [dimKey, weight] of Object.entries(weightOverrides)) {
+    const dimScore = getDimensionScore(entry, dimKey);
+    if (dimScore !== null) {
+      weightedSum += dimScore * weight;
+      totalWeight += weight;
+    }
+  }
+
+  if (totalWeight === 0) return null;
+  return Math.round(weightedSum / totalWeight);
+}
+
 function computeWeightSensitivity(
-  evals: AssertionEval[],
-  entries: ResultEntry[],
-): Array<{ dimension: string; currentWeight: number; sensitivity: string }> {
-  const sensitivity: Array<{ dimension: string; currentWeight: number; sensitivity: string }> = [];
+  snapshot: BenchmarkSnapshot,
+): Array<{ dimension: string; currentWeight: number; sensitivity: string; assertionsAffectedUp: number; assertionsAffectedDown: number }> {
+  const sensitivity: Array<{ dimension: string; currentWeight: number; sensitivity: string; assertionsAffectedUp: number; assertionsAffectedDown: number }> = [];
+
+  const hasDimensions = snapshot.entries.some((e) => e.dimensions && e.dimensions.length > 0);
+
+  const entryMap = new Map<string, ResultEntry>();
+  for (const entry of snapshot.entries) {
+    entryMap.set(entry.name, entry);
+  }
 
   for (const [dim, weight] of Object.entries(CONSUMER_WEIGHTS)) {
-    // Report the weight and its proportion of the total
     const totalWeight = Object.values(CONSUMER_WEIGHTS).reduce((a, b) => a + b, 0);
     const proportion = weight / totalWeight;
     const proportionStr = `${(proportion * 100).toFixed(1)}% of total`;
 
-    // Classify sensitivity based on weight magnitude
+    let assertionsAffectedUp = 0;
+    let assertionsAffectedDown = 0;
+
+    if (hasDimensions) {
+      // Simulate ±20% perturbation
+      for (const direction of [1.2, 0.8] as const) {
+        const perturbedWeights = { ...CONSUMER_WEIGHTS };
+        perturbedWeights[dim] = weight * direction;
+
+        // Re-compute composite scores with perturbed weights
+        const perturbedScores = new Map<string, number | null>();
+        for (const entry of snapshot.entries) {
+          perturbedScores.set(entry.name, recomputeConsumerApi(entry, perturbedWeights));
+        }
+
+        // Check which assertions change outcome
+        let changed = 0;
+        for (const assertion of PAIRWISE_ASSERTIONS) {
+          if (assertion.composite !== "consumerApi") continue;
+
+          const origHigher = entryMap.get(assertion.higher)?.consumerApi ?? null;
+          const origLower = entryMap.get(assertion.lower)?.consumerApi ?? null;
+          const origPasses = origHigher !== null && origLower !== null && origHigher > origLower;
+
+          const pertHigher = perturbedScores.get(assertion.higher) ?? null;
+          const pertLower = perturbedScores.get(assertion.lower) ?? null;
+          const pertPasses = pertHigher !== null && pertLower !== null && pertHigher > pertLower;
+
+          if (origPasses !== pertPasses) {
+            changed++;
+          }
+        }
+
+        if (direction > 1) {
+          assertionsAffectedUp = changed;
+        } else {
+          assertionsAffectedDown = changed;
+        }
+      }
+    }
+
+    // Classify sensitivity
     let level: string;
     if (weight >= 0.3) {
       level = "HIGH — score changes here dominate the composite";
@@ -187,44 +391,59 @@ function computeWeightSensitivity(
       level = "LOW — limited impact on composite";
     }
 
+    const perturbNote = hasDimensions
+      ? ` | +20%: ${assertionsAffectedUp} assertions flip, -20%: ${assertionsAffectedDown} assertions flip`
+      : "";
+
     sensitivity.push({
+      assertionsAffectedDown,
+      assertionsAffectedUp,
       currentWeight: weight,
       dimension: dim,
-      sensitivity: `${proportionStr}, ${level}`,
+      sensitivity: `${proportionStr}, ${level}${perturbNote}`,
     });
   }
 
   return sensitivity;
 }
 
-function computeDeltaHistogram(evals: AssertionEval[]): { bucket: string; count: number }[] {
-  const buckets: Record<string, number> = {
-    "< 0 (fail)": 0,
-    "0-5": 0,
-    "5-10": 0,
-    "10-20": 0,
-    "20-30": 0,
-    "30+": 0,
-  };
+function computeDeltaHistogram(evals: AssertionEval[]): { bucket: string; count: number; mustPass: number; diagnostic: number }[] {
+  const buckets: { key: string; count: number; mustPass: number; diagnostic: number }[] = [
+    { count: 0, diagnostic: 0, key: "< 0 (fail)", mustPass: 0 },
+    { count: 0, diagnostic: 0, key: "0-5", mustPass: 0 },
+    { count: 0, diagnostic: 0, key: "5-10", mustPass: 0 },
+    { count: 0, diagnostic: 0, key: "10-20", mustPass: 0 },
+    { count: 0, diagnostic: 0, key: "20-30", mustPass: 0 },
+    { count: 0, diagnostic: 0, key: "30+", mustPass: 0 },
+  ];
 
   for (const ev of evals) {
-    if (ev.delta === null) {continue;}
+    if (ev.delta === null) continue;
+
+    let idx: number;
     if (ev.delta < 0) {
-      buckets["< 0 (fail)"]++;
+      idx = 0;
     } else if (ev.delta <= 5) {
-      buckets["0-5"]++;
+      idx = 1;
     } else if (ev.delta <= 10) {
-      buckets["5-10"]++;
+      idx = 2;
     } else if (ev.delta <= 20) {
-      buckets["10-20"]++;
+      idx = 3;
     } else if (ev.delta <= 30) {
-      buckets["20-30"]++;
+      idx = 4;
     } else {
-      buckets["30+"]++;
+      idx = 5;
+    }
+
+    buckets[idx].count++;
+    if (ev.class === "must-pass") {
+      buckets[idx].mustPass++;
+    } else {
+      buckets[idx].diagnostic++;
     }
   }
 
-  return Object.entries(buckets).map(([bucket, count]) => ({ bucket, count }));
+  return buckets.map((b) => ({ bucket: b.key, count: b.count, diagnostic: b.diagnostic, mustPass: b.mustPass }));
 }
 
 function main() {
@@ -263,43 +482,76 @@ function main() {
       ev.result === "skip"
         ? "(missing data)"
         : `(${ev.higherScore} vs ${ev.lowerScore}, delta=${ev.delta})`;
-    console.log(`${icon}: ${ev.assertion} ${detail}`);
+    const minDeltaNote = ev.minDelta ? ` [minDelta=${ev.minDelta}]` : "";
+    const classLabel = ev.class === "must-pass" ? "" : " (diag)";
+    console.log(`${icon}${classLabel}: ${ev.assertion} ${detail}${minDeltaNote}`);
   }
 
   const evaluated = passed.length + failed.length;
   const rankingLoss = evaluated > 0 ? failed.length / evaluated : 0;
 
+  const mustPassEvals = evals.filter((e) => e.class === "must-pass" && e.result !== "skip");
+  const mustPassPassed = mustPassEvals.filter((e) => e.result === "pass").length;
+  const mustPassFailed = mustPassEvals.filter((e) => e.result === "fail").length;
+  const diagnosticEvals = evals.filter((e) => e.class === "diagnostic" && e.result !== "skip");
+  const diagnosticPassed = diagnosticEvals.filter((e) => e.result === "pass").length;
+  const diagnosticFailed = diagnosticEvals.filter((e) => e.result === "fail").length;
+
   console.log(`\n=== Summary ===\n`);
   console.log(`Assertions evaluated: ${evaluated} (${skipped.length} skipped)`);
-  console.log(`Passed: ${passed.length}`);
-  console.log(`Failed: ${failed.length}`);
+  console.log(`Must-pass: ${mustPassPassed}/${mustPassPassed + mustPassFailed} passed`);
+  console.log(`Diagnostic: ${diagnosticPassed}/${diagnosticPassed + diagnosticFailed} passed`);
+  console.log(`Overall passed: ${passed.length}`);
+  console.log(`Overall failed: ${failed.length}`);
   console.log(`Ranking loss: ${(rankingLoss * 100).toFixed(1)}%`);
 
   // 3. Per-dimension concordance analysis
   console.log("\n=== Concordance Analysis ===\n");
-  const concordance = computePerDimensionConcordance(snapshot, evals);
+  const concordance = computePerDimensionConcordance(snapshot);
   for (const [dim, stats] of Object.entries(concordance)) {
     console.log(
-      `${dim.padEnd(20)} concordant=${stats.concordant} discordant=${stats.discordant} rate=${(stats.rate * 100).toFixed(1)}%`,
+      `${dim.padEnd(24)} concordant=${String(stats.concordant).padEnd(4)} discordant=${String(stats.discordant).padEnd(4)} rate=${(stats.rate * 100).toFixed(1)}%`,
     );
   }
 
-  // 4. Weight sensitivity analysis
+  // 4. Tie analysis
+  console.log("\n=== Tie Analysis (delta < 2) ===\n");
+  const ties = computeTieAnalysis(snapshot.entries);
+  if (ties.length === 0) {
+    console.log("No near-ties found.");
+  } else {
+    for (const tie of ties) {
+      console.log(`  ${tie.pkgA} (${tie.scoreA}) ~ ${tie.pkgB} (${tie.scoreB})  delta=${tie.delta}`);
+    }
+  }
+
+  // 5. Margin analysis
+  console.log("\n=== Margin Analysis (must-pass with delta < 5) ===\n");
+  const margins = computeMarginAnalysis(evals);
+  if (margins.length === 0) {
+    console.log("No uncomfortably-narrow must-pass margins found.");
+  } else {
+    for (const m of margins) {
+      console.log(`  ${m.assertion}  delta=${m.delta}`);
+    }
+  }
+
+  // 6. Weight sensitivity analysis
   console.log("\n=== Weight Sensitivity Analysis ===\n");
-  const sensitivity = computeWeightSensitivity(evals, snapshot.entries);
+  const sensitivity = computeWeightSensitivity(snapshot);
   for (const s of sensitivity) {
     console.log(`  ${s.dimension.padEnd(22)} w=${s.currentWeight}  ${s.sensitivity}`);
   }
 
-  // 5. Delta histogram
+  // 7. Delta histogram with class breakdown
   console.log("\n=== Delta Histogram ===\n");
   const histogram = computeDeltaHistogram(evals);
-  for (const { bucket, count } of histogram) {
+  for (const { bucket, count, diagnostic, mustPass } of histogram) {
     const bar = "#".repeat(count);
-    console.log(`  ${bucket.padEnd(14)} ${bar} (${count})`);
+    console.log(`  ${bucket.padEnd(14)} ${bar} (${count}: must-pass=${mustPass}, diagnostic=${diagnostic})`);
   }
 
-  // 6. Suggest weight adjustments if ranking loss > 10%
+  // 8. Suggest weight adjustments if ranking loss > 10%
   if (rankingLoss > 0.1) {
     console.log(`\n=== Weight Adjustment Suggestions (ranking loss > 10%) ===\n`);
     const suggestions = suggestWeightAdjustments(evals, snapshot.entries);
@@ -307,7 +559,7 @@ function main() {
       console.log(`  - ${s}`);
     }
 
-    console.log("\nCurrent consumer-API weights:");
+    console.log("\nCurrent consumer-API weights (from DIMENSION_CONFIGS):");
     for (const [dim, weight] of Object.entries(CONSUMER_WEIGHTS)) {
       console.log(`  ${dim.padEnd(22)} ${weight}`);
     }
@@ -316,7 +568,7 @@ function main() {
     console.log("\nRanking loss is within acceptable range (<= 10%). No weight adjustments suggested.");
   }
 
-  // 7. Save calibration report
+  // 9. Save calibration report
   const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
@@ -333,10 +585,14 @@ function main() {
     ranking: sorted.map((e) => ({ name: e.name, tier: e.tier, consumerApi: e.consumerApi })),
     assertions: evals,
     concordance,
+    ties,
+    margins,
     weightSensitivity: sensitivity,
     deltaHistogram: histogram,
     summary: {
       evaluated,
+      mustPass: { passed: mustPassPassed, failed: mustPassFailed },
+      diagnostic: { passed: diagnosticPassed, failed: diagnosticFailed },
       passed: passed.length,
       failed: failed.length,
       skipped: skipped.length,

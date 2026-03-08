@@ -9,6 +9,6 @@
       "uuid@11.1.0",
       { "spec": "moment@2.30.1", "typesVersion": "2.30.5" }
     ],
-    "stretch": ["fp-ts@2.16.9", "io-ts@2.2.22", "rxjs@7.8.2", "hono@4.7.5"]
+    "stretch": ["fp-ts@2.16.9", "io-ts@2.2.22", "rxjs@7.8.2", "hono@4.7.5", "@tanstack/react-router@1.114.3"]
   }
 }

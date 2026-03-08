@@ -77,11 +77,20 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   let consumerFiles = sourceFiles;
   const sourceOnlyFiles = sourceFiles;
   const caveats: string[] = [];
+  let usingSourceFallback = false;
 
   if (mode === "source") {
     try {
       const emitResult = project.emitToMemory({ emitOnlyDtsFiles: true });
       const emittedFiles = emitResult.getFiles();
+      const diagnostics = emitResult.getDiagnostics();
+
+      // Track emission health
+      const emitDiagnosticCount = diagnostics.length;
+      if (emitDiagnosticCount > 0) {
+        caveats.push(`Declaration emit produced ${emitDiagnosticCount} diagnostic(s)`);
+      }
+
       if (emittedFiles.length > 0) {
         const emitSuccessRate = emittedFiles.length / sourceFiles.length;
         const dtsProject = new Project({
@@ -96,9 +105,11 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
           caveats.push(`Partial declaration emit: ${emittedFiles.length}/${sourceFiles.length} files (${Math.round(emitSuccessRate * 100)}%)`);
         }
       } else {
+        usingSourceFallback = true;
         caveats.push("Could not emit declarations; consumer analysis uses source files directly");
       }
     } catch {
+      usingSourceFallback = true;
       caveats.push("Declaration emit failed; consumer analysis uses source files directly");
     }
   }
@@ -150,6 +161,28 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     }
   }
 
+  // Apply confidence penalty when source-mode consumer analysis fell back to raw source files
+  if (usingSourceFallback) {
+    for (const dim of dimensions) {
+      if (dim.confidence !== undefined) {
+        dim.confidence = Math.min(dim.confidence, 0.6);
+      } else {
+        dim.confidence = 0.6;
+      }
+      dim.confidenceSignals = dim.confidenceSignals ?? [];
+      dim.confidenceSignals.push({
+        source: "source-fallback",
+        value: 0.6,
+        reason: "Consumer analysis using raw source files instead of declarations",
+      });
+    }
+  }
+
+  // Add source-mode emit telemetry
+  if (mode === "source") {
+    caveats.push(`Source mode: ${consumerFiles.length} consumer files analyzed`);
+  }
+
   const composites = computeComposites(dimensions, mode);
 
   // Collect top issues
@@ -194,7 +227,13 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
 function buildExplainability(
   dimensions: DimensionResult[],
-  domainInference: { domain: string; confidence: number; signals: string[]; suppressedIssues?: string[] },
+  domainInference: {
+    domain: string;
+    confidence: number;
+    signals: string[];
+    suppressedIssues?: string[];
+    adjustments?: Array<{ dimension: string; adjustment: string; reason: string }>;
+  },
 ): ExplainabilityReport {
   // Lowest specificity: issues from apiSpecificity, sorted by score
   const specDim = dimensions.find((d) => d.key === "apiSpecificity");

@@ -48,13 +48,13 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "agentUsability",
     label: "Agent Usability",
     sourceOnly: false,
-    weights: { consumerApi: 0.02 },
+    weights: { consumerApi: 0.05 },
   },
   {
     key: "declarationFidelity",
     label: "Declaration Fidelity",
     sourceOnly: true,
-    weights: { consumerApi: 0.1 },
+    weights: { consumerApi: 0.07 },
   },
   {
     key: "implementationSoundness",
@@ -116,5 +116,6 @@ export const DOMAIN_PATTERNS = {
   result: ["neverthrow", "effect", "fp-ts", "purify-ts", "oxide.ts"],
   router: ["express", "fastify", "hono", "koa", "hapi", "restify", "react-router", "@trpc/server"],
   schema: ["type-fest", "ts-toolbelt", "utility-types", "type-zoo"],
+  stream: ["rxjs", "xstate", "most", "callbag", "@most/core"],
   validation: ["zod", "valibot", "arktype", "io-ts", "yup", "joi", "superstruct", "runtypes", "typia", "@effect/schema"],
 } as const;

@@ -483,13 +483,21 @@ function analyzeObject(
     reasons.push("+10 advanced type syntax");
   }
 
-  // Count constrained type params
+  // Count constrained type params and detect default generics
   const typeParams = getTypeParameters(type);
   let constrainedCount = 0;
+  let hasDefaultGeneric = false;
   for (const tp of typeParams) {
     const constraint = tp.getConstraint();
     if (constraint && !(constraint.getFlags() & TypeFlags.Unknown)) {
       constrainedCount++;
+    }
+    // Check for default type parameter via declaration nodes
+    const tpDecls = tp.getSymbol()?.getDeclarations() ?? [];
+    for (const tpDecl of tpDecls) {
+      if ((tpDecl as any).getDefault?.()) {
+        hasDefaultGeneric = true;
+      }
     }
   }
   if (constrainedCount > 0) {
@@ -497,6 +505,10 @@ function analyzeObject(
     shapeBonus += paramBonus;
     features.push("constrained-generic");
     reasons.push(`+${paramBonus} constrained type params`);
+  }
+  if (hasDefaultGeneric) {
+    features.push("default-generic-widening");
+    reasons.push("has default type parameter");
   }
 
   // No index signature + reasonable prop count bonus
@@ -577,7 +589,13 @@ function analyzeObject(
 function detectAdvancedSyntaxInDecl(decl: Node): string[] {
   const features: string[] = [];
   decl.forEachDescendant?.((node) => {
-    if (Node.isMappedTypeNode(node)) {features.push("mapped-type");}
+    if (Node.isMappedTypeNode(node)) {
+      features.push("mapped-type");
+      // Key remapping: mapped type with `as` clause
+      if ((node as any).getNameTypeNode?.()) {
+        features.push("key-remapping");
+      }
+    }
     if (Node.isConditionalTypeNode(node)) {features.push("conditional-type");}
     if (Node.isIndexedAccessTypeNode(node)) {features.push("indexed-access");}
     if (Node.isInferTypeNode(node)) {features.push("infer");}
@@ -587,6 +605,20 @@ function detectAdvancedSyntaxInDecl(decl: Node): string[] {
 
 function detectAdvancedSyntax(declarations: Node[]): { hasAdvancedSyntax: boolean; features: string[] } {
   const features = declarations.flatMap((decl) => detectAdvancedSyntaxInDecl(decl));
+
+  // Recursive type detection: check if a type alias references itself in its body
+  for (const decl of declarations) {
+    if (Node.isTypeAliasDeclaration(decl)) {
+      const aliasName = decl.getName();
+      const bodyText = decl.getTypeNode()?.getText() ?? "";
+      // Check if the alias name appears as a standalone type reference in the body
+      const selfRefPattern = new RegExp(`\\b${aliasName}\\b`);
+      if (selfRefPattern.test(bodyText)) {
+        features.push("recursive-type");
+      }
+    }
+  }
+
   return { features, hasAdvancedSyntax: features.length > 0 };
 }
 

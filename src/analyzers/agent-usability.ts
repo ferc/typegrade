@@ -102,29 +102,45 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
-  // --- Overload clarity ---
-  let effectiveOverloads = 0;
-  let totalOverloads = 0;
+  // --- Overload ambiguity detection (replaces old overload clarity) ---
+  let clearOverloads = 0;
+  let ambiguousOverloads = 0;
+  let totalOverloadedFunctions = 0;
+
   for (const decl of surface.declarations) {
-    if (decl.kind === "function" && (decl.overloadCount ?? 0) > 0) {
-      totalOverloads += decl.overloadCount!;
-      // Check if overloads narrow types effectively
-      // (presence of overloads = type narrowing attempt)
-      effectiveOverloads += decl.overloadCount!;
+    if (decl.kind === "function" && (decl.overloadCount ?? 0) > 1) {
+      totalOverloadedFunctions++;
+      // For functions with overloads, check if the overload count is manageable
+      // Fewer overloads (<=4) are clear and easy for agents to disambiguate
+      // Many overloads (>6) create ambiguity
+      const overloads = decl.overloadCount!;
+      if (overloads <= 4) {
+        clearOverloads++;
+      } else if (overloads > 6) {
+        ambiguousOverloads++;
+      }
     }
     if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
       for (const method of decl.methods) {
-        if (method.overloadCount > 0) {
-          totalOverloads += method.overloadCount;
-          effectiveOverloads += method.overloadCount;
+        if (method.overloadCount > 1) {
+          totalOverloadedFunctions++;
+          if (method.overloadCount <= 4) {
+            clearOverloads++;
+          } else if (method.overloadCount > 6) {
+            ambiguousOverloads++;
+          }
         }
       }
     }
   }
 
-  if (effectiveOverloads > 0) {
+  if (clearOverloads > 0 && ambiguousOverloads === 0) {
     score += 5;
-    positives.push(`${effectiveOverloads} overload(s) for type narrowing`);
+    positives.push(`${clearOverloads} function(s) with clear overload patterns`);
+  } else if (ambiguousOverloads > 0) {
+    const penalty = Math.min(10, ambiguousOverloads * 3);
+    score -= penalty;
+    negatives.push(`${ambiguousOverloads} function(s) with excessive overloads (>6, -${penalty})`);
   }
 
   // --- Readable generic parameter naming ---
@@ -150,6 +166,136 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     }
   }
 
+  // --- Parameter/return relationship check (correlated generics) ---
+  let correlatedGenericFunctions = 0;
+  let functionsWithGenerics = 0;
+
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function" && decl.typeParameters.length > 0) {
+      functionsWithGenerics++;
+      const typeParamNames = decl.typeParameters.map((tp) => tp.name);
+      const paramTexts = (decl.paramTypeNodes ?? [])
+        .map((p) => p.typeNode?.getText() ?? "")
+        .join(" ");
+      const returnText = decl.returnTypeNode?.getText() ?? "";
+
+      // Check if any generic type param appears in both params and return
+      const hasCorrelation = typeParamNames.some(
+        (name) => paramTexts.includes(name) && returnText.includes(name),
+      );
+      if (hasCorrelation) {
+        correlatedGenericFunctions++;
+      }
+    }
+    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
+      for (const method of decl.methods) {
+        if (method.typeParameters.length > 0) {
+          functionsWithGenerics++;
+          const typeParamNames = method.typeParameters.map((tp) => tp.name);
+          const paramTexts = method.paramTypeNodes
+            .map((p) => p.typeNode?.getText() ?? "")
+            .join(" ");
+          const returnText = method.returnTypeNode?.getText() ?? "";
+
+          const hasCorrelation = typeParamNames.some(
+            (name) => paramTexts.includes(name) && returnText.includes(name),
+          );
+          if (hasCorrelation) {
+            correlatedGenericFunctions++;
+          }
+        }
+      }
+    }
+  }
+
+  if (functionsWithGenerics > 0) {
+    const correlatedRatio = correlatedGenericFunctions / functionsWithGenerics;
+    if (correlatedRatio > 0.3) {
+      score += 8;
+      positives.push(`${Math.round(correlatedRatio * 100)}% of generic functions preserve input→output type relationships (+8)`);
+    }
+  }
+
+  // --- Narrow result type check ---
+  let specificReturnTypes = 0;
+  let totalReturnTypeFunctions = 0;
+  const WIDE_RETURN_TYPES = new Set(["any", "void", "Promise<void>", "unknown"]);
+
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function" && decl.hasExplicitReturnType) {
+      totalReturnTypeFunctions++;
+      const returnText = decl.returnTypeNode?.getText() ?? "";
+      if (!WIDE_RETURN_TYPES.has(returnText)) {
+        specificReturnTypes++;
+      }
+    }
+    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
+      for (const method of decl.methods) {
+        if (method.hasExplicitReturnType) {
+          totalReturnTypeFunctions++;
+          const returnText = method.returnTypeNode?.getText() ?? "";
+          if (!WIDE_RETURN_TYPES.has(returnText)) {
+            specificReturnTypes++;
+          }
+        }
+      }
+    }
+  }
+
+  if (totalReturnTypeFunctions > 0) {
+    const specificRatio = specificReturnTypes / totalReturnTypeFunctions;
+    if (specificRatio > 0.7) {
+      score += 5;
+      positives.push(`${Math.round(specificRatio * 100)}% of functions return specific types (+5)`);
+    }
+  }
+
+  // --- Predictable export structure check ---
+  const kindCounts: Record<string, number> = {};
+  for (const decl of surface.declarations) {
+    kindCounts[decl.kind] = (kindCounts[decl.kind] ?? 0) + 1;
+  }
+
+  if (totalExports >= 3) {
+    const dominantKindCount = Math.max(...Object.values(kindCounts));
+    const dominantKindRatio = dominantKindCount / totalExports;
+    if (dominantKindRatio > 0.6) {
+      const dominantKind = Object.entries(kindCounts).find(([, count]) => count === dominantKindCount)?.[0] ?? "unknown";
+      score += 5;
+      positives.push(`Predictable export structure (>60% ${dominantKind}s, +5)`);
+    }
+  }
+
+  // --- Option bag discriminant check ---
+  const DISCRIMINANT_PROPS = new Set(["type", "kind", "mode", "variant", "action"]);
+  let optionBagPenalties = 0;
+
+  for (const decl of surface.declarations) {
+    if (decl.kind === "function") {
+      for (const pos of decl.positions) {
+        if (pos.role === "param") {
+          const paramType = pos.type;
+          if (paramType.isObject() && !paramType.isArray()) {
+            const properties = paramType.getProperties();
+            if (properties.length > 5) {
+              const propNames = properties.map((p) => p.getName());
+              const hasDiscriminant = propNames.some((n) => DISCRIMINANT_PROPS.has(n));
+              if (!hasDiscriminant) {
+                optionBagPenalties++;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (optionBagPenalties > 0) {
+    const penalty = Math.min(9, optionBagPenalties * 3);
+    score -= penalty;
+    negatives.push(`${optionBagPenalties} option bag(s) without discriminant property (-${penalty})`);
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   return {
@@ -158,13 +304,19 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
     key: CONFIG.key,
     label: CONFIG.label,
     metrics: {
+      ambiguousOverloads,
+      clearOverloads,
+      correlatedGenericFunctions,
       defaultExports,
-      effectiveOverloads,
       functionsWithExample,
+      functionsWithGenerics,
       namedExports,
+      optionBagPenalties,
       readableGenericNames,
+      specificReturnTypes,
       totalFunctions,
       totalGenericParams,
+      totalReturnTypeFunctions,
     },
     negatives,
     positives,

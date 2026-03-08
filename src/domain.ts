@@ -1,18 +1,26 @@
 import type { PublicSurface } from "./surface/index.js";
 import { DOMAIN_PATTERNS } from "./constants.js";
 
-export type DomainType = "validation" | "result" | "utility" | "router" | "orm" | "schema" | "frontend" | "general";
+export type DomainType = "validation" | "result" | "utility" | "router" | "orm" | "schema" | "frontend" | "stream" | "general";
+
+export interface DomainAdjustment {
+  dimension: string;
+  adjustment: string;
+  reason: string;
+}
 
 export interface DomainInference {
   domain: DomainType;
   confidence: number;
   signals: string[];
   suppressedIssues?: string[];
+  adjustments?: DomainAdjustment[];
 }
 
 export function detectDomain(surface: PublicSurface, packageName?: string): DomainInference {
   const signals: string[] = [];
   const suppressedIssues: string[] = [];
+  const adjustments: DomainAdjustment[] = [];
   const scores: Record<string, number> = {};
 
   // Check package name against known patterns
@@ -88,12 +96,56 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     signals.push(`${ormMatchCount} declarations match ORM patterns`);
   }
 
+  // Check for stream/reactive patterns
+  const streamNames = ["observable", "subject", "stream", "subscription", "pipe", "operator", "subscriber"];
+  let streamMatchCount = 0;
+  for (const decl of surface.declarations) {
+    const lowerName = decl.name.toLowerCase();
+    if (streamNames.some((s) => lowerName.includes(s))) {
+      streamMatchCount++;
+    }
+  }
+  if (streamMatchCount >= 3) {
+    const streamSignal = Math.min(0.6, 0.2 + streamMatchCount * 0.1);
+    scores["stream"] = (scores["stream"] ?? 0) + streamSignal;
+    signals.push(`${streamMatchCount} declarations match stream/reactive patterns`);
+  }
+
   // Check for schema/utility: mostly type aliases and generic functions
   const typeAliases = surface.declarations.filter((d) => d.kind === "type-alias").length;
   const totalDecls = surface.declarations.length;
   if (totalDecls > 0 && typeAliases / totalDecls > 0.6) {
     scores["schema"] = (scores["schema"] ?? 0) + 0.3;
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases`);
+  }
+
+  // Multi-signal: generic pattern detection
+  // If >30% of exported functions have >=2 generic type parameters, boost schema/utility
+  if (totalFunctions > 0) {
+    let multiGenericFunctions = 0;
+    for (const decl of surface.declarations) {
+      if (decl.kind === "function" && decl.typeParameters.length >= 2) {
+        multiGenericFunctions++;
+      }
+    }
+    if (multiGenericFunctions / totalFunctions > 0.3) {
+      scores["schema"] = (scores["schema"] ?? 0) + 0.2;
+      scores["utility"] = (scores["utility"] ?? 0) + 0.2;
+      signals.push(`${multiGenericFunctions}/${totalFunctions} functions have >=2 generic type parameters`);
+    }
+  }
+
+  // Multi-signal: public API role detection
+  // If surface has >5 type aliases that are generic (have type parameters), boost schema
+  let genericTypeAliases = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind === "type-alias" && decl.typeParameters.length > 0) {
+      genericTypeAliases++;
+    }
+  }
+  if (genericTypeAliases > 5) {
+    scores["schema"] = (scores["schema"] ?? 0) + 0.2;
+    signals.push(`${genericTypeAliases} generic type aliases detected`);
   }
 
   // Determine winning domain
@@ -114,17 +166,47 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     signals.push(`${typeAliases}/${totalDecls} declarations are type aliases`);
   }
 
-  // Record suppressions
+  // Record suppressions and adjustments
   if (bestDomain === "validation") {
     suppressedIssues.push("unknown-param warnings suppressed for validation library");
+    adjustments.push({
+      adjustment: "suppress unknown-param warnings",
+      dimension: "apiSafety",
+      reason: "Validation libraries intentionally accept unknown inputs",
+    });
+  }
+
+  if (bestDomain === "stream") {
+    adjustments.push({
+      adjustment: "accept higher-order generic signatures",
+      dimension: "surfaceComplexity",
+      reason: "Stream/reactive libraries require complex generic type compositions",
+    });
+  }
+
+  if (bestDomain === "schema" || bestDomain === "utility") {
+    adjustments.push({
+      adjustment: "expect high generic density",
+      dimension: "apiSpecificity",
+      reason: "Schema/utility libraries are expected to use generics extensively",
+    });
   }
 
   const confidence = bestDomain === "general" ? 0.2 : Math.min(1, bestScore);
 
-  return {
+  const result: DomainInference = {
     confidence,
     domain: bestDomain,
     signals,
-    suppressedIssues: suppressedIssues.length > 0 ? suppressedIssues : undefined,
   };
+
+  if (suppressedIssues.length > 0) {
+    result.suppressedIssues = suppressedIssues;
+  }
+
+  if (adjustments.length > 0) {
+    result.adjustments = adjustments;
+  }
+
+  return result;
 }

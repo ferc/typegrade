@@ -31,7 +31,7 @@ tsguard produces three composite scores:
 
 ## Dimensions
 
-### Consumer Dimensions (11 total, 7 consumer + 4 source-only)
+### Consumer Dimensions (11 total, 8 consumer + 4 source-only, but declarationFidelity is source-only)
 
 #### apiSpecificity (weight: 0.35)
 
@@ -40,7 +40,7 @@ Measures how precise exported type positions are, using per-position feature-mod
 **Formula:**
 ```
 positionScore = clamp(0, 100, basePrecision + Σ featureBonus)
-score = weightedAverage(positionScores) + densityBonus - anyPenalty - recordLikePenalty
+score = weightedAverage(positionScores) + densityBonus - anyPenalty - recordLikePenalty - weakGuidancePenalty - lowReturnPenalty
 ```
 
 **Feature bonuses (per-position):**
@@ -49,14 +49,27 @@ score = weightedAverage(positionScores) + densityBonus - anyPenalty - recordLike
 | branded | +8 |
 | constraint-strong | +8 |
 | discriminated-union | +6 |
+| recursive-type | +6 |
 | constrained-generic | +5 |
 | constraint-structural | +5 |
 | mapped-type | +5 |
 | template-literal | +5 |
+| key-remapping | +5 |
+| infer | +5 |
 | conditional-type | +4 |
+| indexed-access | +4 |
 | constraint-basic | +3 |
+| literal-union | +3 |
+| tuple | +3 |
+| never | +2 |
 
-**Density bonus:** If >50% of positions have features, `+round((density - 0.5) × 10)`.
+**Additional signals:**
+- **Density bonus:** If >50% of positions have features, `+round((density - 0.5) × 10)`
+- **Weak guidance penalty:** -5 if >30% of positions score below 40
+- **Low return value penalty:** -5 if >50% of returns are void or any
+- **Escape-hatch overload penalty:** -8 per function with catch-all any overloads
+- **Broad fallback overload penalty:** -5 per function with wider implementation params
+- **Correlated generic I/O bonus:** +3 per correlated param (max +9) when generic flows from input to output
 
 **Confidence:** `min(1, sampleCount / 20)`
 
@@ -75,19 +88,33 @@ score = 100 - anyDensity × 80 - unknownDensity × 20
 
 #### semanticLift (weight: 0.15)
 
-Measures type-level sophistication above a widened baseline.
+Measures type-level sophistication above a widened baseline, with per-feature scaling.
 
 **Formula:**
 ```
-lift(position) = max(0, precisionScore - widenedBaseline(features))
-score = featureRatio × 40 + meanLift × 0.6 + correlationBonus
+rawLift(position) = max(0, precisionScore - widenedBaseline(features))
+scaledLift = rawLift × FEATURE_LIFT_SCALE[primaryFeature]
+score = liftRatio × 35 + scaledMeanLift × 0.7 + correlationBonus + diversityBonus
 ```
 
-**Per-feature widened baselines:**
-| Feature | Baseline |
-|---------|----------|
-| constrained-generic, constraint-* | 35 |
-| branded, literal-union, template-literal, mapped-type, conditional-type, discriminated-union, indexed-access, infer, tuple | 40 |
+**Per-feature lift scaling:**
+| Feature | Scale | Rationale |
+|---------|-------|-----------|
+| discriminated-union | 1.3 | Enables exhaustive matching |
+| branded | 1.2 | Eliminates type confusion |
+| literal-union | 1.1 | Very specific types |
+| constraint-strong | 1.1 | Above-standard narrowing |
+| constrained-generic | 1.0 | Standard |
+| infer | 1.0 | Standard |
+| conditional-type | 0.9 | Can be opaque |
+| constraint-structural | 0.9 | |
+| template-literal | 0.9 | |
+| tuple | 0.9 | |
+| mapped-type | 0.8 | Can be complex without benefit |
+| indexed-access | 0.8 | |
+| constraint-basic | 0.7 | Minimal narrowing |
+
+**Diversity bonus:** `min(featureCount × 2, 10)` — rewards use of 3+ distinct advanced features.
 
 **Correlation bonus:** `min(correlationCount × 8, 20)` — rewards generic params that flow from input to output.
 
@@ -116,6 +143,9 @@ Measures API surface consistency. Starts at 100, penalties applied.
 - Return type explicitness: penalty if <80% explicit (`-min(20, (80-pct)/4)`)
 - Naming consistency: -5 if mixed camelCase/PascalCase
 - Nullability convention: -5 if mixed null/undefined usage
+- Generic naming consistency: -5 if mixed single-letter/descriptive styles
+- Result shape consistency: -5 if mixed discriminant properties across result types
+- Duplicate public concept detection: tracked in positives/negatives
 
 #### surfaceComplexity (weight: 0.05)
 
@@ -125,8 +155,11 @@ Measures API surface complexity. Starts at 100, penalties applied.
 - Non-conventional generic names: -10 if any
 - Type nesting depth: -3 per deeply nested type (>3 levels, max -15)
 - Wide union/intersection: -2 per type with >8 union or >5 intersection members (max -10)
+- Overload explosion: penalty if >50 total overloads (`-min(15, (count-50)/5)`)
+- Declaration sprawl: penalty if >200 declarations (`-min(10, (count-200)/20)`)
+- Helper-chain depth: -5 if average type alias chain depth > 2
 
-#### agentUsability (weight: 0.02)
+#### agentUsability (weight: 0.05)
 
 Measures AI agent friendliness. Starts at 50.
 
@@ -135,12 +168,16 @@ Measures AI agent friendliness. Starts at 50.
 - Discriminated error unions: +10
 - Generic Error returns: -5
 - @example JSDoc coverage (≥50%: +10, ≥20%: +5, <20% with ≥5 functions: -5)
-- Effective overloads: +5
+- Overload ambiguity (clear ≤4: +5, ambiguous >6: -3 each, max -10)
 - Readable generic names (≥90%): +5
+- Correlated generic I/O (>30% of generic functions): +8
+- Narrow result types (>70% specific returns): +5
+- Predictable export structure (>60% one kind): +5
+- Option bag discriminant check (-3 per bag without type/kind/mode, max -9)
 
 ### Source-Only Dimensions
 
-#### declarationFidelity (weight: 0.10, consumerApi)
+#### declarationFidelity (weight: 0.07, consumerApi)
 
 Checks that emitted `.d.ts` declarations preserve generics and constraints from source.
 
@@ -161,6 +198,8 @@ Scores TypeScript compiler strictness flags.
 Composite confidence = `min(dimension confidences)` across contributing dimensions.
 
 Default dimension confidence is 0.8 when not explicitly set.
+
+**Source-mode fallback penalty:** When declaration emit fails and consumer analysis uses raw source files, all dimension confidences are capped at 0.6.
 
 ## Zero-File Behavior
 

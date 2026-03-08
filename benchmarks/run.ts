@@ -78,7 +78,7 @@ async function main() {
   let diagnosticPassed = 0;
   let diagnosticFailed = 0;
 
-  const assertionResults: { assertion: string; class: string; result: "pass" | "fail" | "skip"; higherScore?: number | null; lowerScore?: number | null }[] = [];
+  const assertionResults: { assertion: string; class: string; result: "pass" | "fail" | "skip"; higherScore?: number | null; lowerScore?: number | null; delta?: number | null; minDelta?: number }[] = [];
 
   for (const assertion of PAIRWISE_ASSERTIONS) {
     const higher = entries.find((e) => e.name === assertion.higher);
@@ -93,16 +93,26 @@ async function main() {
     const higherScore = assertion.composite === "consumerApi" ? higher.consumerApi : higher.agentReadiness;
     const lowerScore = assertion.composite === "consumerApi" ? lower.consumerApi : lower.agentReadiness;
 
-    if (higherScore !== null && lowerScore !== null && higherScore > lowerScore) {
+    const delta = (higherScore ?? 0) - (lowerScore ?? 0);
+    const meetsMinDelta = assertion.minDelta ? delta >= assertion.minDelta : true;
+    const passes = higherScore !== null && lowerScore !== null && higherScore > lowerScore && meetsMinDelta;
+
+    if (passes) {
       const label = assertion.class === "must-pass" ? "PASS" : "PASS (diag)";
       console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
       if (assertion.class === "must-pass") {mustPassPassed++;} else {diagnosticPassed++;}
-      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, higherScore, lowerScore, result: "pass" });
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "pass" });
     } else {
-      const label = assertion.class === "must-pass" ? "FAIL" : "WARN (diag)";
-      console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
+      // Check if it's a margin failure (order correct but delta too small)
+      if (!meetsMinDelta && higherScore !== null && lowerScore !== null && higherScore > lowerScore) {
+        const label = assertion.class === "must-pass" ? "MARGIN" : "MARGIN (diag)";
+        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta}`);
+      } else {
+        const label = assertion.class === "must-pass" ? "FAIL" : "WARN (diag)";
+        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
+      }
       if (assertion.class === "must-pass") {mustPassFailed++;} else {diagnosticFailed++;}
-      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, higherScore, lowerScore, result: "fail" });
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "fail" });
     }
   }
 
@@ -124,6 +134,14 @@ async function main() {
       tier: e.tier,
       consumerApi: e.consumerApi,
       agentReadiness: e.agentReadiness,
+      dimensions: e.result.dimensions.map((d) => ({
+        key: d.key,
+        score: d.score,
+        confidence: d.confidence ?? null,
+      })),
+      graphStats: e.result.graphStats ?? null,
+      domainInference: e.result.domainInference ?? null,
+      caveats: e.result.caveats,
     })),
     assertions: assertionResults,
     summary: {

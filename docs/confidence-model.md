@@ -13,13 +13,26 @@ Each dimension emits a confidence value (0–1) based on evidence quality:
 | publishQuality | Metadata availability | 1.0 if package.json resolved, 0.7 otherwise |
 | Other dimensions | Default | 0.8 |
 
+## Source-Mode Fallback Penalty
+
+When declaration emit fails in source mode and consumer analysis falls back to raw source files, all dimension confidences are capped at **0.6**. This reflects reduced reliability since consumer-facing analysis is operating on source code rather than emitted declarations.
+
+A confidence signal is added:
+```json
+{
+  "source": "source-fallback",
+  "value": 0.6,
+  "reason": "Consumer analysis using raw source files instead of declarations"
+}
+```
+
 ## Confidence Signals
 
 Dimensions that emit confidence also provide structured `confidenceSignals`:
 
 ```typescript
 interface ConfidenceSignal {
-  source: string;   // e.g., "sample-coverage", "metadata-availability"
+  source: string;   // e.g., "sample-coverage", "metadata-availability", "source-fallback"
   value: number;    // 0–1
   reason: string;   // Human-readable explanation
 }
@@ -56,6 +69,7 @@ When no confidence is explicitly set on a dimension, **0.8** is used as the defa
 - 2 dimensions with no explicit confidence → composite confidence = 0.8
 - 1 dimension with confidence 0.3 → composite confidence = 0.3
 - 0 contributing dimensions → confidence is undefined
+- Source-mode fallback active → all confidences capped at 0.6
 
 ## Interpreting Confidence
 

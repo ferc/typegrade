@@ -42,6 +42,29 @@ const FEATURE_BASELINES: Record<string, number> = {
 
 const DEFAULT_BASELINE = 40;
 
+/** Per-feature scaling — how much actual semantic benefit each feature provides */
+const FEATURE_LIFT_SCALE: Record<string, number> = {
+  "branded": 1.2,           // High: fully eliminates type confusion
+  "conditional-type": 0.9,   // Medium: can be opaque
+  "constrained-generic": 1.0, // Standard
+  "constraint-basic": 0.7,   // Low: minimal narrowing
+  "constraint-strong": 1.1,  // Above standard
+  "constraint-structural": 0.9,
+  "discriminated-union": 1.3, // High: enables exhaustive matching
+  "indexed-access": 0.8,
+  "infer": 1.0,
+  "literal-union": 1.1,      // High: very specific
+  "mapped-type": 0.8,        // Medium: can be complex without benefit
+  "template-literal": 0.9,
+  "tuple": 0.9,
+};
+
+interface PerFeatureLiftStats {
+  count: number;
+  totalLift: number;
+  avgLift: number;
+}
+
 function computeWidenedBaseline(features: string[]): number {
   let maxBaseline = 0;
   let hasAdvanced = false;
@@ -59,6 +82,21 @@ function computeWidenedBaseline(features: string[]): number {
   }
 
   return maxBaseline;
+}
+
+/** Identify the primary advanced feature for a position (highest-scaling one) */
+function getPrimaryFeature(features: string[]): string | undefined {
+  let best: string | undefined;
+  let bestScale = -1;
+  for (const f of features) {
+    if (!ADVANCED_FEATURES.has(f)) {continue;}
+    const scale = FEATURE_LIFT_SCALE[f] ?? 1.0;
+    if (scale > bestScale) {
+      bestScale = scale;
+      best = f;
+    }
+  }
+  return best;
 }
 
 function countGenericCorrelation(
@@ -88,9 +126,10 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
 
   let totalPositions = 0;
   let liftedPositions = 0;
-  let totalLift = 0;
+  let totalScaledLift = 0;
   let correlationCount = 0;
   const featuresSeen = new Set<string>();
+  const perFeatureLift = new Map<string, PerFeatureLiftStats>();
 
   function processPosition(pos: SurfacePosition): void {
     totalPositions++;
@@ -99,9 +138,27 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
 
     if (widenedBaseline >= 0 && result.score > widenedBaseline) {
       liftedPositions++;
-      totalLift += result.score - widenedBaseline;
+      const rawLift = result.score - widenedBaseline;
+      const primaryFeature = getPrimaryFeature(result.features);
+      const scale = primaryFeature ? (FEATURE_LIFT_SCALE[primaryFeature] ?? 1.0) : 1.0;
+      const scaledLift = rawLift * scale;
+      totalScaledLift += scaledLift;
+
       for (const f of result.features) {
-        if (ADVANCED_FEATURES.has(f)) {featuresSeen.add(f);}
+        if (ADVANCED_FEATURES.has(f)) {
+          featuresSeen.add(f);
+          // Track per-feature lift stats (attribute lift to the primary feature)
+          if (f === primaryFeature) {
+            const existing = perFeatureLift.get(f);
+            if (existing) {
+              existing.count++;
+              existing.totalLift += scaledLift;
+              existing.avgLift = existing.totalLift / existing.count;
+            } else {
+              perFeatureLift.set(f, { avgLift: scaledLift, count: 1, totalLift: scaledLift });
+            }
+          }
+        }
       }
     }
   }
@@ -156,7 +213,7 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
       issues: [],
       key: CONFIG.key,
       label: CONFIG.label,
-      metrics: { correlationCount: 0, featureCount: 0, liftedPositions: 0, totalPositions: 0 },
+      metrics: { correlationCount: 0, diversityBonus: 0, featureCount: 0, liftedPositions: 0, totalPositions: 0 },
       negatives: ["No exported type positions found"],
       positives: [],
       score: 0,
@@ -164,14 +221,24 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
     };
   }
 
-  const featureRatio = liftedPositions / totalPositions;
-  const meanLift = liftedPositions > 0 ? totalLift / liftedPositions : 0;
+  const liftRatio = liftedPositions / totalPositions;
+  const scaledMeanLift = totalScaledLift / Math.max(1, liftedPositions);
   const correlationBonus = Math.min(correlationCount * 8, 20);
+  const diversityBonus = Math.min(featuresSeen.size * 2, 10);
 
-  let score = Math.round(featureRatio * 40 + meanLift * 0.6 + correlationBonus);
+  let score = Math.round(liftRatio * 35 + scaledMeanLift * 0.7 + correlationBonus + diversityBonus);
   score = Math.max(0, Math.min(100, score));
 
-  // Build positives/negatives
+  // Build positives/negatives — include top features by lift contribution
+  const sortedFeatures = [...perFeatureLift.entries()]
+    .sort((a, b) => b[1].totalLift - a[1].totalLift);
+
+  if (sortedFeatures.length > 0) {
+    const topFeatures = sortedFeatures.slice(0, 3).map(
+      ([name, stats]) => `${name} (${stats.count}x, avg lift ${Math.round(stats.avgLift * 10) / 10})`,
+    );
+    positives.push(`Top features by lift: ${topFeatures.join(", ")}`);
+  }
   if (featuresSeen.size > 0) {
     positives.push(`Advanced features: ${[...featuresSeen].sort().join(", ")}`);
   }
@@ -181,8 +248,17 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   if (correlationCount > 0) {
     positives.push(`${correlationCount} correlated generic(s)`);
   }
+  if (featuresSeen.size >= 3) {
+    positives.push(`Feature diversity bonus: +${diversityBonus} (${featuresSeen.size} distinct features)`);
+  }
   if (score < 15) {
     negatives.push("Limited use of advanced type-system features for semantic lift");
+  }
+
+  // Build per-feature lift metrics for reporting
+  const perFeatureMetrics: Record<string, string> = {};
+  for (const [feature, stats] of perFeatureLift) {
+    perFeatureMetrics[`lift_${feature}`] = `${stats.count}x, avg=${Math.round(stats.avgLift * 10) / 10}`;
   }
 
   const confidence = Math.min(1, totalPositions / 20);
@@ -200,11 +276,13 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
     metrics: {
       correlationBonus,
       correlationCount,
+      diversityBonus,
       featureCount: featuresSeen.size,
-      featureRatio: Math.round(featureRatio * 100) / 100,
+      liftRatio: Math.round(liftRatio * 100) / 100,
       liftedPositions,
-      meanLift: Math.round(meanLift * 100) / 100,
+      scaledMeanLift: Math.round(scaledMeanLift * 100) / 100,
       totalPositions,
+      ...perFeatureMetrics,
     },
     negatives,
     positives,

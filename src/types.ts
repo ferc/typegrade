@@ -51,7 +51,12 @@ export interface AnalysisResult {
   dimensions: DimensionResult[];
   caveats: string[];
   topIssues: Issue[];
-  domainInference?: { domain: string; confidence: number; signals: string[] };
+  domainInference?: {
+    domain: string;
+    confidence: number;
+    signals: string[];
+    adjustments?: Array<{ dimension: string; adjustment: string; reason: string }>;
+  };
   graphStats?: import("./graph/types.js").GraphStats;
   dedupStats?: { groups: number; filesRemoved: number };
   explainability?: ExplainabilityReport;
