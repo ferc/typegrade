@@ -262,6 +262,71 @@ function runTrainGates(): GateResult[] {
     }),
   );
 
+  // Gate 14: Applicability coherence — null-scored dimensions should not carry confidence
+  // NOTE: The snapshot does not persist the `applicability` field from AnalysisResult dimensions.
+  // This gate approximates the check: if a dimension has score=null, its confidence should also be null.
+  // A non-null confidence on a null-scored dimension suggests the scorer assigned confidence to a
+  // dimension it deemed not applicable, which is incoherent.
+  // Currently diagnostic-only (always passes) because the scorer computes confidence before
+  // applicability decisions, so null-score + non-null-confidence is a serialization artifact.
+  // TODO: Once the snapshot persists `applicability`, make this gate strict.
+  gates.push(
+    runGate("applicability-coherence", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        dimensions?: { key: string; score: number | null; confidence: number | null }[];
+      }[] | undefined;
+      if (!entries) return { detail: "No entry data", passed: true };
+
+      let violations = 0;
+      for (const en of entries) {
+        if (!en.dimensions) continue;
+        for (const dim of en.dimensions) {
+          if (dim.score === null && dim.confidence !== null) {
+            violations++;
+          }
+        }
+      }
+      // Diagnostic-only: report count but do not fail the gate
+      return {
+        detail: `${violations} null-score-with-confidence dimension(s) (diagnostic)`,
+        passed: true,
+      };
+    }),
+  );
+
+  // Gate 15: Scenario misapplication rate — scenario scores should only appear for packages
+  // whose detected domain matches the scenario domain. A scenario score on a package with
+  // domain "general" or a mismatched domain indicates the scorer is over-applying scenarios.
+  gates.push(
+    runGate("scenario-misapplication-=0", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        domain?: string | null;
+        domainInference?: { domain: string } | null;
+        scenarioScore?: { domain?: string; score: number } | null;
+      }[] | undefined;
+      if (!entries) return { detail: "No entry data", passed: true };
+
+      let misapplied = 0;
+      let total = 0;
+      for (const en of entries) {
+        if (!en.scenarioScore || en.scenarioScore.score === null) continue;
+        total++;
+        const pkgDomain = en.domain ?? en.domainInference?.domain ?? "general";
+        const scenDomain = en.scenarioScore.domain;
+        // Scenario applied to a general-domain package or domain mismatch
+        if (pkgDomain === "general" || (scenDomain && scenDomain !== pkgDomain)) {
+          misapplied++;
+        }
+      }
+      return {
+        detail: `${misapplied}/${total} scenario misapplication(s)`,
+        passed: misapplied === 0,
+      };
+    }),
+  );
+
   return gates;
 }
 

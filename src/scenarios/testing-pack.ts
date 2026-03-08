@@ -576,6 +576,19 @@ export const TESTING_PACK: ScenarioPack = {
   description:
     "Tests testing libraries for mock precision, matcher specificity, fixture typing, and request/response helpers",
   domain: "testing",
+  isApplicable: (surface) => {
+    const testingNames = ["mock", "fixture", "stub", "spy", "assert", "matcher", "expect"];
+    const matchCount = surface.declarations.filter((decl) =>
+      testingNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} testing-related declarations found`
+          : "Insufficient testing declarations",
+    };
+  },
   name: "testing",
   scenarios: [mockPrecision, matcherSpecificity, fixtureTyping, requestResponseHelperTyping],
 };

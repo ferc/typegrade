@@ -15,6 +15,23 @@ export interface ScenarioPack {
   name: string;
   description: string;
   scenarios: ScenarioTest[];
+  /** Optional applicability check — if provided, the pack will only run if this returns true */
+  isApplicable?: (
+    surface: PublicSurface,
+    packageName?: string,
+  ) => { applicable: boolean; reason: string };
+}
+
+/** Check if a scenario pack is applicable to the given surface */
+export function isScenarioApplicable(
+  pack: ScenarioPack,
+  surface: PublicSurface,
+  packageName?: string,
+): { applicable: boolean; reason: string } {
+  if (!pack.isApplicable) {
+    return { applicable: true, reason: "No applicability check defined" };
+  }
+  return pack.isApplicable(surface, packageName);
 }
 
 /** Evaluate a scenario pack against a surface */

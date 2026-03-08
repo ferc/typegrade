@@ -574,6 +574,19 @@ export const CLI_PACK: ScenarioPack = {
   description:
     "Tests CLI libraries for option schema inference, parsed argument typing, subcommand contracts, and handler context typing",
   domain: "cli",
+  isApplicable: (surface) => {
+    const cliNames = ["command", "program", "subcommand", "argv", "option", "argument"];
+    const matchCount = surface.declarations.filter((decl) =>
+      cliNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} CLI-related declarations found`
+          : "Insufficient CLI declarations",
+    };
+  },
   name: "cli",
   scenarios: [
     optionSchemaInference,

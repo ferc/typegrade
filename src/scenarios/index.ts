@@ -10,7 +10,7 @@ import type { ScenarioPack } from "./types.js";
 import { TESTING_PACK } from "./testing-pack.js";
 import { VALIDATION_PACK } from "./validation-pack.js";
 
-export { evaluateScenarioPack } from "./types.js";
+export { evaluateScenarioPack, isScenarioApplicable } from "./types.js";
 export type { ScenarioPack, ScenarioTest } from "./types.js";
 
 const SCENARIO_PACKS: Record<string, ScenarioPack> = {

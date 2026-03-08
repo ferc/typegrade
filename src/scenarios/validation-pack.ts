@@ -734,6 +734,24 @@ export const VALIDATION_PACK: ScenarioPack = {
   description:
     "Tests validation libraries for unknown-to-typed flow, pipelines, discriminated unions, and ergonomics",
   domain: "validation",
+  isApplicable: (surface) => {
+    const hasParseOrValidate = surface.declarations.some(
+      (decl) =>
+        decl.kind === "function" && /^(parse|validate|safeParse|check|coerce)$/i.test(decl.name),
+    );
+    const hasUnknownParams = surface.declarations.some(
+      (decl) =>
+        decl.kind === "function" &&
+        decl.positions.some((pos) => pos.role === "param" && (pos.type.getFlags() & 2) !== 0),
+    );
+    return {
+      applicable: hasParseOrValidate || hasUnknownParams,
+      reason:
+        hasParseOrValidate || hasUnknownParams
+          ? "Validation patterns detected"
+          : "No parse/validate functions or unknown-accepting params found",
+    };
+  },
   name: "validation",
   scenarios: [
     unknownToValidated,

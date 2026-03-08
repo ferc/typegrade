@@ -139,6 +139,39 @@ export function analyzeSpecializationPower(surface: PublicSurface): DimensionRes
     unconstrainedBroad: 0,
   };
 
+  // Applicability: if no type parameters exist at all, specialization is not applicable
+  const totalTypeParams = surface.declarations.reduce(
+    (sum, decl) => sum + decl.typeParameters.length,
+    0,
+  );
+  const totalMethodTypeParams = surface.declarations.reduce(
+    (sum, decl) => sum + (decl.methods ?? []).reduce((ms, mt) => ms + mt.typeParameters.length, 0),
+    0,
+  );
+  const allTypeParams = totalTypeParams + totalMethodTypeParams;
+
+  if (allTypeParams === 0 && surface.stats.totalDeclarations > 0) {
+    return {
+      applicability: "not_applicable",
+      applicabilityReasons: [
+        "No generic type parameters in public surface — no specialization axis",
+      ],
+      confidence: 0.9,
+      confidenceSignals: [
+        { reason: "Clear non-applicability", source: "applicability", value: 0.9 },
+      ],
+      enabled: true,
+      issues: [],
+      key: CONFIG.key,
+      label: CONFIG.label,
+      metrics: { signalCount: 0, totalPenalty: 0, totalScore: 0 },
+      negatives: [],
+      positives: ["Specialization not applicable — no generic type parameters"],
+      score: null,
+      weights: CONFIG.weights,
+    };
+  }
+
   let declarationsWithSpecialization = 0;
 
   for (const decl of surface.declarations) {
@@ -328,9 +361,19 @@ export function analyzeSpecializationPower(surface: PublicSurface): DimensionRes
 
   const totalSignals = countTotalSignals(signals);
 
+  // Insufficient evidence when very few generic type parameters
+  let applicability: "applicable" | "not_applicable" | "insufficient_evidence" = "applicable";
+  let applicabilityReasons: string[] = [];
+  if (allTypeParams > 0 && allTypeParams < 3) {
+    applicability = "insufficient_evidence";
+    applicabilityReasons = [
+      `Only ${allTypeParams} generic type parameter(s) — weak specialization evidence`,
+    ];
+  }
+
   return {
-    applicability: "applicable",
-    applicabilityReasons: [],
+    applicability,
+    applicabilityReasons,
     confidence,
     confidenceSignals,
     enabled: true,

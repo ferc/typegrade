@@ -403,9 +403,24 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
     },
   ];
 
+  // Applicability: semantic lift requires advanced type features
+  let applicability: "applicable" | "not_applicable" | "insufficient_evidence" = "applicable";
+  let applicabilityReasons: string[] = [];
+  if (liftedPositions === 0 && totalPositions > 0) {
+    applicability = "not_applicable";
+    applicabilityReasons = [
+      "No positions use advanced type features above baseline — no semantic lift axis",
+    ];
+  } else if (liftedPositions > 0 && liftedPositions < 3) {
+    applicability = "insufficient_evidence";
+    applicabilityReasons = [
+      `Only ${liftedPositions} position(s) with advanced type features — weak semantic lift evidence`,
+    ];
+  }
+
   return {
-    applicability: "applicable",
-    applicabilityReasons: [],
+    applicability,
+    applicabilityReasons,
     confidence,
     confidenceSignals,
     enabled: true,

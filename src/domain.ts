@@ -42,6 +42,10 @@ export interface DomainInference {
   adjustments?: DomainAdjustment[];
   ambiguityGap: number;
   runnerUpDomain: DomainType;
+  /** Secondary domain candidates with scores */
+  secondaryDomains?: { domain: DomainType; score: number; confidence: number }[];
+  /** Evidence classes that contributed to the inference */
+  evidenceClasses?: string[];
 }
 
 // ─── Internal rule emission ─────────────────────────────────────────────────
@@ -874,6 +878,36 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     });
   }
 
+  // ── Compute evidence classes ────────────────────────────────────────────
+
+  const evidenceClasses: string[] = [];
+  const bestRulesEvidence = rulesByDomain[bestDomain] ?? [];
+  const evidenceCategories = new Set(bestRulesEvidence.map((rl) => rl.category));
+  if (evidenceCategories.has("package-name")) {
+    evidenceClasses.push("package-name");
+  }
+  if (evidenceCategories.has("declaration-role")) {
+    evidenceClasses.push("declaration-role");
+  }
+  if (evidenceCategories.has("scenario-trigger")) {
+    evidenceClasses.push("scenario-trigger");
+  }
+  if (evidenceCategories.has("generic-structure")) {
+    evidenceClasses.push("generic-structure");
+  }
+
+  // ── Compute secondary domains ──────────────────────────────────────────
+
+  const secondaryDomains = Object.entries(scores)
+    .filter(([dm, sc]) => dm !== bestDomain && sc > 0.1)
+    .toSorted(([, sa], [, sb]) => sb - sa)
+    .slice(0, 3)
+    .map(([dm, sc]) => ({
+      confidence: Math.max(0, Math.min(1, sc * (1 - falsePositiveRisk * 0.3))),
+      domain: dm as DomainType,
+      score: Math.round(sc * 100) / 100,
+    }));
+
   // ── Build result ────────────────────────────────────────────────────────
 
   const result: DomainInference = {
@@ -892,6 +926,14 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
 
   if (adjustments.length > 0) {
     result.adjustments = adjustments;
+  }
+
+  if (secondaryDomains.length > 0) {
+    result.secondaryDomains = secondaryDomains;
+  }
+
+  if (evidenceClasses.length > 0) {
+    result.evidenceClasses = evidenceClasses;
   }
 
   return result;

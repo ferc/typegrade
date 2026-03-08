@@ -565,6 +565,31 @@ export const ORM_PACK: ScenarioPack = {
   description:
     "Tests ORM libraries for schema-to-query inference, join precision, and column narrowing",
   domain: "orm",
+  isApplicable: (surface) => {
+    const ormNames = [
+      "column",
+      "migration",
+      "table",
+      "entity",
+      "relation",
+      "select",
+      "where",
+      "join",
+    ];
+    const matchCount = surface.declarations.filter((decl) =>
+      ormNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    const hasBuilderMethods = surface.declarations.some((decl) =>
+      (decl.methods ?? []).some((mt) => /^(select|where|join|from)$/.test(mt.name)),
+    );
+    return {
+      applicable: matchCount >= 2 || hasBuilderMethods,
+      reason:
+        matchCount >= 2 || hasBuilderMethods
+          ? "ORM/query patterns detected"
+          : "No ORM-related declarations found",
+    };
+  },
   name: "orm",
   scenarios: [schemaToQueryInference, joinPrecision, columnNarrowing],
 };

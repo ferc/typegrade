@@ -972,6 +972,19 @@ export const ROUTER_PACK: ScenarioPack = {
   description:
     "Tests router libraries for type-safe path params, search params, loaders, navigation, and context propagation",
   domain: "router",
+  isApplicable: (surface) => {
+    const routerNames = ["route", "middleware", "router", "endpoint", "handler"];
+    const matchCount = surface.declarations.filter((decl) =>
+      routerNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} router-related declarations found`
+          : "Insufficient router-related declarations",
+    };
+  },
   name: "router",
   scenarios: [
     pathParamInference,

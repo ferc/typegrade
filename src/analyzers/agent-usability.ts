@@ -799,9 +799,20 @@ export function analyzeAgentUsability(surface: PublicSurface): DimensionResult {
 
   score = Math.max(0, Math.min(100, score));
 
+  // Applicability: need sufficient callable surface for usability assessment
+  const callableCount = surface.declarations.filter(
+    (decl) => decl.kind === "function" || decl.kind === "class" || (decl.methods ?? []).length > 0,
+  ).length;
+  const applicability =
+    callableCount < 3 ? ("insufficient_evidence" as const) : ("applicable" as const);
+  const applicabilityReasons =
+    callableCount < 3
+      ? [`Only ${callableCount} callable declaration(s) — limited usability evidence`]
+      : [];
+
   return {
-    applicability: "applicable",
-    applicabilityReasons: [],
+    applicability,
+    applicabilityReasons,
     enabled: true,
     issues: [],
     key: CONFIG.key,

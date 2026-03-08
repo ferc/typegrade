@@ -511,6 +511,22 @@ export const RESULT_PACK: ScenarioPack = {
   description:
     "Tests result/effect libraries for error propagation, map/flatMap precision, and async composition",
   domain: "result",
+  isApplicable: (surface) => {
+    const resultNames = new Set(["result", "either", "ok", "err", "option", "maybe"]);
+    const hasResultType = surface.declarations.some((decl) =>
+      resultNames.has(decl.name.toLowerCase()),
+    );
+    const hasMonadicMethods = surface.declarations.some((decl) =>
+      (decl.methods ?? []).some((mt) => /^(map|flatMap|match|fold|chain|unwrap)$/.test(mt.name)),
+    );
+    return {
+      applicable: hasResultType || hasMonadicMethods,
+      reason:
+        hasResultType || hasMonadicMethods
+          ? "Result/effect patterns detected"
+          : "No Result/Either types or monadic methods found",
+    };
+  },
   name: "result",
   scenarios: [errorChannelPropagation, mapFlatMapPrecision, asyncComposition],
 };

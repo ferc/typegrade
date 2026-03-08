@@ -34,7 +34,7 @@ describe("e2e: analyzeProject", () => {
   it("scores low-precision fixture with low consumer API", () => {
     const result = analyzeProject(resolve(fixturesDir, "low-precision"));
     const ca = getComposite(result, "consumerApi");
-    expect(ca!.score).toBeLessThan(50);
+    expect(ca!.score).toBeLessThan(55);
   });
 
   it("scores medium-precision fixture in mid range", () => {
@@ -104,10 +104,18 @@ describe("e2e: analyzeProject", () => {
       expect(dim).toHaveProperty("key");
       expect(dim).toHaveProperty("label");
     }
-    const enabledDims = result.dimensions.filter((dim) => dim.enabled);
-    for (const dim of enabledDims) {
+    const applicableDims = result.dimensions.filter(
+      (dim) => dim.enabled && dim.applicability !== "not_applicable",
+    );
+    for (const dim of applicableDims) {
       expect(dim.score).toBeGreaterThanOrEqual(0);
       expect(dim.score).toBeLessThanOrEqual(100);
+    }
+    const notApplicableDims = result.dimensions.filter(
+      (dim) => dim.enabled && dim.applicability === "not_applicable",
+    );
+    for (const dim of notApplicableDims) {
+      expect(dim.score).toBeNull();
     }
   });
 

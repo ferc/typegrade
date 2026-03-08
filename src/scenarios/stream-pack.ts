@@ -582,6 +582,19 @@ export const STREAM_PACK: ScenarioPack = {
   description:
     "Tests stream/reactive libraries for pipe inference, value/error channels, and composition",
   domain: "stream",
+  isApplicable: (surface) => {
+    const streamNames = ["observable", "subject", "stream", "subscription", "operator"];
+    const matchCount = surface.declarations.filter((decl) =>
+      streamNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} stream/reactive declarations found`
+          : "Insufficient stream/reactive declarations",
+    };
+  },
   name: "stream",
   scenarios: [pipeOperatorInference, valueErrorChannels, compositionPatterns],
 };

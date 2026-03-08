@@ -464,6 +464,18 @@ export const SCHEMA_PACK: ScenarioPack = {
   description:
     "Tests schema/utility libraries for key preservation, deep transforms, and alias readability",
   domain: "schema",
+  isApplicable: (surface) => {
+    const genericTypeAliases = surface.declarations.filter(
+      (decl) => decl.kind === "type-alias" && decl.typeParameters.length > 0,
+    ).length;
+    return {
+      applicable: genericTypeAliases >= 3,
+      reason:
+        genericTypeAliases >= 3
+          ? `${genericTypeAliases} generic type aliases found`
+          : "Insufficient generic type aliases for schema assessment",
+    };
+  },
   name: "schema",
   scenarios: [keyPreservingTransforms, deepTransforms, aliasReadability],
 };

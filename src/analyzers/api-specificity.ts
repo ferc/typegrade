@@ -361,9 +361,17 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
     negatives.push("Many exported types use broad/imprecise types");
   }
 
+  // Applicability: insufficient evidence with very few type positions
+  const applicability =
+    samples.length < 5 ? ("insufficient_evidence" as const) : ("applicable" as const);
+  const applicabilityReasons =
+    samples.length < 5
+      ? [`Only ${samples.length} type position(s) analyzed — limited specificity evidence`]
+      : [];
+
   return {
-    applicability: "applicable",
-    applicabilityReasons: [],
+    applicability,
+    applicabilityReasons,
     confidence,
     confidenceSignals,
     enabled: true,

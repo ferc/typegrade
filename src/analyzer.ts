@@ -19,7 +19,9 @@ import { type DomainType, detectDomain } from "./domain.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
 import { buildDerivedIndex, extractPublicSurface } from "./surface/index.js";
+import { classifyPublicSurface, computeRoleBreakdown } from "./roles/index.js";
 import { computeComposites, computeGrade } from "./scorer.js";
+import { evaluateScenarioPack, isScenarioApplicable } from "./scenarios/types.js";
 import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
 import type { GraphStats } from "./graph/types.js";
 import { Project } from "ts-morph";
@@ -35,7 +37,6 @@ import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
 import { analyzeSpecializationPower } from "./analyzers/specialization-power.js";
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
-import { evaluateScenarioPack } from "./scenarios/types.js";
 import { getScenarioPack } from "./scenarios/index.js";
 
 /** Minimum domain confidence to emit domainFitScore */
@@ -291,6 +292,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Build derived index once — precomputed aggregates for all analyzers
   const derivedIndex = buildDerivedIndex(consumerSurface);
 
+  // Classify export roles and compute centrality weights
+  const centralityWeights = classifyPublicSurface(consumerSurface);
+
   // Domain detection
   const domainOpt = options?.domain ?? "auto";
   const domainInference =
@@ -423,7 +427,13 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   ) {
     const pack = getScenarioPack(domainInference.domain as DomainKey);
     if (pack) {
-      scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
+      // Check scenario applicability before running
+      const applicabilityCheck = isScenarioApplicable(pack, consumerSurface, packageName);
+      if (applicabilityCheck.applicable) {
+        scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
+      } else {
+        caveats.push(`Scenario pack '${pack.name}' skipped: ${applicabilityCheck.reason}`);
+      }
     }
   }
 
@@ -517,6 +527,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     graphStats,
     mode,
     projectName,
+    roleBreakdown: computeRoleBreakdown(centralityWeights),
     scenarioScore,
     scoreComparability,
     scoreProfile: isPackageMode ? "published-declarations" : "source-project",

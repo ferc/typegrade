@@ -570,6 +570,19 @@ export const STATE_PACK: ScenarioPack = {
   description:
     "Tests state management libraries for store inference, selector narrowing, subscription typing, and action payload precision",
   domain: "state",
+  isApplicable: (surface) => {
+    const stateNames = ["store", "atom", "signal", "selector", "dispatch", "derived", "state"];
+    const matchCount = surface.declarations.filter((decl) =>
+      stateNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} state-related declarations found`
+          : "Insufficient state management declarations",
+    };
+  },
   name: "state",
   scenarios: [storeSliceInference, selectorNarrowing, subscriptionTyping, actionPayloadPrecision],
 };
