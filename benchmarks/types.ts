@@ -84,12 +84,14 @@ export interface RedactedEvalSummary {
     coverageConfidenceViolations: number;
     paretoViolationCount: number;
     scoreCompressionRate: number;
+    seedInstabilityRate?: number;
     domainOverreachRate: number;
     scenarioOverreachRate: number;
     medianConsumerApi: number;
     medianAgentReadiness: number;
     medianTypeSafety: number;
     scoreStdDev: number;
+    trainEvalDrift?: number;
   };
   /** Gate pass/fail results */
   gates: { gate: string; passed: boolean; detail: string }[];

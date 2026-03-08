@@ -414,6 +414,19 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   });
   if (coverageDiagnostics.undersampled) {
     caveats.push(`Package is undersampled: ${coverageDiagnostics.undersampledReasons.join("; ")}`);
+
+    // Apply confidence penalty to all dimensions when undersampled
+    const undersampleCap = computeUndersampleConfidenceCap(coverageDiagnostics);
+    for (const dim of dimensions) {
+      dim.confidence =
+        dim.confidence === undefined ? undersampleCap : Math.min(dim.confidence, undersampleCap);
+      dim.confidenceSignals = dim.confidenceSignals ?? [];
+      dim.confidenceSignals.push({
+        reason: `Undersampled package — confidence capped (${coverageDiagnostics.undersampledReasons.length} reason(s))`,
+        source: "undersampled",
+        value: undersampleCap,
+      });
+    }
   }
 
   const result: AnalysisResult = {
@@ -443,6 +456,27 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
 
   return result;
+}
+
+/**
+ * Compute a confidence cap based on severity of undersampling.
+ * More undersampling reasons = lower cap. Fallback glob = lowest cap (handled separately).
+ */
+function computeUndersampleConfidenceCap(diagnostics: CoverageDiagnostics): number {
+  const reasonCount = diagnostics.undersampledReasons.length;
+
+  // Severe: 3+ reasons or zero positions/declarations
+  if (reasonCount >= 3 || diagnostics.measuredPositions === 0 || diagnostics.measuredDeclarations === 0) {
+    return 0.4;
+  }
+
+  // Moderate: 2 reasons
+  if (reasonCount >= 2) {
+    return 0.55;
+  }
+
+  // Mild: 1 reason (e.g., just slightly below minimum files)
+  return 0.65;
 }
 
 function computeSampleCoverage(dimensions: DimensionResult[]): number {

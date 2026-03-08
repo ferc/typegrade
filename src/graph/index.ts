@@ -1,7 +1,7 @@
 import type { DeclarationGraph, GraphStats, ResolvedEntrypoint } from "./types.js";
 import { type WalkOptions, walkDeclarationGraph } from "./walker.js";
 import { basename, dirname, join } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { Project } from "ts-morph";
 import { deduplicateGraph } from "./dedup.js";
 import { resolveEntrypoints } from "./resolve.js";
@@ -142,14 +142,28 @@ export function buildDeclarationGraph(
 }
 
 /**
- * Find sibling @types/* packages in the same node_modules directory.
- * This allows the walker to follow type references across package boundaries
- * when a package re-exports or references types from its @types sibling.
+ * Find the sibling @types/* package that corresponds to the package being
+ * analyzed. For example, if pkgDir points at `express`, this returns
+ * `node_modules/@types/express` when it exists.
+ *
+ * Scoped packages use the DefinitelyTyped naming convention:
+ *   `@scope/pkg` -> `@types/scope__pkg`
  */
 function findSiblingTypePackages(pkgDir: string): string[] {
-  const siblingDirs: string[] = [];
-
   try {
+    // Read the package name from the package being analyzed
+    const pkgJsonPath = join(pkgDir, "package.json");
+    if (!existsSync(pkgJsonPath)) {
+      return [];
+    }
+
+    const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as {
+      name?: string;
+    };
+    if (!pkg.name) {
+      return [];
+    }
+
     // Determine the node_modules root
     const parentDir = dirname(pkgDir);
     const parentName = basename(parentDir);
@@ -161,35 +175,23 @@ function findSiblingTypePackages(pkgDir: string): string[] {
       return [];
     }
 
-    // Check for @types directory
-    const typesDir = join(nodeModulesRoot, "@types");
-    if (!existsSync(typesDir)) {
-      return [];
+    // Convert package name to @types convention:
+    //   "express"      -> "express"
+    //   "@scope/pkg"   -> "scope__pkg"
+    const typesName = pkg.name.startsWith("@")
+      ? pkg.name.slice(1).replace("/", "__")
+      : pkg.name;
+
+    const typePkgDir = join(nodeModulesRoot, "@types", typesName);
+    if (existsSync(typePkgDir)) {
+      return [typePkgDir];
     }
 
-    // Read package.json to get the package name
-    const pkgJsonPath = join(pkgDir, "package.json");
-    if (!existsSync(pkgJsonPath)) {
-      return [];
-    }
-
-    // Look for type packages that commonly provide types for this package's dependencies
-    const entries = readdirSync(typesDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const typePkgDir = join(typesDir, entry.name);
-      const typePkgJson = join(typePkgDir, "package.json");
-      if (existsSync(typePkgJson)) {
-        siblingDirs.push(typePkgDir);
-      }
-    }
+    return [];
   } catch {
     // Ignore filesystem errors
+    return [];
   }
-
-  return siblingDirs;
 }
 
 /**
