@@ -7,43 +7,34 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
   release:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "lts/*"
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm build
-
-      - name: Setup npm OIDC auth
-        run: |
-          OIDC_TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
-            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            | jq -r '.value')
-          NPM_TOKEN=$(curl -sLS "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/typegrade" \
-            -H "Authorization: Bearer ${OIDC_TOKEN}" \
-            | jq -r '.token')
-          echo "::add-mask::${NPM_TOKEN}"
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
 
       - name: Release
         env:
