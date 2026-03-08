@@ -1,3 +1,15 @@
+## [0.6.0](https://github.com/ferc/typegrade/compare/v0.5.0...v0.6.0) (2026-03-08)
+
+### Features
+
+* accuracy-to-95% plan — phases 1-7 ([357a9c2](https://github.com/ferc/typegrade/commit/357a9c220f6a3dc2782d1735e50049797cb99d3d))
+
+### Bug Fixes
+
+* **benchmarks:** add undersampled anchor waivers for known-stable packages ([44a2d06](https://github.com/ferc/typegrade/commit/44a2d0626164ae125d42260e935c39409b4a4326))
+* **ci:** add packageManager field for pnpm/action-setup@v4 ([ff14b71](https://github.com/ferc/typegrade/commit/ff14b71a7b9ff2bf2b4e29c9b2a89e91f2a89854))
+* **ci:** auto-format source files to pass format check ([35d3a0c](https://github.com/ferc/typegrade/commit/35d3a0c75c48a7b5d1cfeff2daeefff1068173c7))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
