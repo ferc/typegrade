@@ -1,4 +1,4 @@
-import type { DimensionResult, Issue, PackageAnalysisContext } from "../types.js";
+import type { ConfidenceSignal, DimensionResult, Issue, PackageAnalysisContext } from "../types.js";
 import type { Project } from "ts-morph";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
@@ -15,6 +15,7 @@ export function analyzePublishQuality(
   const issues: Issue[] = [];
   const positives: string[] = [];
   const negatives: string[] = [];
+  const confidenceSignals: ConfidenceSignal[] = [];
 
   let totalExportedFns = 0;
   let fnsWithExplicitReturn = 0;
@@ -47,7 +48,6 @@ export function analyzePublishQuality(
         break;
       }
       case "class": {
-        // Class methods count as exported functions
         for (const method of decl.methods ?? []) {
           totalExportedFns++;
           if (method.hasJSDoc) {exportedWithJSDoc++;}
@@ -58,54 +58,62 @@ export function analyzePublishQuality(
         break;
       }
       case "variable": {
-        // Variable declarations inherit JSDoc from the statement.
-        // Already counted above via decl.hasJSDoc.
-        // But variables can have multiple declarations per statement that all
-        // share JSDoc — already handled by sampler (each decl gets stmt JSDoc).
         break;
       }
-      // interface, type-alias, enum: just counted + JSDoc above
     }
   }
 
   let score = 0;
 
-  // 45% from explicit return types
+  // 35% from explicit return types
   if (totalExportedFns > 0) {
     const returnRatio = fnsWithExplicitReturn / totalExportedFns;
-    score += Math.round(returnRatio * 45);
+    score += Math.round(returnRatio * 35);
     positives.push(
       `${fnsWithExplicitReturn}/${totalExportedFns} exported functions have explicit return types`,
     );
   } else {
-    score += 45;
+    score += 35;
   }
 
-  // 25% from fully typed params
+  // 20% from fully typed params
   if (totalExportedFns > 0) {
     const paramRatio = fnsWithFullyTypedParams / totalExportedFns;
-    score += Math.round(paramRatio * 25);
+    score += Math.round(paramRatio * 20);
     positives.push(
       `${fnsWithFullyTypedParams}/${totalExportedFns} exported functions have all params typed`,
     );
   } else {
-    score += 25;
+    score += 20;
   }
 
-  // +15 for types field in package.json
+  // Entrypoint clarity: +15 for types/typings field, +10 bonus for exports with types conditions
   let pkgJsonResolved = false;
+  let hasExportsWithTypes = false;
+
   if (packageContext) {
     try {
       const pkg = JSON.parse(readFileSync(packageContext.packageJsonPath, "utf8"));
       pkgJsonResolved = true;
+      confidenceSignals.push({ reason: "package.json resolved", source: "metadata-availability", value: 1.0 });
+
       if (pkg.types || pkg.typings) {
         score += 15;
         positives.push("package.json has types/typings field");
       } else {
         negatives.push("package.json missing types/typings field");
       }
+
+      // Check for exports with types conditions
+      if (pkg.exports) {
+        hasExportsWithTypes = checkExportsHaveTypes(pkg.exports);
+        if (hasExportsWithTypes) {
+          score += 10;
+          positives.push("package.json exports field has types conditions (+10)");
+        }
+      }
     } catch {
-      // Ignore
+      confidenceSignals.push({ reason: "package.json parse failed", source: "metadata-availability", value: 0.5 });
     }
   }
   if (!pkgJsonResolved) {
@@ -115,29 +123,57 @@ export function analyzePublishQuality(
       if (existsSync(pkgPath)) {
         try {
           const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+          pkgJsonResolved = true;
+          confidenceSignals.push({ reason: "package.json resolved via tsconfig", source: "metadata-availability", value: 0.9 });
           if (pkg.types || pkg.typings) {
             score += 15;
             positives.push("package.json has types/typings field");
           } else {
             negatives.push("package.json missing types/typings field");
           }
+          if (pkg.exports) {
+            hasExportsWithTypes = checkExportsHaveTypes(pkg.exports);
+            if (hasExportsWithTypes) {
+              score += 10;
+              positives.push("package.json exports field has types conditions (+10)");
+            }
+          }
         } catch {
           // Ignore
         }
       }
     }
+    if (!pkgJsonResolved) {
+      confidenceSignals.push({ reason: "no package.json found", source: "metadata-availability", value: 0.7 });
+    }
   }
 
-  // +15 for JSDoc
+  // +15 for JSDoc coverage
   if (totalExportedDecls > 0) {
     const jsDocRatio = exportedWithJSDoc / totalExportedDecls;
     score += Math.round(jsDocRatio * 15);
     positives.push(`${exportedWithJSDoc}/${totalExportedDecls} exported declarations have JSDoc`);
+
+    // Docs density bonus: >80% JSDoc on exported functions
+    if (totalExportedFns > 0) {
+      const fnJsDocCount = surface.declarations.filter(
+        (d) => d.kind === "function" && d.hasJSDoc,
+      ).length;
+      const fnJsDocRatio = fnJsDocCount / totalExportedFns;
+      if (fnJsDocRatio >= 0.8) {
+        score += 5;
+        positives.push(`${Math.round(fnJsDocRatio * 100)}% function JSDoc coverage (+5)`);
+      }
+    }
   }
 
   score = Math.min(100, score);
 
+  const confidence = pkgJsonResolved ? 1.0 : 0.7;
+
   return {
+    confidence,
+    confidenceSignals,
     enabled: true,
     issues,
     key: CONFIG.key,
@@ -146,6 +182,7 @@ export function analyzePublishQuality(
       exportedWithJSDoc,
       fnsWithExplicitReturn,
       fnsWithFullyTypedParams,
+      hasExportsWithTypes,
       overloadCount,
       totalExportedDecls,
       totalExportedFns,
@@ -155,4 +192,16 @@ export function analyzePublishQuality(
     score,
     weights: CONFIG.weights,
   };
+}
+
+function checkExportsHaveTypes(exports: unknown): boolean {
+  if (typeof exports !== "object" || exports === null) {return false;}
+  for (const value of Object.values(exports)) {
+    if (typeof value === "object" && value !== null) {
+      if ("types" in value) {return true;}
+      // Recurse into nested conditions
+      if (checkExportsHaveTypes(value)) {return true;}
+    }
+  }
+  return false;
 }

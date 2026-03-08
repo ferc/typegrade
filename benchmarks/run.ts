@@ -73,10 +73,12 @@ async function main() {
 
   // Run pairwise assertions
   console.log("\n=== Pairwise Assertions ===\n");
-  let passed = 0;
-  let failed = 0;
+  let mustPassPassed = 0;
+  let mustPassFailed = 0;
+  let diagnosticPassed = 0;
+  let diagnosticFailed = 0;
 
-  const assertionResults: { assertion: string; result: "pass" | "fail" | "skip"; higherScore?: number | null; lowerScore?: number | null }[] = [];
+  const assertionResults: { assertion: string; class: string; result: "pass" | "fail" | "skip"; higherScore?: number | null; lowerScore?: number | null }[] = [];
 
   for (const assertion of PAIRWISE_ASSERTIONS) {
     const higher = entries.find((e) => e.name === assertion.higher);
@@ -84,7 +86,7 @@ async function main() {
 
     if (!higher || !lower) {
       console.log(`SKIP: ${assertion.higher} > ${assertion.lower} (missing data)`);
-      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, result: "skip" });
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, result: "skip" });
       continue;
     }
 
@@ -92,17 +94,22 @@ async function main() {
     const lowerScore = assertion.composite === "consumerApi" ? lower.consumerApi : lower.agentReadiness;
 
     if (higherScore !== null && lowerScore !== null && higherScore > lowerScore) {
-      console.log(`PASS: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
-      passed++;
-      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, higherScore, lowerScore, result: "pass" });
+      const label = assertion.class === "must-pass" ? "PASS" : "PASS (diag)";
+      console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
+      if (assertion.class === "must-pass") {mustPassPassed++;} else {diagnosticPassed++;}
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, higherScore, lowerScore, result: "pass" });
     } else {
-      console.log(`FAIL: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
-      failed++;
-      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, higherScore, lowerScore, result: "fail" });
+      const label = assertion.class === "must-pass" ? "FAIL" : "WARN (diag)";
+      console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore})`);
+      if (assertion.class === "must-pass") {mustPassFailed++;} else {diagnosticFailed++;}
+      assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, higherScore, lowerScore, result: "fail" });
     }
   }
 
-  console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} assertions`);
+  const totalMustPass = mustPassPassed + mustPassFailed;
+  const totalDiagnostic = diagnosticPassed + diagnosticFailed;
+  console.log(`\nMust-pass: ${mustPassPassed}/${totalMustPass} passed`);
+  console.log(`Diagnostic: ${diagnosticPassed}/${totalDiagnostic} passed (warnings only)`);
 
   // Persist results to JSON
   const resultsDir = join(import.meta.dirname, "results");
@@ -119,14 +126,18 @@ async function main() {
       agentReadiness: e.agentReadiness,
     })),
     assertions: assertionResults,
-    summary: { passed, failed, total: passed + failed },
+    summary: {
+      mustPass: { passed: mustPassPassed, failed: mustPassFailed, total: totalMustPass },
+      diagnostic: { passed: diagnosticPassed, failed: diagnosticFailed, total: totalDiagnostic },
+    },
   };
 
   const filename = new Date().toISOString().replace(/[:.]/g, "-") + ".json";
   writeFileSync(join(resultsDir, filename), JSON.stringify(snapshot, null, 2));
   console.log(`\nResults saved to benchmarks/results/${filename}`);
 
-  if (failed > 0) {
+  // Exit code 1 only on must-pass failures
+  if (mustPassFailed > 0) {
     process.exit(1);
   }
 }

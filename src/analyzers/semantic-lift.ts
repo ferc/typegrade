@@ -1,4 +1,4 @@
-import type { DimensionResult, Issue } from "../types.js";
+import type { ConfidenceSignal, DimensionResult, Issue } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
 import type { PublicSurface, SurfacePosition } from "../surface/index.js";
 import { analyzePrecision } from "../utils/type-utils.js";
@@ -6,12 +6,14 @@ import type { TypeNode } from "ts-morph";
 import type { SurfaceTypeParam } from "../surface/index.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "semanticLift")!;
-const BASELINE = 40;
 
 const ADVANCED_FEATURES = new Set([
   "branded",
   "conditional-type",
   "constrained-generic",
+  "constraint-basic",
+  "constraint-strong",
+  "constraint-structural",
   "discriminated-union",
   "indexed-access",
   "infer",
@@ -20,6 +22,44 @@ const ADVANCED_FEATURES = new Set([
   "template-literal",
   "tuple",
 ]);
+
+/** Per-feature widened baselines — what the score would be without the feature */
+const FEATURE_BASELINES: Record<string, number> = {
+  "branded": 40,            // unbranded primitive
+  "conditional-type": 40,
+  "constrained-generic": 35, // unconstrained generic equivalent
+  "constraint-basic": 35,
+  "constraint-strong": 35,
+  "constraint-structural": 35,
+  "discriminated-union": 40, // avg-of-members-without-discriminant approx
+  "indexed-access": 40,
+  "infer": 40,
+  "literal-union": 40,      // wide primitive equivalent
+  "mapped-type": 40,
+  "template-literal": 40,   // wide string equivalent
+  "tuple": 40,
+};
+
+const DEFAULT_BASELINE = 40;
+
+function computeWidenedBaseline(features: string[]): number {
+  let maxBaseline = 0;
+  let hasAdvanced = false;
+
+  for (const f of features) {
+    if (ADVANCED_FEATURES.has(f)) {
+      hasAdvanced = true;
+      const baseline = FEATURE_BASELINES[f] ?? DEFAULT_BASELINE;
+      maxBaseline = Math.max(maxBaseline, baseline);
+    }
+  }
+
+  if (!hasAdvanced) {
+    return -1; // Signals no advanced features — position has no lift
+  }
+
+  return maxBaseline;
+}
 
 function countGenericCorrelation(
   typeParams: SurfaceTypeParam[],
@@ -55,10 +95,11 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
   function processPosition(pos: SurfacePosition): void {
     totalPositions++;
     const result = analyzePrecision(pos.type);
-    const hasAdvanced = result.features.some((f) => ADVANCED_FEATURES.has(f));
-    if (hasAdvanced && result.score > BASELINE) {
+    const widenedBaseline = computeWidenedBaseline(result.features);
+
+    if (widenedBaseline >= 0 && result.score > widenedBaseline) {
       liftedPositions++;
-      totalLift += result.score - BASELINE;
+      totalLift += result.score - widenedBaseline;
       for (const f of result.features) {
         if (ADVANCED_FEATURES.has(f)) {featuresSeen.add(f);}
       }
@@ -144,8 +185,14 @@ export function analyzeSemanticLift(surface: PublicSurface): DimensionResult {
     negatives.push("Limited use of advanced type-system features for semantic lift");
   }
 
+  const confidence = Math.min(1, totalPositions / 20);
+  const confidenceSignals: ConfidenceSignal[] = [
+    { reason: `${totalPositions} positions analyzed (20 = full confidence)`, source: "sample-coverage", value: confidence },
+  ];
+
   return {
-    confidence: Math.min(1, totalPositions / 20),
+    confidence,
+    confidenceSignals,
     enabled: true,
     issues,
     key: CONFIG.key,

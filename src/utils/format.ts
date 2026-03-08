@@ -60,6 +60,10 @@ export function renderReport(result: AnalysisResult): string {
   if (result.domainInference && result.domainInference.confidence >= 0.5) {
     lines.push(`  Domain: ${result.domainInference.domain} (${Math.round(result.domainInference.confidence * 100)}% confidence)`);
   }
+  if (result.graphStats) {
+    const gs = result.graphStats;
+    lines.push(`  Graph: ${gs.totalEntrypoints} entrypoint(s), ${gs.totalReachable} reachable, ${gs.totalAfterDedup} after dedup`);
+  }
   lines.push("");
 
   // Composite scores box
@@ -82,7 +86,9 @@ export function renderReport(result: AnalysisResult): string {
     "apiSafety",
     "semanticLift",
     "publishQuality",
-    "surfaceCoherence",
+    "surfaceConsistency",
+    "surfaceComplexity",
+    "agentUsability",
     "declarationFidelity",
   ]);
   const consumerView = result.dimensions.filter((dim) => consumerKeys.has(dim.key));
@@ -159,6 +165,45 @@ export function renderDimensionTable(dimensions: DimensionResult[]): string {
       lines.push(`    ${pc.red("-")} ${negative}`);
     }
   }
+  return lines.join("\n");
+}
+
+export function renderExplainability(result: AnalysisResult): string {
+  if (!result.explainability) {return "";}
+  const lines: string[] = [];
+  const ex = result.explainability;
+
+  if (ex.lowestSpecificity.length > 0) {
+    lines.push(pc.bold("\n  Lowest Specificity Positions:"));
+    for (const entry of ex.lowestSpecificity) {
+      const loc = entry.file ? `${entry.file}:${entry.line}` : "";
+      lines.push(`    ${pc.red("-")} ${pc.dim(loc)} ${entry.name}`);
+    }
+  }
+
+  if (ex.safetyLeaks.length > 0) {
+    lines.push(pc.bold("\n  Safety Leaks:"));
+    for (const entry of ex.safetyLeaks) {
+      const loc = entry.file ? `${entry.file}:${entry.line}` : "";
+      lines.push(`    ${pc.red("-")} ${pc.dim(loc)} ${entry.name}`);
+    }
+  }
+
+  if (ex.highestLift.length > 0) {
+    lines.push(pc.bold("\n  Highest Semantic Lift:"));
+    for (const entry of ex.highestLift) {
+      lines.push(`    ${pc.green("+")} ${entry.name}`);
+    }
+  }
+
+  if (ex.domainSuppressions.length > 0) {
+    lines.push(pc.bold("\n  Domain Suppressions:"));
+    for (const entry of ex.domainSuppressions) {
+      lines.push(`    ${pc.yellow("\u26A0")} ${entry.name}: ${entry.reason}`);
+    }
+  }
+
+  if (lines.length > 0) {lines.push("");}
   return lines.join("\n");
 }
 

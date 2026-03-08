@@ -1,10 +1,23 @@
-import type { DimensionResult, Issue } from "../types.js";
+import type { ConfidenceSignal, DimensionResult, Issue } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
 import type { PublicSurface, SurfaceDeclaration, SurfacePosition } from "../surface/index.js";
 import { analyzePrecision } from "../utils/type-utils.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "apiSpecificity")!;
 const MAX_SAMPLES_PER_GROUP = 12;
+
+// Per-position feature bonuses
+const FEATURE_BONUSES: Record<string, number> = {
+  "branded": 8,
+  "conditional-type": 4,
+  "constraint-basic": 3,
+  "constraint-strong": 8,
+  "constraint-structural": 5,
+  "constrained-generic": 5,
+  "discriminated-union": 6,
+  "mapped-type": 5,
+  "template-literal": 5,
+};
 
 interface WeightedSample {
   score: number;
@@ -56,45 +69,83 @@ export function analyzeApiSpecificity(surface: PublicSurface): DimensionResult {
     };
   }
 
-  // Weighted average
+  // Per-position feature-model scoring:
+  // Each position score = clamp(basePrecision + sum of feature bonuses)
+  // Then compute weighted average across all positions
   let totalWeight = 0;
   let weightedSum = 0;
+  const featureDensities = new Map<string, number>();
+  let samplesWithFeature = 0;
+
   for (const sample of samples) {
-    weightedSum += sample.score * sample.weight;
+    // Compute per-position feature bonus
+    let featureBonus = 0;
+    const seenFeatures = new Set<string>();
+    for (const feature of sample.features) {
+      if (seenFeatures.has(feature)) {continue;}
+      seenFeatures.add(feature);
+      const bonus = FEATURE_BONUSES[feature] ?? 0;
+      featureBonus += bonus;
+    }
+
+    const positionScore = Math.max(0, Math.min(100, sample.score + featureBonus));
+    weightedSum += positionScore * sample.weight;
     totalWeight += sample.weight;
+
+    // Track feature densities
+    if (seenFeatures.size > 0) {samplesWithFeature++;}
+    for (const feature of seenFeatures) {
+      featureDensities.set(feature, (featureDensities.get(feature) ?? 0) + 1);
+    }
   }
+
   let score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
 
-  // Feature-vector adjustments on top of weighted average
-  const allFeatures = samples.flatMap((s) => s.features);
-  const featureCounts = countFeatures(allFeatures);
-
-  if (featureCounts['constrained-generic'] > 0) {score += 5;}
-  if (featureCounts['branded'] > 0) {score += 8;}
-  if (featureCounts['discriminated-union'] > 0) {score += 6;}
-  if (featureCounts['mapped-type'] > 0) {score += 5;}
-  if (featureCounts['conditional-type'] > 0) {score += 4;}
-  if (featureCounts['template-literal'] > 0) {score += 5;}
+  // Feature density bonus: reward pervasive use of advanced features
+  const featureDensityRatio = samplesWithFeature / samples.length;
+  if (featureDensityRatio > 0.5) {
+    score += Math.round((featureDensityRatio - 0.5) * 10);
+  }
 
   // Penalty: any leakage in containers
   const anyContainers = samples.filter((s) => s.containsAny).length;
   if (anyContainers > 0) {score -= Math.min(anyContainers * 4, 20);}
 
   // Penalty: record-like dominating
-  if ((featureCounts['record-like'] ?? 0) > samples.length * 0.3) {score -= 8;}
+  const recordLikeCount = featureDensities.get("record-like") ?? 0;
+  if (recordLikeCount > samples.length * 0.3) {score -= 8;}
 
   score = Math.max(0, Math.min(100, score));
 
+  // Build diagnostics
+  const confidence = Math.min(1, samples.length / 20);
+  const confidenceSignals: ConfidenceSignal[] = [
+    { reason: `${samples.length} positions analyzed (20 = full confidence)`, source: "sample-coverage", value: confidence },
+  ];
   positives.push(`${samples.length} exported type positions analyzed`);
+  if (featureDensityRatio > 0.3) {
+    const topFeatures = [...featureDensities.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([f, c]) => `${f}(${c})`);
+    positives.push(`Feature density: ${topFeatures.join(", ")}`);
+  }
   if (score >= 70) {positives.push("High type specificity across exports");}
   if (score < 40) {negatives.push("Many exported types use broad/imprecise types");}
 
   return {
+    confidence,
+    confidenceSignals,
     enabled: true,
     issues,
     key: CONFIG.key,
     label: CONFIG.label,
-    metrics: { sampleCount: samples.length, weightedAverage: score },
+    metrics: {
+      featureDensityRatio: Math.round(featureDensityRatio * 100) / 100,
+      sampleCount: samples.length,
+      samplesWithFeature,
+      weightedAverage: score,
+    },
     negatives,
     positives,
     score,
@@ -178,12 +229,4 @@ function collectVariableSamples(decl: SurfaceDeclaration, samples: WeightedSampl
       });
     }
   }
-}
-
-function countFeatures(features: string[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const f of features) {
-    counts[f] = (counts[f] ?? 0) + 1;
-  }
-  return counts;
 }

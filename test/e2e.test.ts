@@ -112,9 +112,9 @@ describe("e2e: analyzeProject", () => {
     }
   });
 
-  it("source mode has 9 dimensions", () => {
+  it("source mode has 11 dimensions", () => {
     const result = analyzeProject(resolve(fixturesDir, "high-precision"));
-    expect(result.dimensions).toHaveLength(9);
+    expect(result.dimensions).toHaveLength(11);
     expect(result.mode).toBe("source");
   });
 
@@ -179,5 +179,125 @@ describe("e2e: analyzeProject", () => {
     const highCa = getComposite(high, "consumerApi")!;
     const lowCa = getComposite(low, "consumerApi")!;
     expect(highCa.score!).toBeGreaterThan(lowCa.score!);
+  });
+
+  it("index-signatures fixture has surface consistency dimension", () => {
+    const result = analyzeProject(resolve(fixturesDir, "index-signatures"));
+    const consistency = getDimension(result, "surfaceConsistency");
+    expect(consistency).toBeDefined();
+    expect(consistency!.enabled).toBe(true);
+  });
+
+  it("index-signatures fixture has surface complexity dimension", () => {
+    const result = analyzeProject(resolve(fixturesDir, "index-signatures"));
+    const complexity = getDimension(result, "surfaceComplexity");
+    expect(complexity).toBeDefined();
+    expect(complexity!.enabled).toBe(true);
+  });
+
+  it("index-signatures fixture has agent usability dimension", () => {
+    const result = analyzeProject(resolve(fixturesDir, "index-signatures"));
+    const agentUsability = getDimension(result, "agentUsability");
+    expect(agentUsability).toBeDefined();
+    expect(agentUsability!.enabled).toBe(true);
+  });
+
+  it("router-style fixture has domain inference with signals", () => {
+    const result = analyzeProject(resolve(fixturesDir, "router-style"));
+    expect(result.domainInference).toBeDefined();
+    expect(result.domainInference!.signals.length).toBeGreaterThan(0);
+  });
+
+  it("orm-style fixture has domain inference with signals", () => {
+    const result = analyzeProject(resolve(fixturesDir, "orm-style"));
+    expect(result.domainInference).toBeDefined();
+    expect(result.domainInference!.signals.length).toBeGreaterThan(0);
+  });
+
+  it("explain option generates explainability report", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"), { explain: true });
+    expect(result.explainability).toBeDefined();
+    expect(result.explainability!.lowestSpecificity).toBeDefined();
+    expect(result.explainability!.highestLift).toBeDefined();
+    expect(result.explainability!.safetyLeaks).toBeDefined();
+    expect(result.explainability!.domainSuppressions).toBeDefined();
+  });
+
+  it("composites include confidence values", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const ca = getComposite(result, "consumerApi");
+    expect(ca!.confidence).toBeDefined();
+    expect(ca!.confidence).toBeGreaterThan(0);
+    expect(ca!.confidence).toBeLessThanOrEqual(1);
+  });
+
+  it("api-specificity dimension includes confidence signals", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const spec = getDimension(result, "apiSpecificity");
+    expect(spec!.confidenceSignals).toBeDefined();
+    expect(spec!.confidenceSignals!.length).toBeGreaterThan(0);
+    expect(spec!.confidenceSignals![0]!.source).toBe("sample-coverage");
+  });
+
+  it("validation-style fixture has domain inference", () => {
+    const result = analyzeProject(resolve(fixturesDir, "validation-style"));
+    expect(result.domainInference).toBeDefined();
+    // Validation detection needs package name or strong unknown-param signal
+    // In source mode with emit, the type flags may differ
+    expect(result.domainInference!.domain).toBeDefined();
+  });
+
+  it("namespace-export fixture has namespace declarations", () => {
+    const result = analyzeProject(resolve(fixturesDir, "namespace-export"));
+    expect(result.filesAnalyzed).toBeGreaterThan(0);
+    const spec = getDimension(result, "apiSpecificity");
+    expect(spec).toBeDefined();
+    expect(spec!.enabled).toBe(true);
+  });
+
+  it("all composites have valid grades", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    for (const composite of result.composites) {
+      expect(["A+", "A", "B", "C", "D", "F", "N/A"]).toContain(composite.grade);
+    }
+  });
+
+  it("surface consistency dimension is present", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const consistency = getDimension(result, "surfaceConsistency");
+    expect(consistency).toBeDefined();
+    expect(consistency!.enabled).toBe(true);
+    expect(consistency!.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it("surface complexity dimension is present", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const complexity = getDimension(result, "surfaceComplexity");
+    expect(complexity).toBeDefined();
+    expect(complexity!.enabled).toBe(true);
+    expect(complexity!.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it("agent usability dimension is present", () => {
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+    const agentUsability = getDimension(result, "agentUsability");
+    expect(agentUsability).toBeDefined();
+    expect(agentUsability!.enabled).toBe(true);
+    expect(agentUsability!.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it("low-precision fixture has api-safety errors", () => {
+    const result = analyzeProject(resolve(fixturesDir, "low-precision"));
+    const safety = getDimension(result, "apiSafety");
+    expect(safety).toBeDefined();
+    expect(safety!.score).toBeLessThan(100);
+  });
+
+  it("unsound fixture has implementation quality below consumer API", () => {
+    const result = analyzeProject(resolve(fixturesDir, "unsound"));
+    const ca = getComposite(result, "consumerApi");
+    const impl = getComposite(result, "implementationQuality");
+    expect(impl).toBeDefined();
+    expect(impl!.score).toBeLessThan(ca!.score!);
   });
 });

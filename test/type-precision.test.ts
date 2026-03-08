@@ -68,11 +68,21 @@ describe(analyzePrecision, () => {
     expect(result.score).toBe(70);
   });
 
-  it("scores constrained generics as 65", () => {
+  it("scores constrained generics with basic constraint as 62", () => {
     const result = analyzePrecision(
       getParamType("function test<T extends string>(x: T): T { return x; }", "test"),
     );
-    expect(result.score).toBe(65);
+    expect(result.score).toBe(62);
+    expect(result.features).toContain("constrained-generic");
+    expect(result.features).toContain("constraint-basic");
+  });
+
+  it("scores constrained generics with strong constraint as 70", () => {
+    const result = analyzePrecision(
+      getParamType("interface Opts { x: number }\nfunction test<T extends Opts>(x: T): T { return x; }", "test"),
+    );
+    expect(result.score).toBe(70);
+    expect(result.features).toContain("constraint-strong");
   });
 
   it("scores unconstrained generics as 35", () => {

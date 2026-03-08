@@ -139,12 +139,14 @@ function computePrecision(
   if (type.isTypeParameter()) {
     const constraint = type.getConstraint();
     if (constraint && !(constraint.getFlags() & TypeFlags.Unknown)) {
+      const constraintLevel = classifyConstraint(constraint);
       return {
         containsAny: false,
         containsUnknown: false,
-        features: ["constrained-generic"],
-        reasons: ["constrained generic"],
-        score: 65,
+        featureCounts: { [constraintLevel.feature]: 1 },
+        features: ["constrained-generic", constraintLevel.feature],
+        reasons: [`constrained generic (${constraintLevel.level})`],
+        score: constraintLevel.score,
       };
     }
     return {
@@ -653,6 +655,45 @@ export function isDiscriminatedUnion(members: Type[]): boolean {
     }
   }
   return false;
+}
+
+function classifyConstraint(constraint: Type): { level: string; feature: string; score: number } {
+  const flags = constraint.getFlags();
+
+  // Strong: extends a concrete named type (e.g., `<T extends SomeInterface>`)
+  if (constraint.isObject() || constraint.isInterface()) {
+    const props = constraint.getProperties();
+    if (props.length > 0) {
+      return { feature: "constraint-strong", level: "strong", score: 70 };
+    }
+  }
+
+  // Structural: extends `readonly unknown[]`, arrays, tuples
+  if (constraint.isArray() || constraint.isTuple()) {
+    return { feature: "constraint-structural", level: "structural", score: 68 };
+  }
+  const constraintText = constraint.getText();
+  if (constraintText.includes("readonly") && constraintText.includes("[]")) {
+    return { feature: "constraint-structural", level: "structural", score: 68 };
+  }
+
+  // Union/intersection constraints
+  if (constraint.isUnion() || constraint.isIntersection()) {
+    return { feature: "constraint-structural", level: "structural", score: 68 };
+  }
+
+  // Basic: extends a wide primitive like `object`, `string`, `number`
+  if (flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.Boolean | TypeFlags.BigInt)) {
+    return { feature: "constraint-basic", level: "basic", score: 62 };
+  }
+
+  // `object` constraint
+  if (constraintText === "object") {
+    return { feature: "constraint-basic", level: "basic", score: 62 };
+  }
+
+  // Default: some constraint but not classifiable as strong
+  return { feature: "constraint-basic", level: "basic", score: 65 };
 }
 
 function clamp(score: number): number {

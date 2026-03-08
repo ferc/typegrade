@@ -1,4 +1,4 @@
-import { renderDimensionTable, renderJson, renderReport } from "./utils/format.js";
+import { renderDimensionTable, renderExplainability, renderJson, renderReport } from "./utils/format.js";
 import type { AnalysisResult } from "./types.js";
 import { Command } from "commander";
 import { analyzeProject } from "./analyzer.js";
@@ -12,7 +12,7 @@ function getAgentReadinessScore(result: AnalysisResult): number {
 
 function outputResult(
   result: AnalysisResult,
-  opts: { json?: boolean; verbose?: boolean; minScore?: number; color?: boolean },
+  opts: { json?: boolean; verbose?: boolean; explain?: boolean; minScore?: number; color?: boolean },
 ) {
   if (opts.color === false) {
     pc.isColorSupported = false;
@@ -24,6 +24,9 @@ function outputResult(
     console.log(renderReport(result));
     if (opts.verbose) {
       console.log(renderDimensionTable(result.dimensions));
+    }
+    if (opts.explain) {
+      console.log(renderExplainability(result));
     }
   }
 
@@ -44,6 +47,7 @@ export function run() {
     .option("--json", "Output as JSON")
     .option("--min-score <n>", "Exit code 1 if score < n (CI gate)", parseInt)
     .option("--verbose", "Show per-dimension breakdown")
+    .option("--explain", "Show explainability report")
     .option("--no-color", "Disable colors");
 
   program
@@ -52,11 +56,12 @@ export function run() {
     .option("--json", "Output as JSON")
     .option("--min-score <n>", "Exit code 1 if score < n (CI gate)", parseInt)
     .option("--verbose", "Show per-dimension breakdown")
+    .option("--explain", "Show explainability report")
     .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const projectPath = path ?? ".";
-      const result = analyzeProject(projectPath);
+      const result = analyzeProject(projectPath, { explain: Boolean(opts.explain) });
       outputResult(result, opts);
     });
 
@@ -65,6 +70,7 @@ export function run() {
     .description("Score an npm package or local package path")
     .option("--json", "Output as JSON")
     .option("--verbose", "Show per-dimension breakdown")
+    .option("--explain", "Show explainability report")
     .action((pkg: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };

@@ -61,8 +61,15 @@ function computeComposite(
 
 function computeConfidence(contributing: DimensionResult[]): number {
   if (contributing.length === 0) {return 0;}
-  const sum = contributing.reduce((acc, dim) => acc + (dim.confidence ?? 0.8), 0);
-  return Math.round((sum / contributing.length) * 100) / 100;
+
+  // Use minimum-signal logic: composite confidence = min(dimension confidences)
+  let minConfidence = 1;
+  for (const dim of contributing) {
+    const dimConfidence = dim.confidence ?? 0.8;
+    minConfidence = Math.min(minConfidence, dimConfidence);
+  }
+
+  return Math.round(minConfidence * 100) / 100;
 }
 
 function computeAgentReadiness(

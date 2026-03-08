@@ -1,10 +1,12 @@
 import type {
   ClassDeclaration,
   EnumDeclaration,
+  ExportDeclaration,
   FunctionDeclaration,
   InterfaceDeclaration,
   MethodDeclaration,
   MethodSignature,
+  ModuleDeclaration,
   Node,
   SourceFile,
   Type,
@@ -26,47 +28,158 @@ import type {
 
 export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
   const declarations: SurfaceDeclaration[] = [];
+  const visited = new Set<string>(); // Track resolved re-export files to prevent circularity
 
   for (const sf of sourceFiles) {
-    const filePath = sf.getFilePath();
+    visited.add(sf.getFilePath());
+  }
 
-    for (const fn of sf.getFunctions()) {
-      if (!fn.isExported()) {continue;}
-      declarations.push(extractFunction(fn, filePath));
-    }
+  for (const sf of sourceFiles) {
+    extractFromSourceFile(sf, declarations);
 
-    for (const iface of sf.getInterfaces()) {
-      if (!iface.isExported()) {continue;}
-      declarations.push(extractInterface(iface, filePath));
-    }
-
-    for (const alias of sf.getTypeAliases()) {
-      if (!alias.isExported()) {continue;}
-      declarations.push(extractTypeAlias(alias, filePath));
-    }
-
-    for (const cls of sf.getClasses()) {
-      if (!cls.isExported()) {continue;}
-      declarations.push(extractClass(cls, filePath));
-    }
-
-    for (const en of sf.getEnums()) {
-      if (!en.isExported()) {continue;}
-      declarations.push(extractEnum(en, filePath));
-    }
-
-    for (const varStmt of sf.getVariableStatements()) {
-      if (!varStmt.isExported()) {continue;}
-      for (const decl of varStmt.getDeclarations()) {
-        declarations.push(extractVariable(decl, varStmt, filePath));
+    // Handle `export *` re-exports — resolve target and merge declarations
+    for (const exportDecl of sf.getExportDeclarations()) {
+      if (exportDecl.isNamespaceExport() || (!exportDecl.getNamedExports().length && !exportDecl.getModuleSpecifier())) {
+        const resolved = resolveReExportTarget(exportDecl);
+        if (resolved && !visited.has(resolved.getFilePath())) {
+          visited.add(resolved.getFilePath());
+          extractFromSourceFile(resolved, declarations);
+        }
       }
+    }
+
+    // Handle namespace exports
+    for (const mod of sf.getModules()) {
+      if (!mod.isExported()) {continue;}
+      extractNamespaceExports(mod, sf.getFilePath(), declarations);
     }
   }
 
-  const positions = declarations.flatMap((d) => d.positions);
-  const stats = computeStats(declarations);
+  // Deduplicate merged declarations (same name from multiple declaration sources)
+  const deduped = deduplicateMergedDeclarations(declarations);
 
-  return { declarations, positions, stats };
+  const positions = deduped.flatMap((d) => d.positions);
+  const stats = computeStats(deduped);
+
+  return { declarations: deduped, positions, stats };
+}
+
+function extractFromSourceFile(sf: SourceFile, declarations: SurfaceDeclaration[]): void {
+  const filePath = sf.getFilePath();
+
+  for (const fn of sf.getFunctions()) {
+    if (!fn.isExported()) {continue;}
+    declarations.push(extractFunction(fn, filePath));
+  }
+
+  for (const iface of sf.getInterfaces()) {
+    if (!iface.isExported()) {continue;}
+    declarations.push(extractInterface(iface, filePath));
+  }
+
+  for (const alias of sf.getTypeAliases()) {
+    if (!alias.isExported()) {continue;}
+    declarations.push(extractTypeAlias(alias, filePath));
+  }
+
+  for (const cls of sf.getClasses()) {
+    if (!cls.isExported()) {continue;}
+    declarations.push(extractClass(cls, filePath));
+  }
+
+  for (const en of sf.getEnums()) {
+    if (!en.isExported()) {continue;}
+    declarations.push(extractEnum(en, filePath));
+  }
+
+  for (const varStmt of sf.getVariableStatements()) {
+    if (!varStmt.isExported()) {continue;}
+    for (const decl of varStmt.getDeclarations()) {
+      declarations.push(extractVariable(decl, varStmt, filePath));
+    }
+  }
+}
+
+function resolveReExportTarget(exportDecl: ExportDeclaration): SourceFile | undefined {
+  try {
+    const moduleSpecifier = exportDecl.getModuleSpecifierSourceFile();
+    return moduleSpecifier ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractNamespaceExports(mod: ModuleDeclaration, filePath: string, declarations: SurfaceDeclaration[]): void {
+  const body = mod.getBody();
+  if (!body) {return;}
+  const nsName = mod.getName().replace(/["']/g, "");
+
+  // Extract functions from namespace
+  for (const fn of body.getFunctions?.() ?? []) {
+    if (!fn.isExported()) {continue;}
+    const decl = extractFunction(fn, filePath);
+    decl.name = `${nsName}.${decl.name}`;
+    for (const pos of decl.positions) {
+      pos.declarationName = decl.name;
+    }
+    declarations.push(decl);
+  }
+
+  // Extract interfaces from namespace
+  for (const iface of body.getInterfaces?.() ?? []) {
+    if (!iface.isExported()) {continue;}
+    const decl = extractInterface(iface, filePath);
+    decl.name = `${nsName}.${decl.name}`;
+    for (const pos of decl.positions) {
+      pos.declarationName = decl.name;
+    }
+    declarations.push(decl);
+  }
+
+  // Extract type aliases from namespace
+  for (const alias of body.getTypeAliases?.() ?? []) {
+    if (!alias.isExported()) {continue;}
+    const decl = extractTypeAlias(alias, filePath);
+    decl.name = `${nsName}.${decl.name}`;
+    for (const pos of decl.positions) {
+      pos.declarationName = decl.name;
+    }
+    declarations.push(decl);
+  }
+}
+
+function deduplicateMergedDeclarations(declarations: SurfaceDeclaration[]): SurfaceDeclaration[] {
+  const seen = new Map<string, SurfaceDeclaration>();
+  const result: SurfaceDeclaration[] = [];
+
+  for (const decl of declarations) {
+    const key = `${decl.kind}:${decl.name}`;
+    const existing = seen.get(key);
+    if (existing) {
+      // Merge positions and methods from duplicate declaration
+      for (const pos of decl.positions) {
+        const isDuplicate = existing.positions.some(
+          (ep) => ep.name === pos.name && ep.role === pos.role && ep.filePath === pos.filePath && ep.line === pos.line,
+        );
+        if (!isDuplicate) {
+          existing.positions.push(pos);
+        }
+      }
+      if (decl.methods) {
+        existing.methods = existing.methods ?? [];
+        for (const method of decl.methods) {
+          if (!existing.methods.some((m) => m.name === method.name)) {
+            existing.methods.push(method);
+          }
+        }
+      }
+    } else {
+      seen.set(key, decl);
+      result.push(decl);
+    }
+  }
+
+  return result;
 }
 
 // --- Helpers ---
@@ -178,6 +291,50 @@ function extractInterface(iface: InterfaceDeclaration, filePath: string): Surfac
 
   for (const prop of iface.getProperties()) {
     positions.push(makePosition(prop, "property", prop.getName(), name, "interface", filePath, 0.75));
+  }
+
+  // Index signatures: e.g., [key: string]: ValueType
+  for (const indexSig of iface.getIndexSignatures()) {
+    const loc = nodeLocation(indexSig);
+    const returnType = indexSig.getReturnType();
+    const returnTypeNode = indexSig.getReturnTypeNode();
+    positions.push({
+      column: loc.column,
+      declarationKind: "interface",
+      declarationName: name,
+      filePath,
+      line: loc.line,
+      name: "[index]",
+      node: indexSig,
+      role: "index-sig",
+      type: returnType,
+      typeNode: returnTypeNode,
+      weight: 0.75,
+    });
+  }
+
+  // Call signatures: e.g., (arg: string): number
+  for (const callSig of iface.getCallSignatures()) {
+    for (const param of callSig.getParameters()) {
+      positions.push(makePosition(param, "param", param.getName(), `${name}()`, "interface", filePath, 1.0));
+    }
+    positions.push(
+      makeReturnPosition(callSig, callSig.getReturnType(), callSig.getReturnTypeNode(), `${name}()`, "interface", filePath, 1.25),
+    );
+    // Override role to call-sig for the return position
+    positions[positions.length - 1]!.role = "call-sig";
+  }
+
+  // Construct signatures: e.g., new (arg: string): Instance
+  for (const ctorSig of iface.getConstructSignatures()) {
+    for (const param of ctorSig.getParameters()) {
+      positions.push(makePosition(param, "param", param.getName(), `new ${name}()`, "interface", filePath, 1.0));
+    }
+    positions.push(
+      makeReturnPosition(ctorSig, ctorSig.getReturnType(), ctorSig.getReturnTypeNode(), `new ${name}()`, "interface", filePath, 1.25),
+    );
+    // Override role to construct-sig for the return position
+    positions[positions.length - 1]!.role = "construct-sig";
   }
 
   const methods: SurfaceMethod[] = [];

@@ -12,7 +12,7 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "apiSpecificity",
     label: "API Specificity",
     sourceOnly: false,
-    weights: { consumerApi: 0.4 },
+    weights: { consumerApi: 0.35 },
   },
   {
     key: "apiSafety",
@@ -30,13 +30,25 @@ export const DIMENSION_CONFIGS: DimensionWeightConfig[] = [
     key: "publishQuality",
     label: "Publish Quality",
     sourceOnly: false,
-    weights: { consumerApi: 0.1 },
+    weights: { consumerApi: 0.08 },
   },
   {
-    key: "surfaceCoherence",
-    label: "Surface Coherence",
+    key: "surfaceConsistency",
+    label: "Surface Consistency",
     sourceOnly: false,
     weights: { consumerApi: 0.05 },
+  },
+  {
+    key: "surfaceComplexity",
+    label: "Surface Complexity",
+    sourceOnly: false,
+    weights: { consumerApi: 0.05 },
+  },
+  {
+    key: "agentUsability",
+    label: "Agent Usability",
+    sourceOnly: false,
+    weights: { consumerApi: 0.02 },
   },
   {
     key: "declarationFidelity",
@@ -99,6 +111,10 @@ export const VALIDATION_LIBRARIES = [
 ];
 
 export const DOMAIN_PATTERNS = {
+  frontend: ["react", "preact", "vue", "svelte", "solid-js", "@angular/core"],
+  orm: ["drizzle-orm", "prisma", "typeorm", "sequelize", "knex", "mikro-orm", "kysely"],
   result: ["neverthrow", "effect", "fp-ts", "purify-ts", "oxide.ts"],
+  router: ["express", "fastify", "hono", "koa", "hapi", "restify", "react-router", "@trpc/server"],
+  schema: ["type-fest", "ts-toolbelt", "utility-types", "type-zoo"],
   validation: ["zod", "valibot", "arktype", "io-ts", "yup", "joi", "superstruct", "runtypes", "typia", "@effect/schema"],
 } as const;

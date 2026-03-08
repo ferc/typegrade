@@ -11,6 +11,12 @@ export interface CompositeScore {
 
 export type Grade = "A+" | "A" | "B" | "C" | "D" | "F" | "N/A";
 
+export interface ConfidenceSignal {
+  source: string;
+  value: number;
+  reason: string;
+}
+
 export interface DimensionResult {
   key: string;
   label: string;
@@ -23,6 +29,7 @@ export interface DimensionResult {
   issues: Issue[];
   applicabilityReason?: string;
   confidence?: number;
+  confidenceSignals?: ConfidenceSignal[];
 }
 
 export interface Issue {
@@ -45,6 +52,9 @@ export interface AnalysisResult {
   caveats: string[];
   topIssues: Issue[];
   domainInference?: { domain: string; confidence: number; signals: string[] };
+  graphStats?: import("./graph/types.js").GraphStats;
+  dedupStats?: { groups: number; filesRemoved: number };
+  explainability?: ExplainabilityReport;
 }
 
 export interface PrecisionFeatures {
@@ -53,6 +63,24 @@ export interface PrecisionFeatures {
   containsUnknown: boolean;
   features: string[];
   reasons: string[];
+  /** Per-feature counts for density calculation */
+  featureCounts?: Record<string, number>;
+}
+
+export interface ExplainabilityEntry {
+  name: string;
+  score: number;
+  file?: string;
+  line?: number;
+  features?: string[];
+  reason?: string;
+}
+
+export interface ExplainabilityReport {
+  lowestSpecificity: ExplainabilityEntry[];
+  highestLift: ExplainabilityEntry[];
+  safetyLeaks: ExplainabilityEntry[];
+  domainSuppressions: Array<{ name: string; reason: string }>;
 }
 
 export interface PackageAnalysisContext {

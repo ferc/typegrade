@@ -7,6 +7,67 @@ import { tmpdir } from "node:os";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
 import { loadProject } from "./utils/project-loader.js";
 
+function scoreLocalPackage(localPath: string, pkgJsonPath: string): AnalysisResult {
+  const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+  const packageName = pkgJson.name ?? "local-package";
+
+  // Check if there are declaration entry fields
+  const hasTypeEntries = Boolean(pkgJson.types || pkgJson.typings || pkgJson.exports);
+
+  if (!hasTypeEntries) {
+    // No type entrypoints — fall back to analyzing all files
+    return analyzeProject(localPath, {
+      mode: "package",
+      packageContext: {
+        packageJsonPath: pkgJsonPath,
+        packageName,
+        packageRoot: localPath,
+        typesEntrypoint: null,
+      },
+      sourceFilesOptions: { includeDts: true, includeNodeModules: true },
+    });
+  }
+
+  // Write broad tsconfig for ts-morph resolution
+  const tsconfigPath = join(localPath, "tsconfig.json");
+  const hadTsconfig = existsSync(tsconfigPath);
+  let originalTsconfig: string | undefined;
+
+  if (hadTsconfig) {
+    originalTsconfig = readFileSync(tsconfigPath, "utf8");
+  }
+
+  // Build declaration graph using the package's own structure
+  const graphProject = loadProject(localPath);
+  const graph = buildDeclarationGraph(localPath, graphProject);
+
+  let fileFilter: Set<string> | undefined;
+  let graphUsed = false;
+
+  if (graph.filesToAnalyze.length > 0) {
+    fileFilter = new Set(graph.filesToAnalyze);
+    graphUsed = true;
+  }
+
+  const entrypoints = resolveEntrypoints(localPath);
+  const packageContext: PackageAnalysisContext = {
+    graphStats: graphUsed ? graph.stats : undefined,
+    packageJsonPath: pkgJsonPath,
+    packageName,
+    packageRoot: localPath,
+    typesEntrypoint: entrypoints[0]?.filePath
+      ? entrypoints[0].filePath.replace(localPath + "/", "")
+      : null,
+  };
+
+  return analyzeProject(localPath, {
+    fileFilter,
+    mode: "package",
+    packageContext,
+    sourceFilesOptions: { includeDts: true, includeNodeModules: true },
+  });
+}
+
 function parsePackageSpec(spec: string): { name: string; version: string } {
   // Handle scoped packages: @scope/pkg@1.0.0
   if (spec.startsWith("@")) {
@@ -38,7 +99,15 @@ export interface ScorePackageOptions {
 export function scorePackage(nameOrPath: string, options?: ScorePackageOptions): AnalysisResult {
   // Local path — analyze directly, including .d.ts files
   if (nameOrPath.startsWith(".") || nameOrPath.startsWith("/") || existsSync(nameOrPath)) {
-    return analyzeProject(resolve(nameOrPath), {
+    const localPath = resolve(nameOrPath);
+    const localPkgJsonPath = join(localPath, "package.json");
+
+    // If local path has a package.json, use declaration graph for proper entrypoint resolution
+    if (existsSync(localPkgJsonPath)) {
+      return scoreLocalPackage(localPath, localPkgJsonPath);
+    }
+
+    return analyzeProject(localPath, {
       mode: "package",
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });

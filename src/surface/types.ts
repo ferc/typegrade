@@ -10,7 +10,10 @@ export type PositionRole =
   | "enum"
   | "getter"
   | "setter-param"
-  | "ctor-param";
+  | "ctor-param"
+  | "index-sig"
+  | "call-sig"
+  | "construct-sig";
 
 export type SurfaceDeclarationKind =
   | "function"

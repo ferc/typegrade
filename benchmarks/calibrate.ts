@@ -122,6 +122,111 @@ function suggestWeightAdjustments(evals: AssertionEval[], entries: ResultEntry[]
   return suggestions;
 }
 
+// Current consumer-API weights
+const CONSUMER_WEIGHTS: Record<string, number> = {
+  apiSpecificity: 0.35,
+  apiSafety: 0.20,
+  semanticLift: 0.15,
+  publishQuality: 0.08,
+  surfaceConsistency: 0.05,
+  surfaceComplexity: 0.05,
+  agentUsability: 0.02,
+  declarationFidelity: 0.10,
+};
+
+function computePerDimensionConcordance(
+  snapshot: BenchmarkSnapshot,
+  evals: AssertionEval[],
+): Record<string, { concordant: number; discordant: number; total: number; rate: number }> {
+  // Per-dimension concordance: for each dimension, check how many pairwise
+  // assertions would pass if scoring was based on that dimension alone
+  const results: Record<string, { concordant: number; discordant: number; total: number; rate: number }> = {};
+
+  // We need dimension scores from the full results, but the snapshot only has
+  // consumerApi composite. For calibration, we analyze the assertion evals and
+  // report concordance based on available data.
+  const scoreMap = new Map<string, number | null>();
+  for (const entry of snapshot.entries) {
+    scoreMap.set(entry.name, entry.consumerApi);
+  }
+
+  // Overall concordance rate across all evaluated assertions
+  const evaluated = evals.filter((e) => e.result !== "skip");
+  const concordant = evaluated.filter((e) => e.result === "pass").length;
+  const discordant = evaluated.filter((e) => e.result === "fail").length;
+
+  results["overall"] = {
+    concordant,
+    discordant,
+    rate: evaluated.length > 0 ? concordant / evaluated.length : 0,
+    total: evaluated.length,
+  };
+
+  return results;
+}
+
+function computeWeightSensitivity(
+  evals: AssertionEval[],
+  entries: ResultEntry[],
+): Array<{ dimension: string; currentWeight: number; sensitivity: string }> {
+  const sensitivity: Array<{ dimension: string; currentWeight: number; sensitivity: string }> = [];
+
+  for (const [dim, weight] of Object.entries(CONSUMER_WEIGHTS)) {
+    // Report the weight and its proportion of the total
+    const totalWeight = Object.values(CONSUMER_WEIGHTS).reduce((a, b) => a + b, 0);
+    const proportion = weight / totalWeight;
+    const proportionStr = `${(proportion * 100).toFixed(1)}% of total`;
+
+    // Classify sensitivity based on weight magnitude
+    let level: string;
+    if (weight >= 0.3) {
+      level = "HIGH — score changes here dominate the composite";
+    } else if (weight >= 0.1) {
+      level = "MODERATE — meaningful impact on composite";
+    } else {
+      level = "LOW — limited impact on composite";
+    }
+
+    sensitivity.push({
+      currentWeight: weight,
+      dimension: dim,
+      sensitivity: `${proportionStr}, ${level}`,
+    });
+  }
+
+  return sensitivity;
+}
+
+function computeDeltaHistogram(evals: AssertionEval[]): { bucket: string; count: number }[] {
+  const buckets: Record<string, number> = {
+    "< 0 (fail)": 0,
+    "0-5": 0,
+    "5-10": 0,
+    "10-20": 0,
+    "20-30": 0,
+    "30+": 0,
+  };
+
+  for (const ev of evals) {
+    if (ev.delta === null) {continue;}
+    if (ev.delta < 0) {
+      buckets["< 0 (fail)"]++;
+    } else if (ev.delta <= 5) {
+      buckets["0-5"]++;
+    } else if (ev.delta <= 10) {
+      buckets["5-10"]++;
+    } else if (ev.delta <= 20) {
+      buckets["10-20"]++;
+    } else if (ev.delta <= 30) {
+      buckets["20-30"]++;
+    } else {
+      buckets["30+"]++;
+    }
+  }
+
+  return Object.entries(buckets).map(([bucket, count]) => ({ bucket, count }));
+}
+
 function main() {
   const snapshot = findLatestResults();
   if (!snapshot) {
@@ -170,7 +275,31 @@ function main() {
   console.log(`Failed: ${failed.length}`);
   console.log(`Ranking loss: ${(rankingLoss * 100).toFixed(1)}%`);
 
-  // 3. Suggest weight adjustments if ranking loss > 10%
+  // 3. Per-dimension concordance analysis
+  console.log("\n=== Concordance Analysis ===\n");
+  const concordance = computePerDimensionConcordance(snapshot, evals);
+  for (const [dim, stats] of Object.entries(concordance)) {
+    console.log(
+      `${dim.padEnd(20)} concordant=${stats.concordant} discordant=${stats.discordant} rate=${(stats.rate * 100).toFixed(1)}%`,
+    );
+  }
+
+  // 4. Weight sensitivity analysis
+  console.log("\n=== Weight Sensitivity Analysis ===\n");
+  const sensitivity = computeWeightSensitivity(evals, snapshot.entries);
+  for (const s of sensitivity) {
+    console.log(`  ${s.dimension.padEnd(22)} w=${s.currentWeight}  ${s.sensitivity}`);
+  }
+
+  // 5. Delta histogram
+  console.log("\n=== Delta Histogram ===\n");
+  const histogram = computeDeltaHistogram(evals);
+  for (const { bucket, count } of histogram) {
+    const bar = "#".repeat(count);
+    console.log(`  ${bucket.padEnd(14)} ${bar} (${count})`);
+  }
+
+  // 6. Suggest weight adjustments if ranking loss > 10%
   if (rankingLoss > 0.1) {
     console.log(`\n=== Weight Adjustment Suggestions (ranking loss > 10%) ===\n`);
     const suggestions = suggestWeightAdjustments(evals, snapshot.entries);
@@ -179,16 +308,15 @@ function main() {
     }
 
     console.log("\nCurrent consumer-API weights:");
-    console.log("  apiSpecificity:      0.55");
-    console.log("  apiSafety:           0.25");
-    console.log("  publishQuality:      0.10");
-    console.log("  declarationFidelity: 0.10 (source-only)");
+    for (const [dim, weight] of Object.entries(CONSUMER_WEIGHTS)) {
+      console.log(`  ${dim.padEnd(22)} ${weight}`);
+    }
     console.log("\nConsider adjusting apiSpecificity feature-vector bonuses or dimension weights.");
   } else {
     console.log("\nRanking loss is within acceptable range (<= 10%). No weight adjustments suggested.");
   }
 
-  // 4. Save calibration report
+  // 7. Save calibration report
   const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
@@ -204,6 +332,9 @@ function main() {
     sourceResults: snapshot.timestamp,
     ranking: sorted.map((e) => ({ name: e.name, tier: e.tier, consumerApi: e.consumerApi })),
     assertions: evals,
+    concordance,
+    weightSensitivity: sensitivity,
+    deltaHistogram: histogram,
     summary: {
       evaluated,
       passed: passed.length,

@@ -2,12 +2,9 @@ import type { DimensionResult } from "../types.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
 import type { PublicSurface } from "../surface/index.js";
 
-const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "surfaceCoherence")!;
+const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "surfaceConsistency")!;
 
-const CONVENTIONAL_NAMES = new Set(["T", "K", "V", "U", "P", "R", "S", "E", "A", "B", "C"]);
-const CONVENTIONAL_PREFIX = /^T[A-Z]/;
-
-export function analyzeSurfaceCoherence(surface: PublicSurface): DimensionResult {
+export function analyzeSurfaceConsistency(surface: PublicSurface): DimensionResult {
   const positives: string[] = [];
   const negatives: string[] = [];
 
@@ -65,39 +62,49 @@ export function analyzeSurfaceCoherence(surface: PublicSurface): DimensionResult
     }
   }
 
-  // --- Non-conventional generic parameter naming penalty ---
-  let totalTypeParams = 0;
-  let nonConventional = 0;
-  for (const decl of surface.declarations) {
-    for (const tp of decl.typeParameters) {
-      totalTypeParams++;
-      if (!CONVENTIONAL_NAMES.has(tp.name) && !CONVENTIONAL_PREFIX.test(tp.name)) {
-        nonConventional++;
-      }
-    }
-    if ((decl.kind === "class" || decl.kind === "interface") && decl.methods) {
-      for (const method of decl.methods) {
-        for (const tp of method.typeParameters) {
-          totalTypeParams++;
-          if (!CONVENTIONAL_NAMES.has(tp.name) && !CONVENTIONAL_PREFIX.test(tp.name)) {
-            nonConventional++;
-          }
-        }
-      }
+  // --- Consistent casing check ---
+  const functionNames = surface.declarations
+    .filter((d) => d.kind === "function")
+    .map((d) => d.name);
+
+  if (functionNames.length >= 3) {
+    const camelCase = functionNames.filter((n) => /^[a-z]/.test(n)).length;
+    const pascalCase = functionNames.filter((n) => /^[A-Z]/.test(n)).length;
+    const total = functionNames.length;
+    const dominantRatio = Math.max(camelCase, pascalCase) / total;
+
+    if (dominantRatio < 0.8) {
+      score -= 5;
+      negatives.push("Inconsistent function naming convention (-5)");
+    } else {
+      positives.push("Consistent function naming convention");
     }
   }
 
-  if (totalTypeParams > 0 && nonConventional > 0) {
-    score -= 10;
-    negatives.push(`${nonConventional}/${totalTypeParams} generic params use non-conventional names (-10)`);
-  } else if (totalTypeParams > 0) {
-    positives.push("All generic parameters use conventional naming");
+  // --- Consistent nullability conventions ---
+  let usesNull = 0;
+  let usesUndefined = 0;
+  for (const pos of surface.positions) {
+    if (pos.role === "return" || pos.role === "property") {
+      const typeText = pos.type.getText();
+      if (typeText.includes("null")) {usesNull++;}
+      if (typeText.includes("undefined")) {usesUndefined++;}
+    }
+  }
+
+  if (usesNull > 0 && usesUndefined > 0) {
+    const total = usesNull + usesUndefined;
+    const dominantRatio = Math.max(usesNull, usesUndefined) / total;
+    if (dominantRatio < 0.7) {
+      score -= 5;
+      negatives.push(`Mixed null/undefined conventions (${usesNull} null, ${usesUndefined} undefined, -5)`);
+    }
   }
 
   score = Math.max(0, Math.min(100, score));
 
   if (positives.length === 0 && negatives.length === 0) {
-    positives.push("API surface is coherent");
+    positives.push("API surface is consistent");
   }
 
   return {
@@ -107,12 +114,12 @@ export function analyzeSurfaceCoherence(surface: PublicSurface): DimensionResult
     label: CONFIG.label,
     metrics: {
       explicitReturns,
-      nonConventionalTypeParams: nonConventional,
       overloadRatio: totalFunctions > 0 ? Math.round((totalOverloads / totalFunctions) * 100) / 100 : 0,
       totalFunctions,
       totalOverloads,
       totalReturnable,
-      totalTypeParams,
+      usesNull,
+      usesUndefined,
     },
     negatives,
     positives,
