@@ -129,6 +129,7 @@ export const VALIDATION_LIBRARIES = [
   "runtypes",
   "typia",
   "@effect/schema",
+  "decoders",
 ];
 
 export const DOMAIN_PATTERNS = {
@@ -181,6 +182,7 @@ export const DOMAIN_PATTERNS = {
     "runtypes",
     "typia",
     "@effect/schema",
+    "decoders",
   ],
 } as const;
 

@@ -995,3 +995,74 @@ export const ROUTER_PACK: ScenarioPack = {
     linkTargetCorrectness,
   ],
 };
+
+// ---------------------------------------------------------------------------
+// Server-router variant
+// ---------------------------------------------------------------------------
+
+/** Server-router focuses on handler context, request/response typing, middleware chaining */
+export const ROUTER_SERVER_PACK: ScenarioPack = {
+  description:
+    "Tests server-side router libraries for handler context, request/response typing, middleware chaining, and route declaration",
+  domain: "router",
+  isApplicable: (surface) => {
+    const serverNames = [
+      "handler",
+      "middleware",
+      "request",
+      "response",
+      "listen",
+      "createserver",
+      "createapp",
+      "use",
+    ];
+    const matchCount = surface.declarations.filter((decl) =>
+      serverNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 3,
+      reason:
+        matchCount >= 3
+          ? `${matchCount} server-router declarations found`
+          : "Insufficient server-router declarations",
+    };
+  },
+  name: "router-server",
+  scenarios: [pathParamInference, loaderResultPropagation, nestedRouteContext],
+  variant: "router-server",
+};
+
+// ---------------------------------------------------------------------------
+// Client-router variant
+// ---------------------------------------------------------------------------
+
+/** Client-router focuses on search params, link target correctness, route narrowing */
+export const ROUTER_CLIENT_PACK: ScenarioPack = {
+  description:
+    "Tests client-side router libraries for search params, link targets, route narrowing, and navigation",
+  domain: "router",
+  isApplicable: (surface) => {
+    const clientNames = [
+      "link",
+      "navigate",
+      "redirect",
+      "searchparams",
+      "outlet",
+      "loader",
+      "useparams",
+    ];
+    const matchCount = surface.declarations.filter((decl) =>
+      clientNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} client-router declarations found`
+          : "Insufficient client-router declarations",
+    };
+  },
+  name: "router-client",
+  scenarios: [searchParamInference, routeNarrowing, linkTargetCorrectness],
+  variant: "router-client",
+};

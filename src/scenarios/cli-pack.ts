@@ -595,3 +595,137 @@ export const CLI_PACK: ScenarioPack = {
     handlerContextTyping,
   ],
 };
+
+// ---------------------------------------------------------------------------
+// CLI builder variant (fluent builder pattern: commander, yargs, cac)
+// ---------------------------------------------------------------------------
+
+function isBuilderRelated(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("option") ||
+    lower.includes("command") ||
+    lower.includes("program") ||
+    lower.includes("version") ||
+    lower.includes("description") ||
+    lower.includes("help") ||
+    lower.includes("name") ||
+    lower.includes("usage")
+  );
+}
+
+/** Count builder method matches on a declaration (extracted to reduce nesting) */
+function countBuilderMethods(methods: readonly MethodLike[]): MethodStats {
+  return countMethodMatches(methods, isBuilderRelated);
+}
+
+const builderChainTyping: ScenarioTest = {
+  description: "Fluent builder chains should accumulate option types through method chaining",
+  evaluate: (surface: PublicSurface): ScenarioResult => {
+    let builderDecls = 0;
+    let chainMethods = 0;
+    let genericChains = 0;
+    let constrainedChains = 0;
+
+    for (const decl of surface.declarations) {
+      if (!isBuilderRelated(decl.name)) {
+        continue;
+      }
+      builderDecls++;
+      if (decl.methods) {
+        const ms = countBuilderMethods(decl.methods);
+        chainMethods += ms.matchCount;
+        genericChains += ms.genericCount;
+        constrainedChains += ms.constrainedCount;
+      }
+    }
+
+    let compileScore = 0;
+    if (genericChains > 0) {
+      compileScore = 40;
+    } else if (chainMethods >= 3) {
+      compileScore = 20;
+    } else if (builderDecls > 0) {
+      compileScore = 10;
+    }
+    const failureScore = Math.min(
+      25,
+      (constrainedChains > 0 ? 15 : 0) + (genericChains >= 2 ? 10 : 0),
+    );
+    const exactnessScore = Math.min(
+      25,
+      (genericChains >= 2 ? 12 : 0) + (constrainedChains > 0 ? 8 : 0) + (chainMethods >= 5 ? 5 : 0),
+    );
+    let wrongPathScore = 0;
+    if (chainMethods > 0 && genericChains > 0) {
+      wrongPathScore = 10;
+    } else if (chainMethods > 0) {
+      wrongPathScore = 5;
+    }
+    const score = Math.min(100, compileScore + failureScore + exactnessScore + wrongPathScore);
+    return makeResult({
+      name: "builderChainTyping",
+      passed: score >= 40,
+      reason:
+        score >= 40
+          ? `${genericChains} generic chains, ${constrainedChains} constrained, ${chainMethods} builder methods`
+          : "Builder chains lack type accumulation",
+      score,
+    });
+  },
+  name: "builderChainTyping",
+};
+
+export const CLI_BUILDER_PACK: ScenarioPack = {
+  description:
+    "Tests CLI builder libraries (commander, yargs) for fluent builder chains, option schemas, and parsed args",
+  domain: "cli",
+  isApplicable: (surface) => {
+    const builderNames = ["option", "command", "program", "version", "description", "help"];
+    let methodChainCount = 0;
+    for (const decl of surface.declarations) {
+      if (decl.methods) {
+        const matching = decl.methods.filter((method) =>
+          builderNames.some((nm) => method.name.toLowerCase().includes(nm)),
+        );
+        methodChainCount += matching.length;
+      }
+    }
+    return {
+      applicable: methodChainCount >= 3,
+      reason:
+        methodChainCount >= 3
+          ? `${methodChainCount} builder-pattern methods found`
+          : "Insufficient builder-pattern methods",
+    };
+  },
+  name: "cli-builder",
+  scenarios: [builderChainTyping, optionSchemaInference, parsedArgumentInference],
+  variant: "cli-builder",
+};
+
+// ---------------------------------------------------------------------------
+// CLI parser variant (minimist, arg, mri style: parse argv directly)
+// ---------------------------------------------------------------------------
+
+export const CLI_PARSER_PACK: ScenarioPack = {
+  description:
+    "Tests CLI parser libraries (arg, minimist) for parsed argument typing and option schemas",
+  domain: "cli",
+  isApplicable: (surface) => {
+    const parserNames = ["parse", "arg", "argv", "args", "parseargs", "minimist"];
+    const matchCount = surface.declarations.filter((decl) =>
+      parserNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 1,
+      reason:
+        matchCount >= 1
+          ? `${matchCount} CLI parser declarations found`
+          : "No CLI parser declarations found",
+    };
+  },
+  name: "cli-parser",
+  scenarios: [parsedArgumentInference, optionSchemaInference],
+  variant: "cli-parser",
+};

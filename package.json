@@ -48,6 +48,8 @@
     "benchmark:gate": "tsx benchmarks/gate.ts",
     "benchmark:report": "tsx benchmarks/calibrate.ts",
     "benchmark:shadow": "tsx benchmarks/shadow-latest.ts",
+    "benchmark:validate": "tsx benchmarks/run.ts --validate-manifest",
+    "benchmark:audit": "tsx benchmarks/run.ts --validate-manifest && pnpm benchmark:train && pnpm gate:train",
     "gate:train": "tsx benchmarks/gate.ts",
     "gate:eval": "tsx benchmarks/gate.ts --eval",
     "tune": "tsx benchmarks/tune.ts",

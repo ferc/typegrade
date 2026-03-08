@@ -170,11 +170,24 @@ function ensureCachedInstall(
     }),
   );
 
-  execSync("npm install --ignore-scripts --no-audit --no-fund", {
-    cwd: tmpDir,
-    stdio: "pipe",
-    timeout: 60_000,
-  });
+  try {
+    execSync("npm install --ignore-scripts --no-audit --no-fund", {
+      cwd: tmpDir,
+      stdio: "pipe",
+      timeout: 60_000,
+    });
+  } catch (error) {
+    // Clean up temp dir on install failure
+    try {
+      rmSync(tmpDir, { force: true, recursive: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Package install failed for ${packageName}@${packageVersion}: ${message}`, {
+      cause: error,
+    });
+  }
 
   const pkgDir = join(tmpDir, "node_modules", packageName);
   let typesPackageName: string | undefined = undefined;

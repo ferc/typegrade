@@ -105,6 +105,18 @@ export interface RedactedEvalSummary {
   gates: { gate: string; passed: boolean; detail: string }[];
   /** Overall pass/fail */
   allGatesPassed: boolean;
+  /** Concrete wrong-specific domain mismatch examples (redacted to family only) */
+  wrongSpecificExamples?: { family: string; expected: string; actual: string }[];
+  /** Concrete fallback-glob examples (redacted to family only) */
+  fallbackExamples?: { family: string; reason: string }[];
+  /** Concrete undersampled examples (redacted to family only) */
+  undersampledExamples?: { family: string; reasons: string[] }[];
+  /** Per-family score metrics (normalized) */
+  familyMetrics?: { family: string; meanScore: number; variance: number; count: number }[];
+  /** Normalized family variance (coefficient of variation across families) */
+  normalizedFamilyVariance?: number;
+  /** Install failures encountered during benchmarking */
+  installabilityFailures?: { family: string; error: string }[];
   /** Multi-seed aggregate metrics (present when multiple seeds available) */
   multiSeedMetrics?: {
     seedCount: number;

@@ -1,4 +1,4 @@
-import type { DomainKey, Grade, ScenarioResult, ScenarioScore } from "../types.js";
+import type { DomainKey, Grade, ScenarioResult, ScenarioScore, ScenarioVariant } from "../types.js";
 import type { PublicSurface } from "../surface/index.js";
 
 /** A single scenario test within a domain pack */
@@ -15,6 +15,8 @@ export interface ScenarioPack {
   name: string;
   description: string;
   scenarios: ScenarioTest[];
+  /** Scenario variant for subfamily selection */
+  variant?: ScenarioVariant;
   /** Optional applicability check — if provided, the pack will only run if this returns true */
   isApplicable?: (
     surface: PublicSurface,
@@ -75,6 +77,7 @@ export function evaluateScenarioPack(
     passedScenarios: passedCount,
     results,
     scenario: pack.name,
+    scenarioVariant: pack.variant,
     score: avgScore,
     totalScenarios: pack.scenarios.length,
   };

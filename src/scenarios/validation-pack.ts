@@ -760,3 +760,71 @@ export const VALIDATION_PACK: ScenarioPack = {
     parseGuardErgonomics,
   ],
 };
+
+// ---------------------------------------------------------------------------
+// Schema validation variant (zod, valibot, arktype style)
+// ---------------------------------------------------------------------------
+
+export const VALIDATION_SCHEMA_PACK: ScenarioPack = {
+  description:
+    "Tests schema-style validation libraries for unknown-to-typed flow, refinement pipelines, and discriminated unions",
+  domain: "validation",
+  isApplicable: (surface) => {
+    const schemaNames = [
+      "parse",
+      "safeparse",
+      "validate",
+      "check",
+      "coerce",
+      "schema",
+      "object",
+      "string",
+      "number",
+      "array",
+    ];
+    const matchCount = surface.declarations.filter((decl) =>
+      schemaNames.some((nm) => decl.name.toLowerCase() === nm),
+    ).length;
+    return {
+      applicable: matchCount >= 3,
+      reason:
+        matchCount >= 3
+          ? `${matchCount} schema validation declarations found`
+          : "Insufficient schema validation declarations",
+    };
+  },
+  name: "validation-schema",
+  scenarios: [
+    unknownToValidated,
+    refinementPipeline,
+    discriminatedComposition,
+    parseGuardErgonomics,
+  ],
+  variant: "validation-schema",
+};
+
+// ---------------------------------------------------------------------------
+// Decoder validation variant (decoders, io-ts style)
+// ---------------------------------------------------------------------------
+
+export const VALIDATION_DECODER_PACK: ScenarioPack = {
+  description:
+    "Tests decoder-style validation libraries for decode/guard patterns, type narrowing, and composition",
+  domain: "validation",
+  isApplicable: (surface) => {
+    const decoderNames = ["decode", "decoder", "guard", "verify", "runtype", "fromguard"];
+    const matchCount = surface.declarations.filter((decl) =>
+      decoderNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 2,
+      reason:
+        matchCount >= 2
+          ? `${matchCount} decoder validation declarations found`
+          : "Insufficient decoder validation declarations",
+    };
+  },
+  name: "validation-decoder",
+  scenarios: [unknownToValidated, refinementPipeline, parseGuardErgonomics],
+  variant: "validation-decoder",
+};

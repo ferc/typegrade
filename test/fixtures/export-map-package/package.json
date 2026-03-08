@@ -1,0 +1,13 @@
+{
+  "name": "export-map-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./utils": {
+      "types": "./utils.d.ts"
+    }
+  }
+}

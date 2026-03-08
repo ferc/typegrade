@@ -88,6 +88,18 @@ export type ScenarioPackKey =
   | "testing"
   | "cli";
 
+/** Scenario variant for subfamily selection within a domain */
+export type ScenarioVariant =
+  | "router-client"
+  | "router-server"
+  | "testing-library"
+  | "testing-http"
+  | "testing-runner"
+  | "validation-schema"
+  | "validation-decoder"
+  | "cli-builder"
+  | "cli-parser";
+
 export interface CompositeScore {
   key: CompositeKey;
   score: number | null;
@@ -156,6 +168,8 @@ export interface ScenarioScore {
   totalScenarios: number;
   results: ScenarioResult[];
   comparability: "scenario";
+  /** Scenario variant used for this evaluation */
+  scenarioVariant?: ScenarioVariant;
 }
 
 export interface ScenarioResult {
@@ -268,6 +282,15 @@ export interface ExplainabilityReport {
 }
 
 /** Coverage diagnostics for a package analysis */
+/** Specific failure mode that caused coverage issues */
+export type CoverageFailureMode =
+  | "entrypoint-resolution"
+  | "export-map-resolution"
+  | "@types-fragmentation"
+  | "install-failure"
+  | "fallback-glob"
+  | "declaration-scarcity";
+
 export interface CoverageDiagnostics {
   /** How types are provided: bundled in package, @types/* sibling, or mixed */
   typesSource: "bundled" | "@types" | "mixed" | "unknown";
@@ -289,6 +312,8 @@ export interface CoverageDiagnostics {
   samplingClass: "complete" | "compact" | "undersampled";
   /** If compact, explanation for why it's compact-but-complete */
   compactReason?: string;
+  /** Specific failure mode that caused coverage issues */
+  coverageFailureMode?: CoverageFailureMode;
 }
 
 export interface PackageAnalysisContext {

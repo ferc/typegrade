@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS } from "./assertions.js";
+import { flattenManifest, loadManifest } from "./split-loader.js";
 
 const args = process.argv.slice(2);
 const evalMode = args.includes("--eval");
@@ -323,6 +324,94 @@ function runTrainGates(): GateResult[] {
       return {
         detail: `${misapplied}/${total} scenario misapplication(s)`,
         passed: misapplied === 0,
+      };
+    }),
+  );
+
+  // Gate 16: Installability — any install failures in the benchmark run indicate
+  // a broken manifest entry or transient npm issue. Zero tolerance for install failures.
+  gates.push(
+    runGate("installability-=0", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        graphStats?: { installError?: string | null } | null;
+      }[] | undefined;
+      if (!entries) return { detail: "No entry data", passed: true };
+
+      let failures = 0;
+      for (const en of entries) {
+        if (en.graphStats && "installError" in en.graphStats && en.graphStats.installError) {
+          failures++;
+        }
+      }
+      return {
+        detail: `${failures} install failure(s)`,
+        passed: failures === 0,
+      };
+    }),
+  );
+
+  // Gate 17: Manifest hygiene — all version specs in the train manifest must be
+  // valid semver-pinned versions (e.g. "zod@3.24.2") rather than ranges or tags.
+  gates.push(
+    runGate("manifest-hygiene", () => {
+      try {
+        const manifest = loadManifest("train");
+        const flat = flattenManifest(manifest);
+        // Semver-pinned: name@X.Y.Z or @scope/name@X.Y.Z
+        const semverPinned = /^(@[\w-]+\/)?[\w-]+@\d+\.\d+\.\d+$/;
+        const invalid: string[] = [];
+        for (const entry of flat) {
+          if (!semverPinned.test(entry.entry.spec)) {
+            invalid.push(entry.entry.spec);
+          }
+        }
+        if (invalid.length > 0) {
+          return {
+            detail: `${invalid.length} invalid spec(s): ${invalid.slice(0, 3).join(", ")}`,
+            passed: false,
+          };
+        }
+        return { detail: `${flat.length} spec(s) valid`, passed: true };
+      } catch (error) {
+        return {
+          detail: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          passed: false,
+        };
+      }
+    }),
+  );
+
+  // Gate 18: Scenario overreach rate — measures how often scenario scores are emitted
+  // for packages whose domain does not match the scenario domain. A rate above 5%
+  // indicates the scorer is applying scenarios too aggressively.
+  gates.push(
+    runGate("scenario-overreach-<5%", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        domain?: string | null;
+        domainInference?: { domain: string; confidence?: number } | null;
+        scenarioScore?: { domain?: string; score: number } | null;
+      }[] | undefined;
+      if (!entries) return { detail: "No entry data", passed: true };
+
+      let overreach = 0;
+      let total = 0;
+      for (const en of entries) {
+        if (!en.scenarioScore || en.scenarioScore.score === null) continue;
+        total++;
+        const pkgDomain = en.domain ?? en.domainInference?.domain ?? "general";
+        const scenDomain = en.scenarioScore.domain;
+        const domainConfidence = en.domainInference?.confidence ?? 0;
+        // Overreach: scenario applied to wrong domain or low-confidence domain detection
+        if ((scenDomain && scenDomain !== pkgDomain) || (pkgDomain === "general" && domainConfidence < 0.5)) {
+          overreach++;
+        }
+      }
+      const rate = total > 0 ? overreach / total : 0;
+      return {
+        detail: `${(rate * 100).toFixed(1)}% (${overreach}/${total})`,
+        passed: rate < 0.05,
       };
     }),
   );

@@ -19,13 +19,18 @@ export { resolveEntrypoints } from "./resolve.js";
 /** Well-known locations for declaration index files, tried in order */
 const LAST_RESORT_PATHS = [
   "index.d.ts",
+  "index.d.mts",
   "dist/index.d.ts",
+  "dist/index.d.mts",
   "lib/index.d.ts",
+  "lib/index.d.mts",
   "build/index.d.ts",
   "types/index.d.ts",
   "typings/index.d.ts",
   "dist/types/index.d.ts",
   "dist/typings/index.d.ts",
+  "dist/src/index.d.ts",
+  "out/index.d.ts",
 ] as const;
 
 /**
@@ -197,6 +202,8 @@ const SIBLING_DTS_NAMES = new Set([
   "global.d.ts",
   "typings.d.ts",
   "declarations.d.ts",
+  "interfaces.d.ts",
+  "env.d.ts",
 ]);
 
 /**

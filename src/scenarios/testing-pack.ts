@@ -592,3 +592,246 @@ export const TESTING_PACK: ScenarioPack = {
   name: "testing",
   scenarios: [mockPrecision, matcherSpecificity, fixtureTyping, requestResponseHelperTyping],
 };
+
+// ---------------------------------------------------------------------------
+// Testing-library variant (query, render, screen patterns)
+// ---------------------------------------------------------------------------
+
+function isQueryRelated(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("getby") ||
+    lower.includes("queryby") ||
+    lower.includes("findby") ||
+    lower.includes("getall") ||
+    lower.includes("queryall") ||
+    lower.includes("findall") ||
+    lower.includes("within")
+  );
+}
+
+function isRenderRelated(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("render") ||
+    lower.includes("screen") ||
+    lower.includes("cleanup") ||
+    lower.includes("act") ||
+    lower.includes("fireevent") ||
+    lower.includes("userevent")
+  );
+}
+
+const queryUtilityTyping: ScenarioTest = {
+  description: "Query utilities should return typed elements with proper generic constraints",
+  evaluate: (surface: PublicSurface): ScenarioResult => {
+    let queryDecls = 0;
+    let genericQueries = 0;
+    let constrainedQueries = 0;
+    let overloadedQueries = 0;
+
+    for (const decl of surface.declarations) {
+      if (!isQueryRelated(decl.name)) {
+        continue;
+      }
+      queryDecls++;
+      if (decl.typeParameters.length > 0) {
+        genericQueries++;
+        if (decl.typeParameters.some((tp) => tp.hasConstraint)) {
+          constrainedQueries++;
+        }
+      }
+      if (decl.overloadCount && decl.overloadCount > 1) {
+        overloadedQueries++;
+      }
+      if (decl.methods) {
+        const ms = countMethodMatches(decl.methods, isQueryRelated);
+        queryDecls += ms.matchCount;
+        genericQueries += ms.genericCount;
+        constrainedQueries += ms.constrainedCount;
+        overloadedQueries += ms.overloadedCount;
+      }
+    }
+
+    let compileScore = 0;
+    if (genericQueries > 0) {
+      compileScore = 40;
+    } else if (queryDecls >= 2) {
+      compileScore = 20;
+    } else if (queryDecls > 0) {
+      compileScore = 10;
+    }
+    const failureScore = Math.min(
+      25,
+      (constrainedQueries > 0 ? 12 : 0) + (overloadedQueries > 0 ? 8 : 0),
+    );
+    const exactnessScore = Math.min(
+      25,
+      (genericQueries >= 2 ? 12 : 0) +
+        (constrainedQueries >= 2 ? 8 : 0) +
+        (overloadedQueries > 0 ? 5 : 0),
+    );
+    let wrongPathScore = 0;
+    if (queryDecls > 0 && queryDecls === genericQueries) {
+      wrongPathScore = 10;
+    } else if (queryDecls > 0) {
+      wrongPathScore = 5;
+    }
+    const score = Math.min(100, compileScore + failureScore + exactnessScore + wrongPathScore);
+    return makeResult({
+      name: "queryUtilityTyping",
+      passed: score >= 40,
+      reason:
+        score >= 40
+          ? `${genericQueries} generic queries, ${constrainedQueries} constrained, ${overloadedQueries} overloaded`
+          : "Query utilities lack type precision",
+      score,
+    });
+  },
+  name: "queryUtilityTyping",
+};
+
+const renderHelperTyping: ScenarioTest = {
+  description: "Render helpers should accept typed component props and return typed containers",
+  evaluate: (surface: PublicSurface): ScenarioResult => {
+    let renderDecls = 0;
+    let genericRenders = 0;
+    let constrainedRenders = 0;
+
+    for (const decl of surface.declarations) {
+      if (!isRenderRelated(decl.name)) {
+        continue;
+      }
+      renderDecls++;
+      if (decl.typeParameters.length > 0) {
+        genericRenders++;
+        if (decl.typeParameters.some((tp) => tp.hasConstraint)) {
+          constrainedRenders++;
+        }
+      }
+      if (decl.methods) {
+        const ms = countMethodMatches(decl.methods, isRenderRelated);
+        renderDecls += ms.matchCount;
+        genericRenders += ms.genericCount;
+        constrainedRenders += ms.constrainedCount;
+      }
+    }
+
+    let compileScore = 0;
+    if (genericRenders > 0) {
+      compileScore = 40;
+    } else if (renderDecls >= 2) {
+      compileScore = 20;
+    } else if (renderDecls > 0) {
+      compileScore = 10;
+    }
+    const failureScore = Math.min(
+      25,
+      (constrainedRenders > 0 ? 15 : 0) + (genericRenders >= 2 ? 10 : 0),
+    );
+    const exactnessScore = Math.min(
+      25,
+      (genericRenders >= 2 ? 15 : 0) + (constrainedRenders > 0 ? 10 : 0),
+    );
+    let wrongPathScore = 0;
+    if (renderDecls > 0 && renderDecls <= genericRenders) {
+      wrongPathScore = 10;
+    } else if (renderDecls > 0) {
+      wrongPathScore = 5;
+    }
+    const score = Math.min(100, compileScore + failureScore + exactnessScore + wrongPathScore);
+    return makeResult({
+      name: "renderHelperTyping",
+      passed: score >= 40,
+      reason:
+        score >= 40
+          ? `${genericRenders} generic renders, ${constrainedRenders} constrained`
+          : "Render helpers lack typed props",
+      score,
+    });
+  },
+  name: "renderHelperTyping",
+};
+
+export const TESTING_LIBRARY_PACK: ScenarioPack = {
+  description:
+    "Tests testing-library style packages for query utility typing, render helpers, and event helpers",
+  domain: "testing",
+  isApplicable: (surface) => {
+    const tlNames = [
+      "render",
+      "screen",
+      "getby",
+      "queryby",
+      "findby",
+      "within",
+      "cleanup",
+      "fireevent",
+    ];
+    const matchCount = surface.declarations.filter((decl) =>
+      tlNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 3,
+      reason:
+        matchCount >= 3
+          ? `${matchCount} testing-library declarations found`
+          : "Insufficient testing-library declarations",
+    };
+  },
+  name: "testing-library",
+  scenarios: [queryUtilityTyping, renderHelperTyping, matcherSpecificity],
+  variant: "testing-library",
+};
+
+export const TESTING_HTTP_PACK: ScenarioPack = {
+  description: "Tests HTTP testing libraries for request/response helper typing and mock precision",
+  domain: "testing",
+  isApplicable: (surface) => {
+    const httpNames = ["request", "response", "intercept", "handler", "server", "listen", "fetch"];
+    const matchCount = surface.declarations.filter((decl) =>
+      httpNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 3,
+      reason:
+        matchCount >= 3
+          ? `${matchCount} HTTP testing declarations found`
+          : "Insufficient HTTP testing declarations",
+    };
+  },
+  name: "testing-http",
+  scenarios: [requestResponseHelperTyping, mockPrecision],
+  variant: "testing-http",
+};
+
+export const TESTING_RUNNER_PACK: ScenarioPack = {
+  description:
+    "Tests test runner libraries for mock precision, matcher specificity, and fixture lifecycle",
+  domain: "testing",
+  isApplicable: (surface) => {
+    const runnerNames = [
+      "describe",
+      "test",
+      "it",
+      "beforeeach",
+      "aftereach",
+      "expect",
+      "mock",
+      "vi",
+    ];
+    const matchCount = surface.declarations.filter((decl) =>
+      runnerNames.some((nm) => decl.name.toLowerCase().includes(nm)),
+    ).length;
+    return {
+      applicable: matchCount >= 3,
+      reason:
+        matchCount >= 3
+          ? `${matchCount} test-runner declarations found`
+          : "Insufficient test-runner declarations",
+    };
+  },
+  name: "testing-runner",
+  scenarios: [mockPrecision, matcherSpecificity, fixtureTyping],
+  variant: "testing-runner",
+};

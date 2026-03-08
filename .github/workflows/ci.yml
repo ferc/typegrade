@@ -73,37 +73,5 @@ jobs:
       - name: Run train gate
         run: pnpm gate:train
 
-  eval-gate:
-    needs: quality
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Run eval benchmarks (fixed + multi-seed)
-        run: |
-          pnpm benchmark:eval
-          pnpm benchmark:random:multi
-
-      - name: Run eval judge
-        run: pnpm benchmark:judge
-
-      - name: Run eval gate
-        run: pnpm gate:eval
-
-      - name: Upload eval summary
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: eval-summary
-          path: benchmarks-output/eval-summary.json
-          retention-days: 90
+  # Eval gate removed — eval runs are judge-only (nightly workflow)
+  # and must not block CI. See CLAUDE.md quarantine policy.

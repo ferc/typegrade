@@ -25,6 +25,10 @@ interface RedactedShadowResult {
   rankingStability: number;
   confidenceDrift: number;
   falseEquivalenceCount: number;
+  /** Normalized coefficient of variation across proxy families */
+  normalizedFamilyVariance: number;
+  /** Number of packages that failed to install */
+  installFailureCount: number;
 }
 
 const DEFAULT_CONFIG: ShadowLatestConfig = {
@@ -68,6 +72,8 @@ export async function runShadowLatest(
     rankingStability: 1,
     confidenceDrift: 0,
     falseEquivalenceCount: 0,
+    normalizedFamilyVariance: 0,
+    installFailureCount: 0,
   };
 
   // Write redacted result
@@ -112,6 +118,18 @@ export function checkShadowGates(result: RedactedShadowResult): {
       passed: result.falseEquivalenceCount < 3,
       value: String(result.falseEquivalenceCount),
       threshold: "<3",
+    },
+    {
+      name: "normalized-family-variance-<10%",
+      passed: result.normalizedFamilyVariance < 0.1,
+      value: `${(result.normalizedFamilyVariance * 100).toFixed(1)}%`,
+      threshold: "<10%",
+    },
+    {
+      name: "install-zero-tolerance",
+      passed: result.installFailureCount === 0,
+      value: String(result.installFailureCount),
+      threshold: "=0",
     },
   ];
 

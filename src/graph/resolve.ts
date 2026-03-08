@@ -59,7 +59,9 @@ export function resolveEntrypoints(pkgDir: string): ResolvedEntrypoint[] {
   }
 
   // 4. Fallback: main field with companion .d.ts
-  if (entrypoints.length === 0) {
+  // Also triggers when exports field existed but resolved nothing valid
+  const exportsResolvedNothing = exports && typeof exports === "object" && entrypoints.length === 0;
+  if (entrypoints.length === 0 || exportsResolvedNothing) {
     const mainField = pkg["main"] as string | undefined;
     if (mainField) {
       const dtsCompanion = findDtsCompanion(pkgDir, mainField);
@@ -104,6 +106,22 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
           subpath: currentSubpath,
         });
       }
+    } else if (key === "types" && Array.isArray(value)) {
+      // Array of types paths — try each in order, first match wins
+      for (const item of value) {
+        if (typeof item !== "string") {
+          continue;
+        }
+        const resolved = resolveDeclarationFile(pkgDir, item);
+        if (resolved) {
+          entrypoints.push({
+            condition: conditionLabel(currentSubpath, "types"),
+            filePath: resolved,
+            subpath: currentSubpath,
+          });
+          break;
+        }
+      }
     } else if (key.startsWith(".") && value && typeof value === "object" && !Array.isArray(value)) {
       // Subpath export like "./utils" or "."
       collectExportsEntrypoints({
@@ -112,6 +130,19 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
         exports: value as Record<string, unknown>,
         pkgDir,
       });
+    } else if (key.startsWith(".") && typeof value === "string") {
+      // Direct string subpath export (e.g., "./utils": "./dist/utils.d.ts")
+      const resolved = resolveDeclarationFile(pkgDir, value);
+      if (resolved) {
+        entrypoints.push({
+          condition: conditionLabel(currentSubpath, "direct"),
+          filePath: resolved,
+          subpath: key,
+        });
+      }
+    } else if (key.startsWith(".") && Array.isArray(value)) {
+      // Array subpath export — delegate to helper to avoid excessive nesting
+      collectArraySubpathExport({ entrypoints, items: value, pkgDir, subpath: key });
     } else if (
       !key.startsWith(".") &&
       value &&
@@ -123,6 +154,55 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
         currentSubpath,
         entrypoints,
         exports: value as Record<string, unknown>,
+        pkgDir,
+      });
+    } else if (
+      !key.startsWith(".") &&
+      typeof value === "string" &&
+      (key === "default" || key === "import" || key === "require")
+    ) {
+      // Condition string value — try resolving as declaration file
+      const resolved = resolveDeclarationFile(pkgDir, value);
+      if (resolved) {
+        entrypoints.push({
+          condition: conditionLabel(currentSubpath, key),
+          filePath: resolved,
+          subpath: currentSubpath,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Handle an array-valued subpath export entry.
+ * Tries each element in order: strings are resolved as declaration files,
+ * objects are recursed into as nested condition maps.
+ */
+function collectArraySubpathExport(opts: {
+  items: unknown[];
+  pkgDir: string;
+  entrypoints: ResolvedEntrypoint[];
+  subpath: string;
+}): void {
+  const { items, pkgDir, entrypoints, subpath } = opts;
+  for (const item of items) {
+    if (typeof item === "string") {
+      const resolved = resolveDeclarationFile(pkgDir, item);
+      if (resolved) {
+        entrypoints.push({
+          condition: conditionLabel(subpath, "direct"),
+          filePath: resolved,
+          subpath,
+        });
+        break;
+      }
+    } else if (item && typeof item === "object" && !Array.isArray(item)) {
+      // Nested condition object inside array
+      collectExportsEntrypoints({
+        currentSubpath: subpath,
+        entrypoints,
+        exports: item as Record<string, unknown>,
         pkgDir,
       });
     }

@@ -188,7 +188,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
   // 2c: Router — route/middleware/router/endpoint declarations
   // Score: 0.2 + 0.1 per match, max 0.6 (penalized if competing with package-name domain)
   // "request"/"response" removed — too generic, matches axios/effect/many others
-  const routerNames = ["route", "middleware", "router", "endpoint"];
+  const routerNames = ["route", "middleware", "router", "endpoint", "createrouter", "createapp"];
   let routerMatchCount = 0;
   for (const decl of surface.declarations) {
     const lowerName = decl.name.toLowerCase();
@@ -323,6 +323,41 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       weight: testingSignal,
     });
     signals.push(`${testingMatchCount} declarations match testing patterns`);
+  }
+
+  // 2g+: Testing — query/render/screen patterns for testing-library style
+  const testingLibraryNames = [
+    "render",
+    "screen",
+    "getby",
+    "queryby",
+    "findby",
+    "within",
+    "cleanup",
+  ];
+  let testingLibraryCount = 0;
+  for (const decl of surface.declarations) {
+    const lowerName = decl.name.toLowerCase();
+    if (testingLibraryNames.some((nm) => lowerName.includes(nm))) {
+      testingLibraryCount++;
+    }
+  }
+  if (testingLibraryCount >= 2) {
+    const baseSignal = Math.min(0.6, 0.2 + testingLibraryCount * 0.1);
+    const testingLibSignal =
+      baseSignal *
+      (packageNameMatchedDomain && packageNameMatchedDomain !== "testing"
+        ? competingDomainPenalty
+        : 1);
+    emit({
+      category: "declaration-role",
+      direction: "positive",
+      domain: "testing",
+      reason: `${testingLibraryCount} declarations match testing-library patterns (render/screen/query)`,
+      ruleId: "testing-library-density",
+      weight: testingLibSignal,
+    });
+    signals.push(`${testingLibraryCount} declarations match testing-library patterns`);
   }
 
   // 2h: CLI — command/program/subcommand/argv declarations
@@ -547,6 +582,37 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
+  // 4e: Validation — decoder-style libraries (decode, decoder, decodeEither, fromGuard, guard, verify)
+  {
+    const decoderFnNames = [
+      "decode",
+      "decoder",
+      "decodeeither",
+      "fromguard",
+      "guard",
+      "verify",
+      "runtype",
+    ];
+    let decoderFnCount = 0;
+    for (const decl of surface.declarations) {
+      const lower = decl.name.toLowerCase();
+      if (decoderFnNames.some((fn) => lower === fn || lower.includes(fn))) {
+        decoderFnCount++;
+      }
+    }
+    if (decoderFnCount >= 2) {
+      emit({
+        category: "scenario-trigger",
+        direction: "positive",
+        domain: "validation",
+        reason: `${decoderFnCount} decoder-style functions found (decode/guard/verify)`,
+        ruleId: "scenario:decoder-fns",
+        weight: 0.2,
+      });
+      signals.push(`${decoderFnCount} decoder-style functions suggest validation domain`);
+    }
+  }
+
   // ── Category 5: Negative rules ──────────────────────────────────────────
 
   // 5a: Package name matches domain X but declaration patterns strongly match domain Y
@@ -675,6 +741,30 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     }
   }
 
+  // 5f: Decoder signals reduce result confidence
+  // Libraries like `decoders` have Ok/Err types but are fundamentally validation libraries
+  if ((scores["result"] ?? 0) > 0.1 && (scores["validation"] ?? 0) > 0.1) {
+    const validationRules = rulesByDomain["validation"] ?? [];
+    const hasDecoderEvidence = validationRules.some(
+      (rl) => rl.name === "scenario:decoder-fns" || rl.name === "scenario:validation-fns",
+    );
+    const resultRules = rulesByDomain["result"] ?? [];
+    const onlySymbolEvidence = resultRules.every(
+      (rl) => rl.category === "declaration-role" || rl.category === "negative",
+    );
+    if (hasDecoderEvidence && onlySymbolEvidence) {
+      emit({
+        category: "negative",
+        direction: "negative",
+        domain: "result",
+        reason: "Decoder/validation evidence overrides Result/Ok/Err symbol matching",
+        ruleId: "neg:decoder-beats-result-symbols",
+        weight: -0.25,
+      });
+      signals.push("Decoder evidence reduces result confidence");
+    }
+  }
+
   // 5e: Conflicting domains reduce certainty before changing the chosen label
   // Reduce scores by 10% for all domains within 0.15 of each other
   // Makes it harder for weak evidence to flip the domain label
@@ -774,7 +864,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       );
       bestDomain = "general";
       bestScore = 0;
-    } else if (!hasStrongEvidence && !packageNameMatchedDomain && bestScore < 0.5) {
+    } else if (!hasStrongEvidence && !packageNameMatchedDomain && bestScore < 0.55) {
       // Weak evidence without package-name — abstain
       signals.push(
         `Abstaining from ${bestDomain}: no strong evidence (score ${bestScore.toFixed(2)}) without package-name match`,

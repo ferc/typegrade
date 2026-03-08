@@ -56,6 +56,8 @@ interface EvalSnapshot {
   sampleCount?: number;
   sampledHashes?: string[];
   entries: EvalEntry[];
+  /** Install failures recorded during benchmarking */
+  installFailures?: { spec: string; tier: string; error: string }[];
 }
 
 /** Metrics computed per seed for multi-seed aggregation */
@@ -1056,6 +1058,144 @@ function printCalibration(
   }
 }
 
+// ─── Family Metrics & Examples ────────────────────────────────────────────
+
+/** Per-family score aggregation for the summary */
+interface FamilyMetric {
+  family: string;
+  meanScore: number;
+  variance: number;
+  count: number;
+}
+
+/**
+ * Compute per-family (tier) score metrics from entries.
+ * For each unique tier, calculates mean consumerApi, variance, and count.
+ */
+function computeFamilyMetrics(entries: EvalEntry[]): FamilyMetric[] {
+  const byFamily = new Map<string, number[]>();
+  for (const entry of entries) {
+    if (entry.consumerApi === null) {
+      continue;
+    }
+    const scores = byFamily.get(entry.tier);
+    if (scores) {
+      scores.push(entry.consumerApi);
+    } else {
+      byFamily.set(entry.tier, [entry.consumerApi]);
+    }
+  }
+
+  const results: FamilyMetric[] = [];
+  for (const [family, scores] of byFamily) {
+    const mean = scores.reduce((sum, val) => sum + val, 0) / scores.length;
+    const variance =
+      scores.length > 1
+        ? scores.reduce((sum, val) => sum + (val - mean) ** 2, 0) / scores.length
+        : 0;
+    results.push({
+      count: scores.length,
+      family,
+      meanScore: round3(mean),
+      variance: round3(variance),
+    });
+  }
+
+  // Sort by family name for consistent output
+  results.sort((aa, bb) => aa.family.localeCompare(bb.family));
+  return results;
+}
+
+/**
+ * Compute normalized family variance as the median coefficient of variation
+ * across all families with at least 2 members.
+ *
+ * Coefficient of variation = stdDev / mean (dimensionless ratio).
+ * Returns 0 when no families have enough members.
+ */
+function computeNormalizedFamilyVariance(familyMetrics: FamilyMetric[]): number {
+  const coefficients: number[] = [];
+  for (const fm of familyMetrics) {
+    if (fm.count < 2 || fm.meanScore === 0) {
+      continue;
+    }
+    const cv = Math.sqrt(fm.variance) / fm.meanScore;
+    coefficients.push(cv);
+  }
+
+  if (coefficients.length === 0) {
+    return 0;
+  }
+
+  coefficients.sort((aa, bb) => aa - bb);
+  const mid = Math.floor(coefficients.length / 2);
+  const medianCv = coefficients.length % 2 === 0
+    ? (coefficients[mid - 1]! + coefficients[mid]!) / 2
+    : coefficients[mid]!;
+  return round3(medianCv);
+}
+
+/**
+ * Collect wrong-specific domain examples, redacted to family (tier) only.
+ * An entry is wrong-specific when its domain is neither "general" nor matching
+ * what one would expect — approximated here by low-confidence specific domain.
+ */
+function collectWrongSpecificExamples(
+  entries: EvalEntry[],
+): { family: string; expected: string; actual: string }[] {
+  const examples: { family: string; expected: string; actual: string }[] = [];
+  for (const entry of entries) {
+    if (
+      entry.domainInference &&
+      entry.domainInference.domain !== "general" &&
+      entry.domainInference.confidence < 0.7
+    ) {
+      examples.push({
+        actual: entry.domainInference.domain,
+        expected: "general (low confidence)",
+        family: entry.tier,
+      });
+    }
+  }
+  return examples;
+}
+
+/**
+ * Collect fallback-glob examples, redacted to family (tier) only.
+ */
+function collectFallbackExamples(
+  entries: EvalEntry[],
+): { family: string; reason: string }[] {
+  const examples: { family: string; reason: string }[] = [];
+  for (const entry of entries) {
+    if (entry.graphStats?.usedFallbackGlob) {
+      examples.push({
+        family: entry.tier,
+        reason: "used fallback glob resolution",
+      });
+    }
+  }
+  return examples;
+}
+
+/**
+ * Collect undersampled examples, redacted to family (tier) only.
+ */
+function collectUndersampledExamples(
+  entries: EvalEntry[],
+): { family: string; reasons: string[] }[] {
+  const examples: { family: string; reasons: string[] }[] = [];
+  for (const entry of entries) {
+    if (entry.coverageDiagnostics?.undersampled) {
+      examples.push({
+        family: entry.tier,
+        reasons: entry.coverageDiagnostics.undersampledReasons ?? [],
+      });
+    }
+  }
+  return examples;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────
 
 function main() {
@@ -1171,6 +1311,13 @@ function main() {
     printBaselineComparison(baselineComparison);
   }
 
+  // Compute family metrics and examples
+  const familyMetrics = computeFamilyMetrics(snapshot.entries);
+  const normalizedFamilyVariance = computeNormalizedFamilyVariance(familyMetrics);
+  const wrongSpecificExamples = collectWrongSpecificExamples(snapshot.entries);
+  const fallbackExamples = collectFallbackExamples(snapshot.entries);
+  const undersampledExamples = collectUndersampledExamples(snapshot.entries);
+
   // Build redacted summary (no package names, no per-package scores)
   const summary: RedactedEvalSummary = {
     allGatesPassed,
@@ -1181,6 +1328,31 @@ function main() {
     split: snapshot.corpusSplit as "eval-fixed" | "eval-pool",
     timestamp: new Date().toISOString(),
   };
+
+  // Include family metrics
+  if (familyMetrics.length > 0) {
+    summary.familyMetrics = familyMetrics;
+    summary.normalizedFamilyVariance = normalizedFamilyVariance;
+  }
+
+  // Include redacted examples
+  if (wrongSpecificExamples.length > 0) {
+    summary.wrongSpecificExamples = wrongSpecificExamples;
+  }
+  if (fallbackExamples.length > 0) {
+    summary.fallbackExamples = fallbackExamples;
+  }
+  if (undersampledExamples.length > 0) {
+    summary.undersampledExamples = undersampledExamples;
+  }
+
+  // Include install failures from snapshot (redacted to family only)
+  if (snapshot.installFailures && snapshot.installFailures.length > 0) {
+    summary.installabilityFailures = snapshot.installFailures.map((ff) => ({
+      error: ff.error,
+      family: ff.tier,
+    }));
+  }
 
   // Include confidence calibration
   if (calibration.length > 0) {

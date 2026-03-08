@@ -4,6 +4,7 @@ import type {
   CompositeScore,
   ConfidenceSummary,
   CoverageDiagnostics,
+  CoverageFailureMode,
   DimensionResult,
   DomainKey,
   DomainScore,
@@ -37,7 +38,7 @@ import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
 import { analyzeSpecializationPower } from "./analyzers/specialization-power.js";
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
-import { getScenarioPack } from "./scenarios/index.js";
+import { getScenarioPackWithVariant } from "./scenarios/index.js";
 
 /** Minimum domain confidence to emit domainFitScore */
 const DOMAIN_CONFIDENCE_THRESHOLD = 0.7;
@@ -135,6 +136,22 @@ function computeCoverageDiagnostics(opts: {
     );
   }
 
+  // Determine specific coverage failure mode
+  let coverageFailureMode: CoverageFailureMode | undefined = undefined;
+  if (graphStats.usedFallbackGlob) {
+    coverageFailureMode =
+      graphStats.fallbackReason === "no-entrypoints-found"
+        ? "entrypoint-resolution"
+        : "fallback-glob";
+  } else if (typesSource === "@types" && xrefs > 5 && graphStats.totalReachable < 5) {
+    coverageFailureMode = "@types-fragmentation";
+  } else if (
+    surfaceDeclarations < MIN_MEASURED_DECLARATIONS &&
+    surfacePositions < MIN_MEASURED_POSITIONS
+  ) {
+    coverageFailureMode = "declaration-scarcity";
+  }
+
   // Classify sampling quality:
   // - "complete": all thresholds met
   // - "compact": few files but sufficient positions and declarations (small-by-design library)
@@ -176,6 +193,10 @@ function computeCoverageDiagnostics(opts: {
 
   if (compactReason) {
     result.compactReason = compactReason;
+  }
+
+  if (coverageFailureMode) {
+    result.coverageFailureMode = coverageFailureMode;
   }
 
   return result;
@@ -425,7 +446,11 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     !usedFallbackGlob &&
     domainInference.confidence >= SCENARIO_CONFIDENCE_THRESHOLD
   ) {
-    const pack = getScenarioPack(domainInference.domain as DomainKey);
+    const pack = getScenarioPackWithVariant(
+      domainInference.domain as DomainKey,
+      consumerSurface,
+      packageName,
+    );
     if (pack) {
       // Check scenario applicability before running
       const applicabilityCheck = isScenarioApplicable(pack, consumerSurface, packageName);

@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import type { AnalysisResult, ScenarioScore } from "../src/types.js";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS, UNDERSAMPLED_ANCHOR_WAIVERS } from "./assertions.js";
@@ -12,6 +13,7 @@ import { runPool } from "./pool.js";
 const args = process.argv.slice(2);
 const holdoutMode = args.includes("--holdout");
 const evalMode = args.includes("--eval");
+const validateManifestMode = args.includes("--validate-manifest");
 const poolSampleIdx = args.indexOf("--pool-sample");
 const poolSampleCount = poolSampleIdx >= 0 ? Number.parseInt(args[poolSampleIdx + 1] ?? "5", 10) : 0;
 const poolCountIdx = args.indexOf("--count");
@@ -50,11 +52,62 @@ interface BenchmarkEntry {
   typeSafety: number | null;
 }
 
+interface InstallFailure {
+  spec: string;
+  tier: string;
+  error: string;
+}
+
 function getCompositeScore(result: AnalysisResult, key: string): number | null {
   return result.composites.find((comp) => comp.key === key)?.score ?? null;
 }
 
+/**
+ * Validate manifest by resolving each package spec via `npm view`.
+ * Reports any specs that cannot be resolved (e.g., ETARGET errors).
+ * Returns true if all specs are valid, false otherwise.
+ */
+function validateManifest(): boolean {
+  const manifest = loadManifestByFilename(manifestFilename);
+  const flat = flattenManifest(manifest);
+  console.log(`Validating ${flat.length} package specs in ${manifestFilename}...\n`);
+
+  const failures: { spec: string; tier: string; error: string }[] = [];
+
+  for (const { entry, tier } of flat) {
+    const spec = entry.spec;
+    try {
+      execSync(`npm view "${spec}" version`, { encoding: "utf8", stdio: "pipe" });
+      console.log(`  OK: ${spec}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Extract the first meaningful line from npm error output
+      const firstLine = message.split("\n").find((ln) => ln.trim().length > 0) ?? message;
+      failures.push({ error: firstLine.trim(), spec, tier });
+      console.log(`  FAIL: ${spec} — ${firstLine.trim()}`);
+    }
+  }
+
+  console.log(`\n${flat.length - failures.length}/${flat.length} specs resolved successfully.`);
+
+  if (failures.length > 0) {
+    console.log(`\n${failures.length} invalid spec(s):`);
+    for (const ff of failures) {
+      console.log(`  [${ff.tier}] ${ff.spec}: ${ff.error}`);
+    }
+    return false;
+  }
+
+  return true;
+}
+
 async function main() {
+  // Handle --validate-manifest early exit
+  if (validateManifestMode) {
+    const valid = validateManifest();
+    process.exit(valid ? 0 : 1);
+  }
+
   // Load manifest with split-aware loader
   let packages: { tier: string; entry: ManifestEntry }[] = [];
   let poolManifestHash: string | undefined;
@@ -84,6 +137,7 @@ async function main() {
   console.log(`Corpus: ${corpusSplit} (manifest: ${manifestFilename})\n`);
 
   const entries: BenchmarkEntry[] = [];
+  const installFailures: InstallFailure[] = [];
 
   if (parallelMode) {
     // Parallel scoring via worker pool
@@ -101,13 +155,18 @@ async function main() {
       },
     });
 
-    for (let i = 0; i < packages.length; i++) {
-      const { tier } = packages[i]!;
-      const poolResult = poolResults[i]!;
+    for (let idx = 0; idx < packages.length; idx++) {
+      const { tier } = packages[idx]!;
+      const poolResult = poolResults[idx]!;
       const name = poolResult.spec.replaceAll(/@[\d.]+$/g, "");
 
       if (poolResult.error || !poolResult.result) {
-        console.error(`  FAILED: ${name}: ${poolResult.error}`);
+        const errorMsg = poolResult.error ?? "unknown error";
+        console.error(`  FAILED: ${name}: ${errorMsg}`);
+        // Track install failures separately
+        if (errorMsg.includes("ETARGET") || errorMsg.includes("404") || errorMsg.includes("install")) {
+          installFailures.push({ error: errorMsg, spec: poolResult.spec, tier });
+        }
         continue;
       }
 
@@ -153,7 +212,12 @@ async function main() {
         const fallbackStr = result.graphStats.usedFallbackGlob ? " [FALLBACK]" : "";
         console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}${scenStr}${fallbackStr}`);
       } catch (error) {
-        console.error(`  FAILED: ${error}`);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`  FAILED: ${errorMsg}`);
+        // Track install failures separately
+        if (errorMsg.includes("ETARGET") || errorMsg.includes("404") || errorMsg.includes("install")) {
+          installFailures.push({ error: errorMsg, spec, tier });
+        }
       }
     }
   }
@@ -462,12 +526,21 @@ async function main() {
       total: domainTotal,
       wrongSpecificRate: Math.round(wrongSpecificRate * 1000) / 1000,
     },
+    installFailures: installFailures.length > 0 ? installFailures : undefined,
     manifestSource: manifestFilename,
     sampleCount: poolSampleCount > 0 ? poolSampleCount : poolCount > 0 ? poolCount : undefined,
     sampledHashes: poolSampledHashes,
     seed: (poolSampleCount > 0 || poolCount > 0) ? seed : undefined,
     timestamp: new Date().toISOString(),
   };
+
+  // Report install failures
+  if (installFailures.length > 0) {
+    console.log(`\n=== Install Failures (${installFailures.length}) ===\n`);
+    for (const ff of installFailures) {
+      console.log(`  [${ff.tier}] ${ff.spec}: ${ff.error}`);
+    }
+  }
 
   const filename = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
   writeFileSync(join(resultsBaseDir, filename), JSON.stringify(snapshot, null, 2));
