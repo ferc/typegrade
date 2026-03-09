@@ -1,5 +1,5 @@
-import type { AgentReport, StopCondition } from "./types.js";
-import type { AnalysisResult, AutofixSummary, Issue } from "../types.js";
+import type { AbortCondition, AnalysisResult, AutofixSummary, Issue } from "../types.js";
+import type { AgentReport, EnrichedFixBatch, StopCondition } from "./types.js";
 import { computeExecutionOrder, enrichFixBatches, groupFixBatches } from "./fix-batch.js";
 import { filterIssues } from "../origin/filter.js";
 
@@ -34,6 +34,7 @@ export function buildAgentReport(
   if ((result.status === "degraded" && allNullScores) || result.status === "degraded") {
     const abstentionReason = `Analysis is degraded: ${result.degradedReason ?? "unknown reason"}. No fix batches emitted.`;
     return {
+      abortSignals: [{ condition: "Analysis is degraded", reason: abstentionReason }],
       abstentionReason,
       actionableIssues: [],
       enrichedBatches: [],
@@ -57,6 +58,7 @@ export function buildAgentReport(
   if (isLowConfidence && result.scoreValidity === "not-comparable") {
     const abstentionReason = `Analysis confidence too low for fix batches (scoreValidity: ${result.scoreValidity}). No fix batches emitted.`;
     return {
+      abortSignals: [{ condition: "Confidence too low", reason: abstentionReason }],
       abstentionReason,
       actionableIssues: [],
       enrichedBatches: [],
@@ -154,19 +156,84 @@ export function buildAgentReport(
     }
   }
 
+  // Select nextBestBatch: highest-impact batch that is low or medium risk
+  const nextBestBatch = selectNextBestBatch(enrichedBatches);
+
+  // Build abort signals — conditions where the agent should stop entirely
+  const abortSignals = buildAbortSignals(result);
+
+  // Build report trust from the analysis trust summary
+  const reportTrust = result.trustSummary;
+
   return {
+    abortSignals,
     ...(abstentionReason === undefined ? {} : { abstentionReason }),
     actionableIssues: budgetedIssues,
     enrichedBatches,
     executionOrder,
     expectedScoreImprovement,
     fixBatches,
+    nextBestBatch,
+    reportTrust,
     stopConditions,
     suppressedCount,
     suppressionReasons,
     verificationPlan,
     verificationSteps,
   };
+}
+
+/**
+ * Select the best next batch: highest-impact low-risk batch.
+ * If no low-risk batch exists, choose highest-impact medium-risk.
+ * Never auto-select high-risk batches.
+ */
+function selectNextBestBatch(enrichedBatches: EnrichedFixBatch[]): EnrichedFixBatch | undefined {
+  // Already sorted by impact desc, risk asc
+  const lowRisk = enrichedBatches.find((bb) => bb.risk === "low");
+  if (lowRisk) {
+    return lowRisk;
+  }
+  const mediumRisk = enrichedBatches.find((bb) => bb.risk === "medium");
+  if (mediumRisk) {
+    return mediumRisk;
+  }
+  // Never auto-select high-risk batches
+  return undefined;
+}
+
+/**
+ * Build abort signals from the analysis result.
+ */
+function buildAbortSignals(result: AnalysisResult): AbortCondition[] {
+  const signals: AbortCondition[] = [
+    {
+      condition: "Trust becomes abstained after applying fixes",
+      reason: "Re-analysis shows abstained trust — further iteration is not justified",
+    },
+    {
+      condition: "TypeScript compilation fails (tsc --noEmit exits non-zero)",
+      reason: "Fixes introduced type errors — roll back the last batch",
+    },
+    {
+      condition: "Test suite fails (vitest run exits non-zero)",
+      reason: "Fixes broke existing tests — roll back the last batch",
+    },
+    {
+      condition: "Score regresses by more than 5 points after a batch",
+      reason: "Fix batch worsened overall quality — roll back and stop",
+    },
+  ];
+
+  // Add batch-touches-public-API signal when any batch requires human review
+  if (result.autofixSummary?.fixBatches.some((bb) => bb.requiresPublicApiChange)) {
+    signals.push({
+      condition: "Batch modifies public API surface without human review",
+      reason: "Public API changes require human approval — do not auto-apply",
+    });
+  }
+
+  return signals;
 }
 
 /**
@@ -302,6 +369,7 @@ function computeSourceModeIssuePriority(issue: Issue): number {
 export function renderAgentJson(report: AgentReport): string {
   return JSON.stringify(
     {
+      abortSignals: report.abortSignals,
       ...(report.abstentionReason === undefined
         ? {}
         : { abstentionReason: report.abstentionReason }),
@@ -311,6 +379,8 @@ export function renderAgentJson(report: AgentReport): string {
       expectedScoreImprovement: report.expectedScoreImprovement,
       fixBatches: report.fixBatches,
       issues: report.actionableIssues,
+      nextBestBatch: report.nextBestBatch ?? null,
+      reportTrust: report.reportTrust ?? null,
       stopConditions: report.stopConditions,
       suppressedCount: report.suppressedCount,
       suppressionReasons: report.suppressionReasons,

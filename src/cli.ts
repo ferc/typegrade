@@ -166,6 +166,7 @@ export function runCli() {
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--profile <profile>", `Analysis profile: ${VALID_PROFILES.join("|")}`)
     .option("--agent", "Agent-optimized output (precision-first, fix batches)")
+    .option("--include-generated", "Include generated/dist/vendor issues in ranked findings")
     .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
@@ -205,6 +206,10 @@ export function runCli() {
     .description("Analyze and suggest improvements (closed-loop self-improvement)")
     .option("--json", "Output as JSON")
     .option("--apply", "Apply safe fixes automatically (dry-run by default)")
+    .option("--include-generated", "Include generated/dist/vendor issues in ranked findings")
+    .option("--include-indirect", "Include indirectly fixable issues")
+    .option("--budget <n>", "Maximum actionable issues to include", parseInt)
+    .option("--strict-agent", "Enforce most conservative filter mode")
     .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
@@ -219,12 +224,26 @@ export function runCli() {
         skipBoundaries: true,
         skipDeclEmit: true,
       });
-      const agentReport = buildAgentReport(result);
+      const agentOpts: {
+        includeIndirect?: boolean;
+        issueBudget?: number;
+        minConfidence?: number;
+      } = {};
+      if (opts["strictAgent"]) {
+        agentOpts.minConfidence = 0.8;
+      }
+      if (opts["includeIndirect"]) {
+        agentOpts.includeIndirect = true;
+      }
+      if (typeof opts["budget"] === "number") {
+        agentOpts.issueBudget = opts["budget"];
+      }
+      const agentReport = buildAgentReport(result, agentOpts);
 
-      if (opts.json) {
+      if (opts["json"]) {
         console.log(renderAgentJson(agentReport));
       } else {
-        console.log(renderSelfAnalysis(result, agentReport, Boolean(opts.apply)));
+        console.log(renderSelfAnalysis(result, agentReport, Boolean(opts["apply"])));
       }
     });
 
@@ -281,8 +300,10 @@ export function runCli() {
         console.log(
           JSON.stringify(
             {
+              boundaryHotspots: result.boundaryHotspots,
               boundaryQuality: result.boundaryQuality,
               boundarySummary: result.boundarySummary,
+              recommendedFixes: result.recommendedFixes,
             },
             null,
             2,
@@ -453,13 +474,58 @@ interface ComparisonOpts {
 
 function renderComparison(opts: ComparisonOpts): string {
   const { nameA, resultA, nameB, resultB, decision } = opts;
-  const lines: string[] = [
-    "",
-    pc.bold("  typegrade comparison"),
-    "",
-    `  ${"".padEnd(22)}${nameA.padEnd(16)}${nameB.padEnd(16)}${"Delta"}`,
-    `  ${"─".repeat(60)}`,
-  ];
+  const lines: string[] = ["", pc.bold("  typegrade comparison"), ""];
+
+  // Lead with the decision (recommendation, confidence, reasons, blockers)
+  if (decision) {
+    switch (decision.outcome) {
+      case "clear-winner": {
+        lines.push(pc.green(`  Recommendation: ${decision.winner} (clear winner)`));
+        break;
+      }
+      case "marginal-winner": {
+        lines.push(
+          pc.yellow(`  Recommendation: ${decision.winner} (marginal — review recommended)`),
+        );
+        break;
+      }
+      case "equivalent": {
+        lines.push(pc.blue("  Recommendation: Equivalent — no significant differences"));
+        break;
+      }
+      case "incomparable": {
+        lines.push(pc.yellow("  Recommendation: Incomparable — cannot rank these results"));
+        break;
+      }
+      case "abstained": {
+        lines.push(pc.red("  Recommendation: Abstained — insufficient evidence for comparison"));
+        break;
+      }
+    }
+
+    lines.push(`  Confidence: ${Math.round(decision.decisionConfidence * 100)}%`);
+
+    if (decision.topReasons.length > 0) {
+      lines.push("  Key factors:");
+      for (const reason of decision.topReasons) {
+        lines.push(`    ${reason}`);
+      }
+    }
+
+    if (decision.blockingReasons.length > 0) {
+      lines.push(pc.yellow("  Blockers:"));
+      for (const reason of decision.blockingReasons) {
+        lines.push(`    ${reason}`);
+      }
+    }
+
+    lines.push("");
+    lines.push(`  ${"─".repeat(60)}`);
+  }
+
+  // Metric table
+  lines.push(`  ${"".padEnd(22)}${nameA.padEnd(16)}${nameB.padEnd(16)}${"Delta"}`);
+  lines.push(`  ${"─".repeat(60)}`);
 
   const compositeKeys = ["consumerApi", "agentReadiness", "typeSafety"] as const;
   const labels: Record<string, string> = {
@@ -516,50 +582,6 @@ function renderComparison(opts: ComparisonOpts): string {
         22,
       );
     lines.push(`  ${domainLabel}${String(domA).padEnd(16)}${String(domB).padEnd(16)}`);
-  }
-
-  // Decision section
-  if (decision) {
-    lines.push("");
-    lines.push(`  ${"─".repeat(60)}`);
-
-    switch (decision.outcome) {
-      case "clear-winner": {
-        lines.push(pc.green(`  Winner: ${decision.winner} (clear)`));
-        break;
-      }
-      case "marginal-winner": {
-        lines.push(pc.yellow(`  Winner: ${decision.winner} (marginal — review recommended)`));
-        break;
-      }
-      case "equivalent": {
-        lines.push(pc.blue("  Equivalent — no significant differences"));
-        break;
-      }
-      case "incomparable": {
-        lines.push(pc.yellow("  Incomparable — cannot rank these results"));
-        for (const reason of decision.blockingReasons) {
-          lines.push(`    ${reason}`);
-        }
-        break;
-      }
-      case "abstained": {
-        lines.push(pc.red("  Abstained — insufficient evidence for comparison"));
-        for (const reason of decision.blockingReasons) {
-          lines.push(`    ${reason}`);
-        }
-        break;
-      }
-    }
-
-    if (decision.topReasons.length > 0) {
-      lines.push("  Key factors:");
-      for (const reason of decision.topReasons) {
-        lines.push(`    ${reason}`);
-      }
-    }
-
-    lines.push(`  Confidence: ${Math.round(decision.decisionConfidence * 100)}%`);
   }
 
   lines.push("");
@@ -657,14 +679,50 @@ function renderSelfAnalysis(
 function renderBoundaryReportFromBoundaryResult(result: {
   boundaryQuality: BoundaryQualityScore | null;
   boundarySummary: BoundarySummary | null;
+  boundaryHotspots?: {
+    file: string;
+    line: number;
+    boundaryType: string;
+    riskScore: number;
+    description: string;
+  }[];
+  recommendedFixes?: {
+    file: string;
+    line: number;
+    boundaryType: string;
+    fix: string;
+    riskScore: number;
+  }[];
 }): string {
-  return renderBoundaryData(result.boundarySummary, result.boundaryQuality);
+  return renderBoundaryData({
+    hotspots: result.boundaryHotspots,
+    quality: result.boundaryQuality,
+    recommendedFixes: result.recommendedFixes,
+    summary: result.boundarySummary,
+  });
 }
 
-function renderBoundaryData(
-  summary: BoundarySummary | undefined | null,
-  quality: BoundaryQualityScore | undefined | null,
-): string {
+interface BoundaryRenderOpts {
+  summary: BoundarySummary | undefined | null;
+  quality: BoundaryQualityScore | undefined | null;
+  hotspots?: {
+    file: string;
+    line: number;
+    boundaryType: string;
+    riskScore: number;
+    description: string;
+  }[];
+  recommendedFixes?: {
+    file: string;
+    line: number;
+    boundaryType: string;
+    fix: string;
+    riskScore: number;
+  }[];
+}
+
+function renderBoundaryData(opts: BoundaryRenderOpts): string {
+  const { summary, quality, hotspots, recommendedFixes } = opts;
   const lines: string[] = ["", pc.bold("  typegrade boundaries"), ""];
 
   if (!summary || !quality) {
@@ -683,8 +741,41 @@ function renderBoundaryData(
   lines.push(`    Coverage: ${Math.round(summary.boundaryCoverage * 100)}%`);
   lines.push("");
 
-  // Hotspots
-  if (summary.missingValidationHotspots.length > 0) {
+  // Ranked hotspots (lead with these, not the raw inventory)
+  if (hotspots && hotspots.length > 0) {
+    lines.push(pc.bold("  Top Hotspots (by risk):"));
+    for (const hotspot of hotspots.slice(0, 10)) {
+      let riskColor = pc.dim;
+      if (hotspot.riskScore >= 70) {
+        riskColor = pc.red;
+      } else if (hotspot.riskScore >= 40) {
+        riskColor = pc.yellow;
+      }
+      lines.push(
+        `    ${riskColor(`[risk: ${hotspot.riskScore}]`)} ${hotspot.file}:${hotspot.line} (${hotspot.boundaryType})`,
+      );
+      lines.push(`      ${pc.dim(hotspot.description)}`);
+    }
+    if (hotspots.length > 10) {
+      lines.push(pc.dim(`    ... and ${hotspots.length - 10} more`));
+    }
+    lines.push("");
+  }
+
+  // Recommended fixes
+  if (recommendedFixes && recommendedFixes.length > 0) {
+    lines.push(pc.bold("  Recommended Fixes:"));
+    for (const rf of recommendedFixes.slice(0, 5)) {
+      lines.push(`    ${pc.green(">")} ${rf.file}:${rf.line} — ${rf.fix}`);
+    }
+    if (recommendedFixes.length > 5) {
+      lines.push(pc.dim(`    ... and ${recommendedFixes.length - 5} more`));
+    }
+    lines.push("");
+  }
+
+  // Legacy hotspots from summary (fallback for raw inventory)
+  if ((!hotspots || hotspots.length === 0) && summary.missingValidationHotspots.length > 0) {
     lines.push(pc.bold("  Missing Validation Hotspots:"));
     for (const hotspot of summary.missingValidationHotspots.slice(0, 10)) {
       const trustColor = hotspot.trustLevel === "untrusted-external" ? pc.red : pc.yellow;

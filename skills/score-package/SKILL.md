@@ -8,7 +8,7 @@ description: >
   Use when evaluating an npm dependency.
 type: core
 library: typegrade
-library_version: "0.11.0"
+library_version: "0.12.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"

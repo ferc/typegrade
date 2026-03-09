@@ -672,6 +672,10 @@ export interface AnalysisResult {
   trustSummary?: TrustSummary;
   /** Resolution diagnostics — traces the acquisition pipeline */
   resolutionDiagnostics?: ResolutionDiagnostics;
+  /** Top boundary hotspots ranked by risk */
+  boundaryHotspots?: BoundaryHotspot[];
+  /** Concrete next-action recommendations (max 3) */
+  recommendations?: Recommendation[];
 }
 
 export interface PrecisionFeatures {
@@ -1207,7 +1211,62 @@ export interface ShadowLatestResult {
   shadow: EvalAggregateMetrics;
 }
 
+// --- Recommendations ---
+
+/** Impact class for a recommendation */
+export type ImpactClass = "high" | "medium" | "low";
+
+/** A concrete next-action recommendation */
+export interface Recommendation {
+  /** What to do */
+  action: string;
+  /** Why this matters */
+  reason: string;
+  /** Expected impact class */
+  impact: ImpactClass;
+  /** Category of recommendation */
+  category: "soundness" | "boundary" | "public-surface" | "general";
+}
+
+// --- Boundary Recommended Fix ---
+
+/** A recommended fix for a boundary hotspot */
+export interface BoundaryRecommendedFix {
+  /** File containing the hotspot */
+  file: string;
+  /** Line number */
+  line: number;
+  /** Boundary type */
+  boundaryType: BoundaryType;
+  /** Concrete fix description */
+  fix: string;
+  /** Fix category */
+  fixKind: SuggestedFixKind;
+  /** Risk score of the hotspot being fixed */
+  riskScore: number;
+}
+
+// --- Agent Acceptance and Abort ---
+
+/** An acceptance check for a fix batch */
+export interface AcceptanceCheck {
+  /** Command to run */
+  command: string;
+  /** What the command should produce */
+  expectedOutcome: string;
+  /** Whether this check must pass */
+  mustPass: boolean;
+}
+
+/** A condition under which the agent should abort */
+export interface AbortCondition {
+  /** What to check */
+  condition: string;
+  /** Why this should cause an abort */
+  reason: string;
+}
+
 // --- Analysis Schema ---
 
 /** Current schema version for analysis output */
-export const ANALYSIS_SCHEMA_VERSION = "0.11.0";
+export const ANALYSIS_SCHEMA_VERSION = "0.12.0";

@@ -8,7 +8,7 @@ description: >
   dependencies.
 type: core
 library: typegrade
-library_version: "0.11.0"
+library_version: "0.12.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
@@ -37,8 +37,13 @@ Scores both packages and prints global scores, domain scores, and deltas.
 npx typegrade compare zod valibot
 ```
 
-Output shows Consumer API, Agent Readiness, and Type Safety for both packages
-with signed deltas (positive means the first package scores higher).
+Output leads with a decision report showing the recommendation (clear-winner,
+marginal-winner, equivalent, incomparable, or abstained), confidence level,
+key decision factors, and any blockers. Below that, Consumer API, Agent
+Readiness, and Type Safety scores for both packages are shown with signed
+deltas (positive means the first package scores higher). The comparison
+engine considers 5 metrics: consumerApi, agentReadiness, typeSafety,
+declarationFidelity, and boundaryDiscipline.
 
 ### JSON comparison for automation
 

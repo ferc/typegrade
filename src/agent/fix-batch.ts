@@ -1,5 +1,5 @@
+import type { AbortCondition, AcceptanceCheck, FixBatch, Issue } from "../types.js";
 import type { EnrichedFixBatch, FixBatchDiff, RollbackRisk } from "./types.js";
-import type { FixBatch, Issue } from "../types.js";
 import { dirname } from "node:path";
 
 /**
@@ -127,12 +127,16 @@ export function enrichFixBatches(batches: FixBatch[], issues: Issue[]): Enriched
     // Count error and warning issues in this batch
     let errorCount = 0;
     let warningCount = 0;
+    const batchIssues: Issue[] = [];
     for (const issueId of batch.issueIds) {
       const issue = issueById.get(issueId);
-      if (issue?.severity === "error") {
-        errorCount++;
-      } else if (issue?.severity === "warning") {
-        warningCount++;
+      if (issue) {
+        batchIssues.push(issue);
+        if (issue.severity === "error") {
+          errorCount++;
+        } else if (issue.severity === "warning") {
+          warningCount++;
+        }
       }
     }
 
@@ -145,12 +149,34 @@ export function enrichFixBatches(batches: FixBatch[], issues: Issue[]): Enriched
     // Compute rollback risk
     const rollbackRisk = computeRollbackRisk(batch, issueById);
 
+    // Generate goal and whyNow
+    const goal = `Resolve ${batch.issueIds.length} ${batch.title.split(":")[0] ?? "type"} issue(s) to improve score by ~${expectedScoreDelta} points`;
+    const whyNow = computeWhyNow(batch.risk);
+
+    // Generate patchHints from issue root causes and fix kinds
+    const patchHints = generatePatchHints(batchIssues);
+
+    // Generate acceptanceChecks
+    const acceptanceChecks = generateAcceptanceChecks(batch, expectedScoreDelta);
+
+    // Generate abortIf conditions
+    const abortIf = generateAbortConditions(batch);
+
+    // Generate rollbackPlan
+    const rollbackPlan = `Revert changes to ${batch.targetFiles.join(", ")}. Run: git checkout -- ${batch.targetFiles.join(" ")}`;
+
     return {
       ...batch,
+      abortIf,
+      acceptanceChecks,
       expectedDiffs,
       expectedScoreDelta,
+      goal,
+      patchHints,
+      rollbackPlan,
       rollbackRisk,
       verificationCommands: ["npx tsc --noEmit"],
+      whyNow,
     };
   });
 }
@@ -217,4 +243,106 @@ function computeRollbackRisk(batch: FixBatch, issueById: Map<string, Issue>): Ro
   }
 
   return { affectsPublicApi, affectsTests, level, reason };
+}
+
+/**
+ * Compute the whyNow explanation based on batch risk.
+ */
+function computeWhyNow(risk: "low" | "medium" | "high"): string {
+  if (risk === "low") {
+    return "Low-risk batch with high expected impact — safe to apply immediately";
+  }
+  if (risk === "medium") {
+    return "Medium-risk batch — apply with verification";
+  }
+  return "High-risk batch — requires human review before applying";
+}
+
+/**
+ * Generate concrete patch hints from issue root causes and fix kinds.
+ */
+function generatePatchHints(issues: Issue[]): string[] {
+  const hints = new Set<string>();
+
+  const HINT_MAP: Record<string, string> = {
+    "add-env-parsing":
+      "Use z.string().parse(process.env.VAR) or equivalent to validate env values at load time",
+    "add-narrowing": "Add explicit type guard or discriminated union check before using the value",
+    "add-type-annotation": "Add explicit return type annotation to exported functions",
+    "add-type-guard": "Create a user-defined type guard: function isT(val: unknown): val is T",
+    "add-validation": "Add runtime validation (zod, valibot, etc.) at the data ingress point",
+    "replace-any": "Replace `any` with `unknown` and add narrowing where the value is consumed",
+    "strengthen-generic": "Add type constraints to generic parameters: <T extends Base>",
+    "wrap-json-parse": "Replace JSON.parse(x) with schema.parse(JSON.parse(x)) using zod/valibot",
+  };
+
+  for (const issue of issues) {
+    if (issue.suggestedFixKind && HINT_MAP[issue.suggestedFixKind]) {
+      hints.add(HINT_MAP[issue.suggestedFixKind]!);
+    }
+  }
+
+  // If no specific hints, provide generic guidance
+  if (hints.size === 0) {
+    hints.add("Review flagged locations and tighten types to match actual usage");
+  }
+
+  return [...hints];
+}
+
+/**
+ * Generate acceptance checks for a fix batch.
+ */
+function generateAcceptanceChecks(batch: FixBatch, expectedScoreDelta: number): AcceptanceCheck[] {
+  return [
+    {
+      command: "npx tsc --noEmit",
+      expectedOutcome: "Exit code 0 — no type errors introduced",
+      mustPass: true,
+    },
+    {
+      command: "npx vitest run",
+      expectedOutcome: "All existing tests still pass",
+      mustPass: true,
+    },
+    {
+      command: "npx typegrade analyze --json",
+      expectedOutcome: `Score should not regress; expected +${expectedScoreDelta} points`,
+      mustPass: false,
+    },
+    {
+      command: `Verify issue count reduction for batch ${batch.id}`,
+      expectedOutcome: `At least ${Math.max(1, Math.floor(batch.issueIds.length * 0.5))} issue(s) resolved`,
+      mustPass: false,
+    },
+  ];
+}
+
+/**
+ * Generate abort conditions for a fix batch.
+ */
+function generateAbortConditions(batch: FixBatch): AbortCondition[] {
+  const conditions: AbortCondition[] = [
+    {
+      condition: "TypeScript compilation fails after applying this batch",
+      reason: "Batch introduced type errors — roll back immediately",
+    },
+    {
+      condition: "Test suite fails after applying this batch",
+      reason: "Batch broke existing tests — roll back and investigate",
+    },
+    {
+      condition: "Score regresses by more than 3 points after this batch",
+      reason: "Batch worsened quality — the fix approach is incorrect",
+    },
+  ];
+
+  if (batch.requiresPublicApiChange) {
+    conditions.push({
+      condition: "Public API surface changed without human review",
+      reason: "This batch modifies the public API — human approval required",
+    });
+  }
+
+  return conditions;
 }

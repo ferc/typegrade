@@ -1,4 +1,4 @@
-import type { FixBatch, Issue } from "../types.js";
+import type { AbortCondition, AcceptanceCheck, FixBatch, Issue, TrustSummary } from "../types.js";
 
 export type { AutofixSummary, FixBatch, Issue } from "../types.js";
 
@@ -39,6 +39,18 @@ export interface EnrichedFixBatch extends FixBatch {
   rollbackRisk?: RollbackRisk | undefined;
   /** Commands to run after applying this batch */
   verificationCommands: string[];
+  /** High-level goal of this batch */
+  goal: string;
+  /** Why this batch should be applied now */
+  whyNow: string;
+  /** Concrete code change hints for the agent */
+  patchHints: string[];
+  /** Acceptance checks that must pass after applying this batch */
+  acceptanceChecks: AcceptanceCheck[];
+  /** Conditions under which the agent should abort this batch */
+  abortIf: AbortCondition[];
+  /** Rollback instructions as text */
+  rollbackPlan: string;
 }
 
 /** Agent report with actionable findings and fix batches */
@@ -65,4 +77,10 @@ export interface AgentReport {
   verificationSteps: string[];
   /** Why no fix batches were emitted (when empty) */
   abstentionReason?: string;
+  /** The single best batch to apply next (highest-impact, low/medium risk) */
+  nextBestBatch?: EnrichedFixBatch | undefined;
+  /** Trust summary for the report itself */
+  reportTrust?: TrustSummary | undefined;
+  /** Abort signals — conditions under which the agent should stop entirely */
+  abortSignals: AbortCondition[];
 }

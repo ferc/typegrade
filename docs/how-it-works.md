@@ -391,9 +391,42 @@ The boundary analysis produces a `BoundaryQualityScore` with:
 
 The boundary report includes taint chains (with provenance), hotspots, trust zone crossings, policy violations, and finding categories (see [Scoring Contract: Boundary finding categories](scoring-contract.md#boundary-finding-categories)).
 
+### Boundary hotspots
+
+Unvalidated boundaries are ranked into **hotspots** using `computeBoundaryHotspots()`. Each hotspot carries a `riskScore` computed from boundary type weight and trust level:
+
+- **Network + untrusted-external**: highest risk (weight 10 × trust multiplier 2.0)
+- **Filesystem, database, queue + semi-trusted**: moderate risk
+- **Env, config + trusted-local**: lower risk
+
+Hotspots are sorted by descending risk score and attached to the `AnalysisResult` as `boundaryHotspots`. In boundary-only mode (`typegrade boundaries`), hotspots and recommended fixes are included in the JSON output.
+
+### Boundary recommended fixes
+
+Each hotspot maps to a **recommended fix** (`BoundaryRecommendedFix`) with a concrete `fix` description and `fixKind` (e.g., `add-validation`, `wrap-json-parse`, `add-env-parsing`) based on the boundary type.
+
+### Recommendations (source mode)
+
+In source and self-analysis modes, up to 3 **recommendations** are generated from the analysis results, grouped by category:
+
+- **soundness** — from implementation issues (unsafe casts, missing narrowing)
+- **boundary** — from unvalidated boundary hotspots
+- **public-surface** — from exported API surface issues (weak types, missing annotations)
+
+Each recommendation includes an `action`, `reason`, `impact` level (high/medium/low), and `category`. Recommendations are attached to the `AnalysisResult` as the `recommendations` field.
+
 ## Fix planning pipeline
 
-The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption. Actionable issues are capped at 50 (the agent issue budget), sorted by `agentPriority` descending with source-owned issues prioritized first. Degraded results with all-null composite scores emit an empty report with no fix batches.
+The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption. Actionable issues are capped at 50 (the agent issue budget, or 25 in strict/source mode), sorted by `agentPriority` descending with source-owned issues prioritized first. Degraded results with all-null composite scores emit an empty report with no fix batches.
+
+### Agent report fields
+
+The `AgentReport` includes:
+
+- **`nextBestBatch`** — the highest-impact batch that is low or medium risk. High-risk batches are never auto-selected. Agents should apply this batch first.
+- **`abortSignals`** — global abort conditions for the entire agent session (e.g., "Trust becomes abstained after applying fixes", "Score regresses by more than 5 points").
+- **`reportTrust`** — the `TrustSummary` from the underlying analysis, so agents can check trust classification before proceeding.
+- **`abstentionReason`** — explains why no fix batches were emitted (present when batches are empty due to degraded status, low confidence, or no actionable issues).
 
 ### Issue enrichment
 
@@ -436,6 +469,12 @@ Enriched fix batches (`EnrichedFixBatch`) extend the base batch with agent-speci
 - **`rollbackRisk`** — a risk assessment with `level` (`trivial`, `safe`, `caution`, `dangerous`), `reason`, and flags for `affectsPublicApi` and `affectsTests`. Agents can use this to decide whether human review is needed.
 - **`expectedScoreDelta`** — predicted composite score improvement from applying this batch.
 - **`verificationCommands`** — shell commands to validate the fix after applying.
+- **`goal`** — human-readable objective for the batch (e.g., "Resolve 3 apiSafety issue(s) to improve score by ~6 points").
+- **`whyNow`** — urgency rationale based on batch risk level.
+- **`patchHints`** — concrete code change hints mapped from `suggestedFixKind` values (e.g., "Replace `any` with `unknown` and add narrowing where the value is consumed").
+- **`acceptanceChecks`** — typed acceptance criteria (`AcceptanceCheck[]`), each with a `command`, `expectedOutcome`, and `mustPass` flag.
+- **`abortIf`** — abort conditions (`AbortCondition[]`) that should halt batch application (e.g., "TypeScript compilation fails after applying this batch").
+- **`rollbackPlan`** — shell command to revert the batch's changes.
 
 ### Verification plan
 

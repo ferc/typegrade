@@ -218,7 +218,7 @@ Returns an `AnalysisResult` with:
 
 ```jsonc
 {
-  "analysisSchemaVersion": "0.11.0",
+  "analysisSchemaVersion": "0.12.0",
   "status": "complete",
   "scoreValidity": "fully-comparable",
   "mode": "package",
@@ -287,7 +287,9 @@ Returns an `AnalysisResult` with:
     "declarationCount": 15
   },
   "dimensions": [/* 8 dimension results with scores, metrics, issues */],
-  "topIssues": [/* top 10 issues by severity */]
+  "topIssues": [/* top 10 issues by severity */],
+  "boundaryHotspots": [/* ranked unvalidated boundary points with risk scores */],
+  "recommendations": [/* actionable recommendations by category (source mode) */]
 }
 ```
 

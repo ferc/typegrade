@@ -8,7 +8,7 @@ description: >
   undersampled results. Use when running typegrade on a local codebase.
 type: core
 library: typegrade
-library_version: "0.11.0"
+library_version: "0.12.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -106,6 +106,15 @@ Returns an `AnalysisResult` object with mandatory envelope fields: `status`,
 field traces the acquisition pipeline stages. See the `consume-json` skill
 for full field details.
 
+### Include generated issues
+
+```bash
+npx typegrade analyze . --include-generated
+```
+
+By default, issues from generated files (dist/, build output) are excluded from
+`topIssues`. Use `--include-generated` to restore them in the output.
+
 ### Agent-optimized output
 
 ```bash
@@ -123,7 +132,10 @@ npx typegrade boundaries .
 
 Analyzes I/O boundary trust and validation coverage — network, filesystem,
 env, config, serialization, IPC, database, SDK, and queue boundaries. Shows
-a boundary quality score, missing validation hotspots, and taint breaks.
+a boundary quality score, ranked hotspots with risk scores, recommended fixes,
+and taint breaks. In source mode, boundary hotspots and up to 3
+recommendations (soundness, boundary, public-surface) are also attached to
+the main `AnalysisResult`.
 
 ### Fix planning and application
 

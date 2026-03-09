@@ -57,6 +57,8 @@ export { ANALYSIS_SCHEMA_VERSION } from "./types.js";
 
 // Stable public types
 export type {
+  AbortCondition,
+  AcceptanceCheck,
   ActionabilitySummary,
   AcquisitionStage,
   AnalysisMode,
@@ -73,6 +75,7 @@ export type {
   BoundaryPolicyConfig,
   BoundaryPolicyViolation,
   BoundaryQualityScore,
+  BoundaryRecommendedFix,
   BoundaryReport,
   BoundarySource,
   BoundarySummary,
@@ -109,6 +112,7 @@ export type {
   FixPlanBatch,
   GlobalScores,
   Grade,
+  ImpactClass,
   Issue,
   LayerViolation,
   MetricDelta,
@@ -122,6 +126,7 @@ export type {
   PackageIdentity,
   PackageLayer,
   ProfileInfo,
+  Recommendation,
   RedactedEvalSummary,
   ResolutionDiagnostics,
   RoleClassification,

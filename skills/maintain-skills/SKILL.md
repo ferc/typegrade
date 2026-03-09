@@ -8,7 +8,7 @@ description: >
   or documentation.
 type: lifecycle
 library: typegrade
-library_version: "0.11.0"
+library_version: "0.12.0"
 sources:
   - "ferc/typegrade:AGENTS.md"
   - "ferc/typegrade:skills/_artifacts/domain_map.yaml"
@@ -152,14 +152,14 @@ commit as the code change that affects them.
 Wrong:
 
 ```yaml
-# In SKILL.md frontmatter after a 0.10.0 -> 0.11.0 release
+# In SKILL.md frontmatter after a 0.11.0 -> 0.12.0 release
 library_version: "0.11.0"
 ```
 
 Correct:
 
 ```yaml
-library_version: "0.11.0"
+library_version: "0.12.0"
 ```
 
 The `stale` check compares `library_version` against the published npm version.

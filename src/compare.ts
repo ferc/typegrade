@@ -11,11 +11,17 @@ import { type ScorePackageOptions, scorePackage } from "./package-scorer.js";
 /** Minimum composite delta to be considered significant */
 const SIGNIFICANCE_THRESHOLD = 5;
 
-/** Composite weights for decision scoring */
+/** Balanced-trust composite weights for decision scoring */
 const DECISION_WEIGHTS: Record<string, number> = {
-  agentReadiness: 0.2,
+  agentReadiness: 0.15,
   consumerApi: 0.25,
   typeSafety: 0.35,
+};
+
+/** Dimension weights used when composites include dimension-level metrics */
+const DIMENSION_DECISION_WEIGHTS: Record<string, number> = {
+  boundaryDiscipline: 0.1,
+  declarationFidelity: 0.15,
 };
 
 export interface CompareOptions extends ScorePackageOptions {
@@ -114,7 +120,7 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
     return buildIncomparableReport(blockingReasons, trustA, trustB);
   }
 
-  // Compute metric deltas
+  // Compute metric deltas — composites + dimension-level metrics
   const compositeKeys = ["consumerApi", "agentReadiness", "typeSafety"] as const;
   const metricDeltas: MetricDelta[] = [];
   const metricProvenance: MetricProvenance[] = [];
@@ -151,6 +157,27 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
       inputs: [`${nameA}.${key} = ${valueA ?? "null"}`, `${nameB}.${key} = ${valueB ?? "null"}`],
       metric: key,
       penaltiesApplied: penalties,
+    });
+  }
+
+  // Dimension-level metrics: declarationFidelity, boundaryDiscipline
+  for (const dimKey of Object.keys(DIMENSION_DECISION_WEIGHTS)) {
+    const dimA = resultA.dimensions.find((dd) => dd.key === dimKey);
+    const dimB = resultB.dimensions.find((dd) => dd.key === dimKey);
+    const valueA = dimA?.score ?? null;
+    const valueB = dimB?.score ?? null;
+    const delta = valueA !== null && valueB !== null ? valueA - valueB : null;
+    const significant = delta !== null && Math.abs(delta) >= SIGNIFICANCE_THRESHOLD;
+
+    metricDeltas.push({ delta, metric: dimKey, significant, valueA, valueB });
+    metricProvenance.push({
+      confidence: Math.min(dimA?.confidence ?? 0.5, dimB?.confidence ?? 0.5),
+      inputs: [
+        `${nameA}.${dimKey} = ${valueA ?? "null"}`,
+        `${nameB}.${dimKey} = ${valueB ?? "null"}`,
+      ],
+      metric: dimKey,
+      penaltiesApplied: [],
     });
   }
 
@@ -236,12 +263,14 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
 
 /**
  * Compute a weighted decision score for a single package result.
+ * Uses composites + dimension-level metrics with penalty adjustments.
  */
 function computeDecisionScore(result: AnalysisResult, _name: string): number | null {
   let totalWeight = 0;
   let weightedSum = 0;
   let nullCount = 0;
 
+  // Composite-level metrics
   for (const [key, weight] of Object.entries(DECISION_WEIGHTS)) {
     const comp = result.composites.find((cc) => cc.key === key);
     if (comp?.score !== null && comp?.score !== undefined) {
@@ -249,6 +278,15 @@ function computeDecisionScore(result: AnalysisResult, _name: string): number | n
       totalWeight += weight;
     } else {
       nullCount++;
+    }
+  }
+
+  // Dimension-level metrics (declarationFidelity, boundaryDiscipline)
+  for (const [dimKey, weight] of Object.entries(DIMENSION_DECISION_WEIGHTS)) {
+    const dim = result.dimensions.find((dd) => dd.key === dimKey);
+    if (dim?.score !== null && dim?.score !== undefined) {
+      weightedSum += dim.score * weight;
+      totalWeight += weight;
     }
   }
 
@@ -271,6 +309,15 @@ function computeDecisionScore(result: AnalysisResult, _name: string): number | n
   }
   if (result.coverageDiagnostics?.coverageFailureMode === "fallback-glob") {
     score -= 10;
+  }
+  // Domain mismatch penalty: missing domain detection penalizes slightly
+  if (result.domainInference && result.domainInference.confidence < 0.5) {
+    score -= 5;
+  }
+  // Low publish quality penalty
+  const publishDim = result.dimensions.find((dd) => dd.key === "publishQuality");
+  if (publishDim?.score !== null && publishDim?.score !== undefined && publishDim.score < 40) {
+    score -= 5;
   }
 
   return Math.max(0, Math.round(score * 10) / 10);
@@ -321,7 +368,9 @@ function computeDecisionConfidence(input: ConfidenceInput): number {
 function buildTopReasons(deltas: MetricDelta[], nameA: string, nameB: string): string[] {
   const labels: Record<string, string> = {
     agentReadiness: "Agent Readiness",
+    boundaryDiscipline: "Boundary Discipline",
     consumerApi: "Consumer API",
+    declarationFidelity: "Declaration Fidelity",
     typeSafety: "Type Safety",
   };
 

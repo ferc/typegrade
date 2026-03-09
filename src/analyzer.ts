@@ -4,6 +4,8 @@ import {
   type AnalysisProfile,
   type AnalysisResult,
   type AnalysisStatus,
+  type BoundaryHotspot,
+  type BoundaryRecommendedFix,
   type CompositeScore,
   type ConfidenceSummary,
   type CoverageDiagnostics,
@@ -16,9 +18,11 @@ import {
   type FixabilityScore,
   type GlobalScores,
   type Grade,
+  type ImpactClass,
   type Issue,
   type PackageAnalysisContext,
   type PackageIdentity,
+  type Recommendation,
   type ScenarioApplicabilityStatus,
   type ScenarioScore,
   type ScoreComparability,
@@ -63,6 +67,7 @@ import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
 import { applySuppressions } from "./suppression/index.js";
 import { classifyFileOrigin } from "./origin/classifier.js";
+import { computeBoundaryHotspots } from "./boundaries/policy.js";
 import { filterIssues } from "./origin/filter.js";
 import { getScenarioPackWithVariant } from "./scenarios/index.js";
 import { resolveFileOwnership } from "./ownership/index.js";
@@ -937,52 +942,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     caveats.push(scenarioAbstentionReason);
   }
 
-  // Collect top issues
+  // Collect top issues using the shared signal-hygiene filter as single source of truth
   const allIssues: Issue[] = dimensions.flatMap((dim) => dim.issues);
-  const severityOrder: Record<string, number> = { error: 0, info: 2, warning: 1 };
-  const fixabilityOrder: Record<string, number> = {
-    direct: 0,
-    external: 2,
-    indirect: 1,
-    not_actionable: 3,
-  };
-  // Ownership priority: source-owned first, dependency-owned last
-  const ownershipOrder: Record<string, number> = {
-    "dependency-owned": 4,
-    generated: 3,
-    mixed: 2,
-    "source-owned": 0,
-    "standard-library-owned": 5,
-    unresolved: 6,
-    "workspace-owned": 1,
-  };
-  // Filter top issues: exclude generated/dist/vendor/config-origin by default
-  const noiseOrigins = new Set(["generated", "dist", "vendor", "config"]);
-  const sourceIssues = allIssues.filter((iss) => {
-    const origin = iss.fileOrigin ?? "source";
-    return !noiseOrigins.has(origin);
+  const topIssueFilter = filterIssues(allIssues, {
+    budget: 10,
+    includeGenerated: false,
   });
-  // Fall back to all issues if no source issues exist
-  const issueCandidates = sourceIssues.length > 0 ? sourceIssues : allIssues;
-  const topIssues = issueCandidates
-    .toSorted((lhs, rhs) => {
-      // Source-owned issues sort first
-      const byOwnership =
-        (ownershipOrder[lhs.ownership ?? "source-owned"] ?? 0) -
-        (ownershipOrder[rhs.ownership ?? "source-owned"] ?? 0);
-      if (byOwnership !== 0) {
-        return byOwnership;
-      }
-      const bySeverity = (severityOrder[lhs.severity] ?? 0) - (severityOrder[rhs.severity] ?? 0);
-      if (bySeverity !== 0) {
-        return bySeverity;
-      }
-      return (
-        (fixabilityOrder[lhs.fixability ?? "direct"] ?? 0) -
-        (fixabilityOrder[rhs.fixability ?? "direct"] ?? 0)
-      );
-    })
-    .slice(0, 10);
+  // Fall back to severity-sorted all issues if no source issues pass the filter
+  const topIssues =
+    topIssueFilter.actionable.length > 0
+      ? rankIssuesForReport(topIssueFilter.actionable)
+      : rankIssuesForReport(allIssues).slice(0, 10);
 
   const timeMs = Math.round(performance.now() - startTime);
 
@@ -1202,12 +1172,22 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   if (boundarySummary) {
     result.boundarySummary = boundarySummary;
+    // Wire boundary hotspots into the result
+    const hotspots = computeBoundaryHotspots(boundarySummary);
+    if (hotspots.length > 0) {
+      result.boundaryHotspots = hotspots;
+    }
   }
   if (boundaryQuality) {
     result.boundaryQuality = boundaryQuality;
   }
   if (suppressions.length > 0) {
     result.suppressions = suppressions;
+  }
+
+  // Generate recommendations for source/workspace/self analyses
+  if (mode === "source" || analysisScope === "self") {
+    result.recommendations = generateRecommendations(dimensions, boundarySummary, topIssues);
   }
 
   // Build explainability report if requested
@@ -1825,13 +1805,193 @@ function computeFixabilityScore(dimensions: DimensionResult[]): FixabilityScore 
 }
 
 /**
+ * Rank issues for the top-issues report. Sorts by ownership, severity, fixability.
+ */
+function rankIssuesForReport(issues: Issue[]): Issue[] {
+  const severityOrder: Record<string, number> = { error: 0, info: 2, warning: 1 };
+  const fixabilityOrder: Record<string, number> = {
+    direct: 0,
+    external: 2,
+    indirect: 1,
+    not_actionable: 3,
+  };
+  const ownershipOrder: Record<string, number> = {
+    "dependency-owned": 4,
+    generated: 3,
+    mixed: 2,
+    "source-owned": 0,
+    "standard-library-owned": 5,
+    unresolved: 6,
+    "workspace-owned": 1,
+  };
+
+  return issues.toSorted((lhs, rhs) => {
+    const byOwnership =
+      (ownershipOrder[lhs.ownership ?? "source-owned"] ?? 0) -
+      (ownershipOrder[rhs.ownership ?? "source-owned"] ?? 0);
+    if (byOwnership !== 0) {
+      return byOwnership;
+    }
+    const bySeverity = (severityOrder[lhs.severity] ?? 0) - (severityOrder[rhs.severity] ?? 0);
+    if (bySeverity !== 0) {
+      return bySeverity;
+    }
+    return (
+      (fixabilityOrder[lhs.fixability ?? "direct"] ?? 0) -
+      (fixabilityOrder[rhs.fixability ?? "direct"] ?? 0)
+    );
+  });
+}
+
+/**
+ * Classify a count into impact class using two thresholds.
+ */
+function classifyImpact(
+  count: number,
+  highThreshold: number,
+  mediumThreshold: number,
+): ImpactClass {
+  if (count >= highThreshold) {
+    return "high";
+  }
+  if (count >= mediumThreshold) {
+    return "medium";
+  }
+  return "low";
+}
+
+/**
+ * Generate up to 3 concrete next-action recommendations from analysis results.
+ * Prefers one soundness fix, one boundary fix, and one public-surface fix when available.
+ */
+function generateRecommendations(
+  dimensions: DimensionResult[],
+  boundarySummary: ReturnType<typeof buildBoundarySummary> | undefined,
+  topIssues: Issue[],
+): Recommendation[] {
+  const recommendations: Recommendation[] = [];
+  const allIssues = dimensions.flatMap((dim) => dim.issues);
+
+  // Soundness cluster: apiSafety, implementationSoundness, typeSafety-related
+  const soundnessIssues = allIssues.filter(
+    (iss) =>
+      (iss.dimension === "apiSafety" || iss.dimension === "implementationSoundness") &&
+      iss.ownership !== "dependency-owned" &&
+      iss.ownership !== "standard-library-owned",
+  );
+  if (soundnessIssues.length > 0) {
+    const errorCount = soundnessIssues.filter((ii) => ii.severity === "error").length;
+    const impact: ImpactClass = classifyImpact(errorCount, 3, 1);
+    recommendations.push({
+      action: `Fix ${soundnessIssues.length} type safety issue(s) — ${errorCount} error-severity`,
+      category: "soundness",
+      impact,
+      reason: "Unsafe casts and missing narrowing reduce consumer type guarantees",
+    });
+  }
+
+  // Boundary cluster
+  if (boundarySummary && boundarySummary.unvalidatedBoundaries > 0) {
+    const untrustedCount = boundarySummary.inventory.filter(
+      (ee) => !ee.hasValidation && ee.trustLevel === "untrusted-external",
+    ).length;
+    const impact: ImpactClass = classifyImpact(untrustedCount, 3, 1);
+    recommendations.push({
+      action: `Add validation to ${boundarySummary.unvalidatedBoundaries} unvalidated boundary(ies)`,
+      category: "boundary",
+      impact,
+      reason: "Unvalidated external data flows weaken runtime trust guarantees",
+    });
+  }
+
+  // Public surface cluster: apiSpecificity, surfaceConsistency
+  const surfaceIssues = allIssues.filter(
+    (iss) =>
+      (iss.dimension === "apiSpecificity" || iss.dimension === "surfaceConsistency") &&
+      iss.ownership !== "dependency-owned" &&
+      iss.ownership !== "standard-library-owned",
+  );
+  if (surfaceIssues.length > 0) {
+    const impact: ImpactClass = classifyImpact(surfaceIssues.length, 5, 2);
+    recommendations.push({
+      action: `Tighten ${surfaceIssues.length} public API type(s) — reduce any/unknown surface exposure`,
+      category: "public-surface",
+      impact,
+      reason: "Vague public types hurt consumer inference and agent usability",
+    });
+  }
+
+  // If we still have room and have top issues, add a general recommendation
+  if (recommendations.length === 0 && topIssues.length > 0) {
+    recommendations.push({
+      action: `Address ${topIssues.length} top issue(s) starting from highest severity`,
+      category: "general",
+      impact: topIssues.some((ii) => ii.severity === "error") ? "medium" : "low",
+      reason: "Resolving the highest-severity issues first yields the fastest score improvement",
+    });
+  }
+
+  return recommendations.slice(0, 3);
+}
+
+/**
+ * Generate recommended fixes from boundary hotspots.
+ */
+function generateBoundaryFixes(hotspots: BoundaryHotspot[]): BoundaryRecommendedFix[] {
+  const FIX_MAP: Record<string, { fix: string; fixKind: BoundaryRecommendedFix["fixKind"] }> = {
+    "UI-input": {
+      fix: "Add input validation/sanitization before processing",
+      fixKind: "add-validation",
+    },
+    config: { fix: "Parse and validate config values before use", fixKind: "add-env-parsing" },
+    database: {
+      fix: "Validate database query results against expected schema",
+      fixKind: "add-validation",
+    },
+    env: {
+      fix: "Add runtime parsing for environment variables (e.g., zod, valibot)",
+      fixKind: "add-env-parsing",
+    },
+    filesystem: {
+      fix: "Validate file content after read with schema parser",
+      fixKind: "add-validation",
+    },
+    network: {
+      fix: "Wrap HTTP response with schema validation (zod, valibot)",
+      fixKind: "add-validation",
+    },
+    queue: { fix: "Validate queue payload against expected schema", fixKind: "add-validation" },
+    serialization: { fix: "Wrap JSON.parse with schema validation", fixKind: "wrap-json-parse" },
+  };
+
+  return hotspots.slice(0, 10).map((hotspot) => {
+    const template = FIX_MAP[hotspot.boundaryType] ?? {
+      fix: "Add validation at this boundary",
+      fixKind: "add-validation" as const,
+    };
+    return {
+      boundaryType: hotspot.boundaryType,
+      file: hotspot.file,
+      fix: template.fix,
+      fixKind: template.fixKind,
+      line: hotspot.line,
+      riskScore: hotspot.riskScore,
+    };
+  });
+}
+
+/**
  * Lightweight boundary-only analysis.
  * Skips dimensions, domain detection, scenario scoring, composites, explainability.
- * Returns only the boundary graph, summary, and quality score.
+ * Returns only the boundary graph, summary, quality score, hotspots, and recommended fixes.
  */
 export interface BoundaryOnlyResult {
   boundaryQuality: ReturnType<typeof computeBoundaryQuality> | null;
   boundarySummary: ReturnType<typeof buildBoundarySummary> | null;
+  /** Ranked boundary hotspots by descending risk */
+  boundaryHotspots: BoundaryHotspot[];
+  /** Recommended boundary fixes derived from hotspot analysis */
+  recommendedFixes: BoundaryRecommendedFix[];
   filesAnalyzed: number;
   projectName: string;
   timeMs: number;
@@ -1849,10 +2009,12 @@ export function analyzeBoundariesOnly(projectPath: string): BoundaryOnlyResult {
 
   if (filesAnalyzed === 0) {
     return {
+      boundaryHotspots: [],
       boundaryQuality: null,
       boundarySummary: null,
       filesAnalyzed: 0,
       projectName,
+      recommendedFixes: [],
       timeMs: Math.round(performance.now() - startTime),
     };
   }
@@ -1860,12 +2022,16 @@ export function analyzeBoundariesOnly(projectPath: string): BoundaryOnlyResult {
   const boundaryGraph = buildBoundaryGraph(sourceFiles, project);
   const boundarySummary = buildBoundarySummary(boundaryGraph);
   const boundaryQuality = computeBoundaryQuality(boundarySummary);
+  const boundaryHotspots = computeBoundaryHotspots(boundarySummary);
+  const recommendedFixes = generateBoundaryFixes(boundaryHotspots);
 
   return {
+    boundaryHotspots,
     boundaryQuality,
     boundarySummary,
     filesAnalyzed,
     projectName,
+    recommendedFixes,
     timeMs: Math.round(performance.now() - startTime),
   };
 }

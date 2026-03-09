@@ -8,7 +8,7 @@ description: >
   automation, dashboards, or agent workflows that ingest typegrade output.
 type: core
 library: typegrade
-library_version: "0.11.0"
+library_version: "0.12.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/types.ts"
@@ -43,7 +43,7 @@ The JSON output is an `AnalysisResult` object. Here are the stable fields:
 ```typescript
 interface AnalysisResult {
   // --- Mandatory envelope fields (always present) ---
-  analysisSchemaVersion: string;   // e.g. "0.11.0"
+  analysisSchemaVersion: string;   // e.g. "0.12.0"
   status: AnalysisStatus;         // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
   scoreValidity: ScoreValidity;   // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
   degradedReason?: string;        // Present when status is 'degraded'
@@ -79,6 +79,8 @@ interface AnalysisResult {
   // --- Optional analysis extras ---
   boundaryQuality?: BoundaryQualityScore;  // Source mode
   boundarySummary?: BoundarySummary;        // Source mode
+  boundaryHotspots?: BoundaryHotspot[];     // Ranked unvalidated boundaries (source mode)
+  recommendations?: Recommendation[];       // Actionable recommendations (source mode)
   autofixSummary?: AutofixSummary;          // Agent mode
 }
 ```

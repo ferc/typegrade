@@ -9,7 +9,7 @@ description: >
   in agent-driven refactoring or self-improvement loops.
 type: core
 library: typegrade
-library_version: "0.11.0"
+library_version: "0.12.0"
 sources:
   - "ferc/typegrade:src/cli.ts"
   - "ferc/typegrade:src/agent/report.ts"
@@ -67,14 +67,18 @@ Output:
 npx typegrade self-analyze . --json
 ```
 
-Returns an `AgentReport` with up to 50 actionable issues (capped by the agent
-issue budget), sorted by `agentPriority` with source-owned issues first:
+Returns an `AgentReport` with up to 50 actionable issues (25 in strict/source
+mode), sorted by `agentPriority` with source-owned issues first:
 
 ```typescript
 interface AgentReport {
-  actionableIssues: Issue[];  // Capped at 50, ownership-prioritized
+  actionableIssues: Issue[];  // Capped at 50 (25 in strict mode)
   fixBatches: FixBatch[];
   enrichedBatches: EnrichedFixBatch[];  // Batches with score deltas and verification
+  nextBestBatch?: EnrichedFixBatch;     // Highest-impact low/medium-risk batch
+  abortSignals: AbortCondition[];       // Global session abort conditions
+  reportTrust?: TrustSummary;           // Trust classification from the analysis
+  abstentionReason?: string;            // Why no batches were emitted (if empty)
   suppressedCount: number;
   suppressionReasons: { category: string; count: number }[];
   executionOrder: string[];             // Suggested batch execution order (batch IDs)
@@ -92,8 +96,14 @@ interface FixBatch {
 }
 
 interface EnrichedFixBatch extends FixBatch {
-  expectedScoreDelta: number;      // Estimated score delta from this batch
-  verificationCommands: string[];  // Commands to run after applying this batch
+  expectedScoreDelta: number;           // Estimated score delta from this batch
+  verificationCommands: string[];       // Commands to run after applying this batch
+  goal: string;                         // Human-readable batch objective
+  whyNow: string;                       // Urgency rationale
+  patchHints: string[];                 // Concrete code change hints
+  acceptanceChecks: AcceptanceCheck[];   // Typed acceptance criteria
+  abortIf: AbortCondition[];            // Batch-level abort conditions
+  rollbackPlan: string;                 // Shell command to revert changes
 }
 
 interface StopCondition {
@@ -103,6 +113,12 @@ interface StopCondition {
   reason: string;
 }
 ```
+
+**`nextBestBatch`** selects the highest-impact batch that is low or medium
+risk. High-risk batches are never auto-selected — agents should apply the
+`nextBestBatch` first and re-analyze. **`abortSignals`** list global
+conditions where the agent should stop entirely (e.g., trust becomes
+abstained, score regresses by >5 points).
 
 ### Iterative improvement workflow
 
@@ -124,6 +140,22 @@ npx typegrade self-analyze .
 
 # Step 6: Move to medium-risk fixes with human review
 jq '.fixBatches[] | select(.risk=="medium")' report.json
+```
+
+### Agent control flags
+
+```bash
+# Include generated/dist issues in the report
+npx typegrade self-analyze . --include-generated
+
+# Include indirect (not directly fixable) issues
+npx typegrade self-analyze . --include-indirect
+
+# Limit actionable issues to N (default: 25 in source mode, 50 otherwise)
+npx typegrade self-analyze . --budget 10
+
+# Strict agent mode (lower budget, higher confidence threshold)
+npx typegrade self-analyze . --strict-agent
 ```
 
 ### Specific path analysis
