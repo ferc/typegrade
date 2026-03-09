@@ -12,6 +12,15 @@ export interface CompareResult {
   rendered?: string;
 }
 
+/**
+ * Compare two packages side-by-side on type precision quality.
+ *
+ * @example
+ * ```ts
+ * import { comparePackages } from "typegrade";
+ * const { resultA, resultB } = comparePackages("zod", "yup");
+ * ```
+ */
 export function comparePackages(
   pkgA: string,
   pkgB: string,

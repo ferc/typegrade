@@ -64,6 +64,15 @@ function compositeLabel(key: string): string {
   }
 }
 
+/**
+ * Render an analysis result as a human-readable text report.
+ *
+ * @example
+ * ```ts
+ * import { analyzeProject, renderReport } from "typegrade";
+ * console.log(renderReport(analyzeProject("./my-project")));
+ * ```
+ */
 export function renderReport(result: AnalysisResult): string {
   const lines: string[] = ["", pc.bold("  typegrade v0.5.0"), ""];
 
@@ -196,6 +205,15 @@ function renderDimLine(lines: string[], dim: DimensionResult): void {
   }
 }
 
+/**
+ * Render a dimension breakdown table from analysis dimensions.
+ *
+ * @example
+ * ```ts
+ * import { analyzeProject, renderDimensionTable } from "typegrade";
+ * console.log(renderDimensionTable(analyzeProject(".").dimensions));
+ * ```
+ */
 export function renderDimensionTable(dimensions: DimensionResult[]): string {
   const lines: string[] = [];
   for (const dim of dimensions) {
@@ -215,6 +233,15 @@ export function renderDimensionTable(dimensions: DimensionResult[]): string {
   return lines.join("\n");
 }
 
+/**
+ * Render the explainability report showing per-declaration scoring details.
+ *
+ * @example
+ * ```ts
+ * import { analyzeProject, renderExplainability } from "typegrade";
+ * console.log(renderExplainability(analyzeProject(".", { explain: true })));
+ * ```
+ */
 export function renderExplainability(result: AnalysisResult): string {
   if (!result.explainability) {
     return "";
@@ -258,6 +285,15 @@ export function renderExplainability(result: AnalysisResult): string {
   return lines.join("\n");
 }
 
+/**
+ * Render an analysis result as formatted JSON.
+ *
+ * @example
+ * ```ts
+ * import { scorePackage, renderJson } from "typegrade";
+ * console.log(renderJson(scorePackage("zod")));
+ * ```
+ */
 export function renderJson(result: AnalysisResult): string {
   return JSON.stringify(result, null, 2);
 }

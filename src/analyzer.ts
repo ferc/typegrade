@@ -214,6 +214,16 @@ export interface AnalyzeOptions {
   domain?: "auto" | "off" | DomainType;
 }
 
+/**
+ * Analyze a local TypeScript project for type precision quality.
+ *
+ * @example
+ * ```ts
+ * import { analyzeProject } from "typegrade";
+ * const result = analyzeProject("./my-project");
+ * console.log(result.composites); // consumerApi, agentReadiness, typeSafety
+ * ```
+ */
 export function analyzeProject(projectPath: string, options?: AnalyzeOptions): AnalysisResult {
   const startTime = performance.now();
   const absolutePath = resolve(projectPath);

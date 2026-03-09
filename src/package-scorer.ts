@@ -266,6 +266,16 @@ function ensureCachedInstall(
   };
 }
 
+/**
+ * Score an npm package or local package path for type precision quality.
+ *
+ * @example
+ * ```ts
+ * import { scorePackage } from "typegrade";
+ * const result = scorePackage("zod");
+ * console.log(result.composites); // consumerApi, agentReadiness, typeSafety
+ * ```
+ */
 export function scorePackage(nameOrPath: string, options?: ScorePackageOptions): AnalysisResult {
   // Local path — analyze directly, including .d.ts files
   if (nameOrPath.startsWith(".") || nameOrPath.startsWith("/") || existsSync(nameOrPath)) {
