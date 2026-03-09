@@ -1,5 +1,6 @@
+import type { EnrichedFixBatch, FixBatchDiff, RollbackRisk } from "./types.js";
 import type { FixBatch, Issue } from "../types.js";
-import type { EnrichedFixBatch } from "./types.js";
+import { dirname } from "node:path";
 
 /**
  * Group related issues into fix batches for sequential agent execution.
@@ -10,11 +11,12 @@ import type { EnrichedFixBatch } from "./types.js";
  * 3. Assign risk based on whether public API changes are needed
  * 4. Order by expected impact (high confidence + high severity first)
  */
-export function groupFixBatches(issues: Issue[]): FixBatch[] {
-  // Group by file + dimension
+export function groupFixBatches(issues: Issue[], opts?: { clusterByModule?: boolean }): FixBatch[] {
+  // Group by file (or module directory) + dimension
   const groups = new Map<string, Issue[]>();
   for (const issue of issues) {
-    const key = `${issue.file}::${issue.dimension}`;
+    const fileKey = opts?.clusterByModule ? dirname(issue.file) : issue.file;
+    const key = `${fileKey}::${issue.dimension}`;
     const existing = groups.get(key);
     if (existing) {
       existing.push(issue);
@@ -27,8 +29,8 @@ export function groupFixBatches(issues: Issue[]): FixBatch[] {
   let batchIndex = 0;
 
   for (const [groupKey, groupIssues] of groups) {
-    const [file, dimension] = groupKey.split("::");
-    if (!file || !dimension) {
+    const [fileOrDir, dimension] = groupKey.split("::");
+    if (!fileOrDir || !dimension) {
       continue;
     }
 
@@ -51,17 +53,21 @@ export function groupFixBatches(issues: Issue[]): FixBatch[] {
       groupIssues.some((iss) => iss.fixability === "indirect") ||
       risk === "high";
 
+    // Collect unique target files (may differ from fileOrDir in module-cluster mode)
+    const targetFiles = [...new Set(groupIssues.map((iss) => iss.file))];
+    const displayName = fileOrDir.split("/").pop() ?? fileOrDir;
+
     batchIndex++;
     batches.push({
       expectedImpact,
       id: `batch-${batchIndex}`,
       issueIds: groupIssues.map((iss) => `${iss.file}:${iss.line}:${iss.column}`),
-      rationale: `Fix ${groupIssues.length} ${dimension} issue(s) in ${file.split("/").pop()}`,
+      rationale: `Fix ${groupIssues.length} ${dimension} issue(s) in ${displayName}`,
       requiresHumanReview,
       requiresPublicApiChange: hasPublicApiIssue,
       risk,
-      targetFiles: [file],
-      title: `${dimension}: ${groupIssues.length} fix(es) in ${file.split("/").pop()}`,
+      targetFiles,
+      title: `${dimension}: ${groupIssues.length} fix(es) in ${displayName}`,
     });
   }
 
@@ -133,10 +139,82 @@ export function enrichFixBatches(batches: FixBatch[], issues: Issue[]): Enriched
     // Estimate score delta: errors worth 2 points, warnings worth 1
     const expectedScoreDelta = Math.min(errorCount * 2 + warningCount, 15);
 
+    // Compute expected diffs
+    const expectedDiffs = computeExpectedDiffs(batch, issueById);
+
+    // Compute rollback risk
+    const rollbackRisk = computeRollbackRisk(batch, issueById);
+
     return {
       ...batch,
+      expectedDiffs,
       expectedScoreDelta,
+      rollbackRisk,
       verificationCommands: ["npx tsc --noEmit"],
     };
   });
+}
+
+function computeExpectedDiffs(batch: FixBatch, issueById: Map<string, Issue>): FixBatchDiff[] {
+  // Group issues by file to produce per-file diffs
+  const fileIssues = new Map<string, Issue[]>();
+  for (const issueId of batch.issueIds) {
+    const issue = issueById.get(issueId);
+    if (!issue) {
+      continue;
+    }
+    const existing = fileIssues.get(issue.file);
+    if (existing) {
+      existing.push(issue);
+    } else {
+      fileIssues.set(issue.file, [issue]);
+    }
+  }
+
+  const diffs: FixBatchDiff[] = [];
+  for (const [file, issues] of fileIssues) {
+    const dimensions = [...new Set(issues.map((iss) => iss.dimension))];
+    diffs.push({
+      changeDescription: `Fix ${issues.length} ${dimensions.join(", ")} issue(s)`,
+      file,
+      linesAffected: issues.length,
+    });
+  }
+
+  return diffs;
+}
+
+function computeRollbackRisk(batch: FixBatch, issueById: Map<string, Issue>): RollbackRisk {
+  const affectsPublicApi = batch.requiresPublicApiChange;
+  const affectsTests = batch.targetFiles.some(
+    (tf) => tf.includes(".test.") || tf.includes(".spec.") || tf.includes("__tests__"),
+  );
+
+  // Count high-severity issues
+  let errorCount = 0;
+  for (const issueId of batch.issueIds) {
+    const issue = issueById.get(issueId);
+    if (issue?.severity === "error") {
+      errorCount++;
+    }
+  }
+
+  let level: RollbackRisk["level"] = "trivial";
+  let reason = "Low-risk internal changes only";
+
+  if (affectsPublicApi && errorCount > 0) {
+    level = "dangerous";
+    reason = "Modifies public API with error-severity issues";
+  } else if (affectsPublicApi) {
+    level = "caution";
+    reason = "Modifies public API surface";
+  } else if (errorCount > 0 || affectsTests) {
+    level = "safe";
+    reason = affectsTests ? "Modifies test files" : "Internal changes with error-severity issues";
+  } else {
+    level = "trivial";
+    reason = "Low-risk internal changes only";
+  }
+
+  return { affectsPublicApi, affectsTests, level, reason };
 }

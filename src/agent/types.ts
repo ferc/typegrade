@@ -14,10 +14,29 @@ export interface StopCondition {
   reason: string;
 }
 
+/** Expected code change description for a fix batch */
+export interface FixBatchDiff {
+  changeDescription: string;
+  file: string;
+  linesAffected: number;
+}
+
+/** Risk assessment for rolling back a fix batch */
+export interface RollbackRisk {
+  affectsPublicApi: boolean;
+  affectsTests: boolean;
+  level: "trivial" | "safe" | "caution" | "dangerous";
+  reason: string;
+}
+
 /** Enriched fix batch with agent-specific metadata */
 export interface EnrichedFixBatch extends FixBatch {
+  /** Expected code change diffs for this batch */
+  expectedDiffs?: FixBatchDiff[] | undefined;
   /** Estimated score delta from applying this batch */
   expectedScoreDelta: number;
+  /** Rollback risk assessment */
+  rollbackRisk?: RollbackRisk | undefined;
   /** Commands to run after applying this batch */
   verificationCommands: string[];
 }
@@ -40,6 +59,10 @@ export interface AgentReport {
   expectedScoreImprovement: number;
   /** Stop conditions — when should the agent stop iterating */
   stopConditions: StopCondition[];
+  /** Typed verification plan for post-fix validation */
+  verificationPlan?: { commands: { command: string; description: string; mustPass: boolean }[] };
   /** Verification steps for the entire report */
   verificationSteps: string[];
+  /** Why no fix batches were emitted (when empty) */
+  abstentionReason?: string;
 }

@@ -10,6 +10,10 @@ import { computeExecutionOrder, enrichFixBatches, groupFixBatches } from "./fix-
  */
 /** Maximum actionable issues to include in agent report */
 const AGENT_ISSUE_BUDGET = 50;
+/** Maximum actionable issues in strict agent mode (--agent flag) */
+const AGENT_STRICT_BUDGET = 25;
+/** Minimum confidence for agent mode (higher than default) */
+const AGENT_MIN_CONFIDENCE = 0.7;
 
 export function buildAgentReport(
   result: AnalysisResult,
@@ -27,7 +31,9 @@ export function buildAgentReport(
     : false;
 
   if ((result.status === "degraded" && allNullScores) || result.status === "degraded") {
+    const abstentionReason = `Analysis is degraded: ${result.degradedReason ?? "unknown reason"}. No fix batches emitted.`;
     return {
+      abstentionReason,
       actionableIssues: [],
       enrichedBatches: [],
       executionOrder: [],
@@ -37,7 +43,7 @@ export function buildAgentReport(
         {
           kind: "no-actionable-issues",
           met: true,
-          reason: `Analysis is degraded: ${result.degradedReason ?? "unknown reason"}. No fix batches emitted.`,
+          reason: abstentionReason,
         },
       ],
       suppressedCount: 0,
@@ -48,7 +54,9 @@ export function buildAgentReport(
 
   // Very low confidence: block fix batches even on "complete" analyses
   if (isLowConfidence && result.scoreValidity === "not-comparable") {
+    const abstentionReason = `Analysis confidence too low for fix batches (scoreValidity: ${result.scoreValidity}). No fix batches emitted.`;
     return {
+      abstentionReason,
       actionableIssues: [],
       enrichedBatches: [],
       executionOrder: [],
@@ -58,7 +66,7 @@ export function buildAgentReport(
         {
           kind: "no-actionable-issues",
           met: true,
-          reason: `Analysis confidence too low for fix batches (scoreValidity: ${result.scoreValidity}). No fix batches emitted.`,
+          reason: abstentionReason,
         },
       ],
       suppressedCount: 0,
@@ -67,7 +75,7 @@ export function buildAgentReport(
     };
   }
 
-  const minConfidence = opts?.minConfidence ?? 0.7;
+  const minConfidence = opts?.minConfidence ?? AGENT_MIN_CONFIDENCE;
   const includeIndirect = opts?.includeIndirect ?? false;
 
   // Collect all issues from dimensions
@@ -107,8 +115,18 @@ export function buildAgentReport(
     return true;
   });
 
+  // Apply source-mode priority boost when analyzing own source
+  const isSourceMode = result.analysisScope === "source" || result.analysisScope === "self";
+  if (isSourceMode) {
+    for (const issue of actionableIssues) {
+      issue.agentPriority = (issue.agentPriority ?? 50) + computeSourceModeIssuePriority(issue);
+    }
+  }
+
   // Apply issue budget — prioritize by agentPriority, then cap
-  const budget = opts?.issueBudget ?? AGENT_ISSUE_BUDGET;
+  // Use stricter budget when analysis is source/self mode (agent is operating on own code)
+  const isStrictMode = isSourceMode;
+  const budget = opts?.issueBudget ?? (isStrictMode ? AGENT_STRICT_BUDGET : AGENT_ISSUE_BUDGET);
   const budgetedIssues = actionableIssues
     .toSorted((lhs, rhs) => (rhs.agentPriority ?? 0) - (lhs.agentPriority ?? 0))
     .slice(0, budget);
@@ -117,8 +135,11 @@ export function buildAgentReport(
   const suppressedCount = allIssues.length - budgetedIssues.length;
   const suppressionReasons = computeSuppressionBreakdown(allIssues, budgetedIssues);
 
-  // Group into fix batches
-  const fixBatches = groupFixBatches(budgetedIssues);
+  // Group into fix batches (cluster by module directory in source mode)
+  const fixBatches = groupFixBatches(
+    budgetedIssues,
+    isSourceMode ? { clusterByModule: true } : undefined,
+  );
   const executionOrder = computeExecutionOrder(fixBatches);
 
   // Enrich batches with score deltas and verification commands
@@ -133,7 +154,34 @@ export function buildAgentReport(
   // Default verification steps for the entire report
   const verificationSteps = ["npx tsc --noEmit", "npx vitest run", "npx typegrade analyze --json"];
 
+  // Build typed verification plan
+  const verificationPlan = {
+    commands: [
+      { command: "npx tsc --noEmit", description: "Type check all files", mustPass: true },
+      { command: "npx vitest run", description: "Run test suite", mustPass: true },
+      {
+        command: "npx typegrade analyze --json",
+        description: "Re-score after fixes",
+        mustPass: false,
+      },
+    ],
+  };
+
+  // Compute abstention reason when no batches were produced
+  let abstentionReason: string | undefined = undefined;
+  if (fixBatches.length === 0) {
+    if (budgetedIssues.length === 0) {
+      abstentionReason =
+        allIssues.length === 0
+          ? "No issues found in the analysis"
+          : `All ${allIssues.length} issues were filtered out (not source-owned, low confidence, or suppressed)`;
+    } else {
+      abstentionReason = "Actionable issues exist but could not be grouped into fix batches";
+    }
+  }
+
   return {
+    ...(abstentionReason === undefined ? {} : { abstentionReason }),
     actionableIssues: budgetedIssues,
     enrichedBatches,
     executionOrder,
@@ -142,6 +190,7 @@ export function buildAgentReport(
     stopConditions,
     suppressedCount,
     suppressionReasons,
+    verificationPlan,
     verificationSteps,
   };
 }
@@ -239,11 +288,49 @@ function estimateScoreImprovement(actionableIssues: Issue[], totalIssueCount: nu
 }
 
 /**
+ * Compute source-mode priority boost for an issue.
+ * Boosts priority for source-owned, exported-surface, declaration-affecting,
+ * and directly fixable issues.
+ */
+function computeSourceModeIssuePriority(issue: Issue): number {
+  let boost = 0;
+
+  // Source-owned issues are most actionable
+  if (issue.ownership === "source-owned") {
+    boost += 20;
+  }
+
+  // Exported-surface dimensions affect API quality
+  if (issue.dimension === "apiSpecificity" || issue.dimension === "semanticLift") {
+    boost += 15;
+  }
+
+  // Declaration-affecting fix kinds improve type output
+  if (
+    issue.suggestedFixKind === "add-type-annotation" ||
+    issue.suggestedFixKind === "replace-any" ||
+    issue.suggestedFixKind === "strengthen-generic"
+  ) {
+    boost += 10;
+  }
+
+  // Directly fixable issues can be resolved immediately
+  if (issue.fixability === "direct") {
+    boost += 10;
+  }
+
+  return boost;
+}
+
+/**
  * Render an agent report as JSON suitable for consumption.
  */
 export function renderAgentJson(report: AgentReport): string {
   return JSON.stringify(
     {
+      ...(report.abstentionReason === undefined
+        ? {}
+        : { abstentionReason: report.abstentionReason }),
       actionableIssueCount: report.actionableIssues.length,
       enrichedBatches: report.enrichedBatches,
       executionOrder: report.executionOrder,
@@ -253,6 +340,7 @@ export function renderAgentJson(report: AgentReport): string {
       stopConditions: report.stopConditions,
       suppressedCount: report.suppressedCount,
       suppressionReasons: report.suppressionReasons,
+      verificationPlan: report.verificationPlan,
       verificationSteps: report.verificationSteps,
     },
     null,

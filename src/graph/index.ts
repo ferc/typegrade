@@ -26,6 +26,7 @@ const LAST_RESORT_PATHS = [
   "dist/index.d.cts",
   "lib/index.d.ts",
   "lib/index.d.mts",
+  "lib/index.d.cts",
   "build/index.d.ts",
   "build/index.d.mts",
   "types/index.d.ts",
@@ -41,6 +42,17 @@ const LAST_RESORT_PATHS = [
   "module/index.d.ts",
   "dist/esm/index.d.ts",
   "dist/cjs/index.d.ts",
+  // Platform-specific and additional patterns
+  "dist/node/index.d.ts",
+  "dist/browser/index.d.ts",
+  "dist/common/index.d.ts",
+  "dist/lib/index.d.ts",
+  "dist/mod.d.ts",
+  "mod.d.ts",
+  "output/index.d.ts",
+  "release/index.d.ts",
+  "pkg/index.d.ts",
+  "bundle/index.d.ts",
 ] as const;
 
 /**

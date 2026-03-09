@@ -15,7 +15,15 @@ import {
   hasPackageCache,
   markPackageCached,
 } from "./cache.js";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import type { DomainType } from "./domain.js";
 import type { GraphStats } from "./graph/types.js";
 import { execSync } from "node:child_process";
@@ -32,6 +40,77 @@ function makeFallbackGraphStats(): GraphStats {
     totalReachable: 0,
     usedFallbackGlob: true,
   };
+}
+
+// --- WS4: Package layout classification ---
+
+/** Classification of a package's declaration layout */
+type PackageLayoutClass =
+  | "standard"
+  | "declaration-sparse"
+  | "no-declarations"
+  | "no-types-entry"
+  | "unsupported-bundler";
+
+/** Check whether a package.json exports map contains "types" entries */
+function hasTypesInExports(pkgJson: Record<string, unknown>): boolean {
+  const { exports } = pkgJson;
+  if (!exports || typeof exports !== "object") {
+    return false;
+  }
+  return JSON.stringify(exports).includes('"types"');
+}
+
+/**
+ * Count .d.ts files in the package's top-level and common output directories.
+ * Does not recurse deeply — only checks immediate children of each directory.
+ */
+function countDtsFiles(pkgDir: string): number {
+  let count = 0;
+  const checkDirs = [pkgDir];
+  for (const subdir of ["dist", "lib", "build", "types", "typings"]) {
+    const full = join(pkgDir, subdir);
+    if (existsSync(full)) {
+      checkDirs.push(full);
+    }
+  }
+  for (const dir of checkDirs) {
+    try {
+      const files = readdirSync(dir);
+      for (const fl of files) {
+        if (fl.endsWith(".d.ts") || fl.endsWith(".d.mts") || fl.endsWith(".d.cts")) {
+          count++;
+        }
+      }
+    } catch {
+      // Ignore unreadable directories
+    }
+  }
+  return count;
+}
+
+/**
+ * Classify a package layout to determine analysis strategy.
+ */
+function classifyPackageLayout(
+  pkgDir: string,
+  pkgJson: Record<string, unknown>,
+): PackageLayoutClass {
+  const hasTypeEntries = Boolean(
+    pkgJson["types"] || pkgJson["typings"] || hasTypesInExports(pkgJson),
+  );
+  const dtsFiles = countDtsFiles(pkgDir);
+
+  if (dtsFiles === 0) {
+    return "no-declarations";
+  }
+  if (!hasTypeEntries && dtsFiles > 0) {
+    return "no-types-entry";
+  }
+  if (hasTypeEntries && dtsFiles < 3) {
+    return "declaration-sparse";
+  }
+  return "standard";
 }
 
 /**
@@ -246,14 +325,25 @@ function scoreLocalPackage(
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
   const packageName = pkgJson.name ?? "local-package";
 
-  // Check if there are declaration entry fields
-  const hasTypeEntries = Boolean(pkgJson.types || pkgJson.typings || pkgJson.exports);
-
   const resolvedVersion: string | null = pkgJson.version ?? null;
   const moduleKind = detectModuleKind(pkgJson);
 
-  if (!hasTypeEntries) {
-    // No type entrypoints — fall back to analyzing all files
+  // Classify the package layout before choosing an analysis strategy
+  const layout = classifyPackageLayout(localPath, pkgJson);
+
+  // No declaration files at all — return degraded result
+  if (layout === "no-declarations") {
+    return buildDegradedResult({
+      category: "missing-declarations",
+      errorMessage: `No .d.ts files found in ${packageName}`,
+      packageName,
+      spec: localPath,
+      version: resolvedVersion,
+    });
+  }
+
+  // Has .d.ts files but no package.json type entries — fall back to analyzing all files
+  if (layout === "no-types-entry") {
     const result = analyzeProject(localPath, {
       ...(domain !== undefined && { domain }),
       mode: "package",
@@ -277,6 +367,11 @@ function scoreLocalPackage(
     };
     stampResultStatus(result);
     return result;
+  }
+
+  // Declaration-sparse packages: proceed but add a caveat for low confidence
+  if (layout === "declaration-sparse") {
+    // Continue with normal analysis but lower confidence expectations
   }
 
   // Build declaration graph using the package's own structure
@@ -316,6 +411,15 @@ function scoreLocalPackage(
     resolvedVersion,
     typesSource: "bundled",
   };
+
+  // Add caveat for declaration-sparse packages
+  if (layout === "declaration-sparse") {
+    result.caveats = result.caveats ?? [];
+    result.caveats.push(
+      "Declaration-sparse package (<3 .d.ts files) — confidence may be lower than usual",
+    );
+  }
+
   stampResultStatus(result);
   return result;
 }
@@ -344,12 +448,18 @@ function parsePackageSpec(spec: string): { name: string; version: string } {
   return { name: spec, version: "latest" };
 }
 
+let cachedTsVersion: string | null = null;
+
 function getTsVersion(): string {
-  try {
-    return execSync("tsc --version", { encoding: "utf8", stdio: "pipe" }).trim();
-  } catch {
-    return "unknown";
+  if (cachedTsVersion !== null) {
+    return cachedTsVersion;
   }
+  try {
+    cachedTsVersion = execSync("tsc --version", { encoding: "utf8", stdio: "pipe" }).trim();
+  } catch {
+    cachedTsVersion = "unknown";
+  }
+  return cachedTsVersion;
 }
 
 export interface ScorePackageOptions {
@@ -580,6 +690,34 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     const effectivePkgDir = typesPackageName
       ? join(installRoot, "node_modules", typesPackageName)
       : pkgDir;
+
+    // Verify the effective package directory exists and has declaration files
+    if (!existsSync(effectivePkgDir)) {
+      return buildDegradedResult({
+        category: "missing-declarations",
+        errorMessage: `Package directory not found: ${effectivePkgDir}`,
+        packageName,
+        spec: nameOrPath,
+        version: packageVersion === "latest" ? null : packageVersion,
+      });
+    }
+
+    // Classify the package layout to detect unsupported configurations
+    const effectivePkgJsonForLayout = typesPackageName
+      ? JSON.parse(readFileSync(join(effectivePkgDir, "package.json"), "utf8"))
+      : pkgJson;
+    const layout = classifyPackageLayout(effectivePkgDir, effectivePkgJsonForLayout);
+
+    if (layout === "no-declarations") {
+      return buildDegradedResult({
+        category: "missing-declarations",
+        errorMessage: `No .d.ts files found in ${packageName}`,
+        packageName,
+        spec: nameOrPath,
+        version: packageVersion === "latest" ? null : packageVersion,
+      });
+    }
+
     const typesSource: "bundled" | "@types" = typesPackageName ? "@types" : "bundled";
 
     // Build declaration graph: resolve entrypoints → walk imports → deduplicate
@@ -642,6 +780,14 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       resolvedVersion,
       typesSource,
     };
+
+    // Add caveat for declaration-sparse packages
+    if (layout === "declaration-sparse") {
+      result.caveats = result.caveats ?? [];
+      result.caveats.push(
+        "Declaration-sparse package (<3 .d.ts files) — confidence may be lower than usual",
+      );
+    }
 
     stampResultStatus(result);
     return result;

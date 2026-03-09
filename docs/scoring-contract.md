@@ -252,6 +252,10 @@ Domain-specific consumer benchmark tests:
 - **Schema/Utility**: key-preserving transforms, deep recursive transforms, alias readability.
 - **Stream**: pipe/operator inference, value/error channel propagation, composition patterns.
 
+### Scenario applicability
+
+Each `ScenarioScore` carries a `scenarioApplicability` field indicating whether the scenario was evaluable. Scenarios are gated by domain confidence, graph quality, and domain ambiguity before execution. See [Confidence Model: Scenario applicability gating](confidence-model.md#scenario-applicability-gating) for the full status taxonomy and gating rules.
+
 ## Root cause categories
 
 Every issue may carry a `rootCauseCategory` identifying why the problem exists. Root cause categories are used by the fix planning pipeline to group related issues and suggest appropriate fixes.
@@ -311,6 +315,19 @@ The `compact-complete` / `compact-partial` distinction refines the older `compac
 
 When `undersampled`, confidence caps are applied based on severity: 0.40 (severe), 0.55 (moderate), 0.65 (mild), depending on how many undersampling reasons apply.
 
+## Boundary finding categories
+
+Each boundary inventory entry carries a `findingCategory` classifying the nature of the boundary point:
+
+| Category | Description |
+|----------|-------------|
+| `library-public-boundary` | Boundary at a library's public API surface (exported functions accepting external input) |
+| `application-runtime-boundary` | Boundary at application runtime (HTTP handlers, CLI entry points, queue consumers) |
+| `tooling-trusted-local` | Boundary in tooling or build code where data is locally controlled |
+| `cross-package-trust-boundary` | Boundary where data crosses between packages with different trust levels |
+
+The category helps agents and consumers understand which boundaries are most critical. `library-public-boundary` and `application-runtime-boundary` findings typically require validation, while `tooling-trusted-local` findings can often be safely suppressed.
+
 ## Boundary flow scoring
 
 When boundary flow analysis is active (source mode with boundary configuration), a `BoundaryQualityScore` is computed separately from the dimension scores.
@@ -361,6 +378,33 @@ Issues can be suppressed using one of 13 categories. Suppressions are profile-aw
 | `internal-tooling-pattern` | Pattern is idiomatic for internal tooling and should not be flagged |
 
 Suppressions are configured via `typegrade.config.ts` or applied programmatically through `applySuppressions()`.
+
+## Monorepo health scoring
+
+The `monorepo` command produces a health score based on **severity-weighted** violation counts. Each violation is classified by severity (as of 2026-03-09):
+
+| Severity | Weight | When assigned |
+|----------|--------|---------------|
+| `critical` | 20 | Trust-zone-crossing from `domain` or `shared` layers |
+| `high` | 10 | Trust-zone-crossing from other layers, `unstable-leak`, `infra-bypass`, high trust-delta forbidden-cross-layer |
+| `medium` | 5 | Moderate trust-delta forbidden-cross-layer |
+| `low` | 2 | Low trust-delta forbidden-cross-layer |
+
+**Formula:**
+
+```
+healthScore = 100 - sum(severity_weight × count_per_severity)
+healthScore = clamp(0, 100, healthScore)
+```
+
+The health report also includes:
+- `violationSeveritySummary` — count of violations by severity level
+- `violationDensity` — violations per package (normalized for comparability)
+- `workspaceConfidence` — confidence in workspace discovery (0=none, 0.3=single package, 0.6=few, 0.9=adequate)
+- `layerModelConfidence` — confidence in layer classification (higher when packages have clear layer indicators)
+- `crossPackageBoundarySummary` — summary of trust-zone crossings with risk classification, including a `trustGapSeverity` field (`none`, `low`, `moderate`, `high`) computed from the ratio of high-risk crossings to total crossings
+
+When workspace discovery is partial or ambiguous (low `workspaceConfidence`), the health grade should be interpreted with caution.
 
 ## Zero-file behavior
 

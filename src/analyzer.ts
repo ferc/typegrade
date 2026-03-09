@@ -19,13 +19,20 @@ import {
   type Issue,
   type PackageAnalysisContext,
   type PackageIdentity,
+  type ScenarioApplicabilityStatus,
   type ScenarioScore,
   type ScoreComparability,
   type ScoreValidity,
+  type SourceModeConfidence,
   type SuppressionEntry,
 } from "./types.js";
 import { type DomainType, detectDomain } from "./domain.js";
-import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
+import {
+  type GetSourceFilesOptions,
+  getSourceFiles,
+  loadProject,
+  loadProjectLightweight,
+} from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
 import { buildAgentReport, buildAutofixSummary } from "./agent/index.js";
 import {
@@ -139,9 +146,33 @@ export function normalizeResult(result: AnalysisResult): AnalysisResult {
     // Strip fix batches and autofix summary — degraded results must not guide agents
     delete result.autofixSummary;
     delete result.fixPlan;
+    result.autofixAbstentionReason =
+      result.autofixAbstentionReason ?? `Analysis degraded: ${result.degradedReason ?? "unknown"}`;
+
+    // Strip boundary quality — degraded analyses lack evidence for boundary scoring
+    delete result.boundaryQuality;
+    delete result.boundarySummary;
 
     // Ensure degradedCategory is always set
     result.degradedCategory = result.degradedCategory ?? "insufficient-surface";
+
+    // Build degraded reason chain
+    const chain: string[] = [];
+    if (result.degradedReason) {
+      chain.push(result.degradedReason);
+    }
+    if (result.degradedCategory) {
+      chain.push(`Category: ${result.degradedCategory}`);
+    }
+    if (result.coverageDiagnostics?.coverageFailureMode) {
+      chain.push(`Failure mode: ${result.coverageDiagnostics.coverageFailureMode}`);
+    }
+    if (chain.length > 0) {
+      result.degradedReasonChain = chain;
+    }
+
+    // Ensure scoreComparability reflects degraded state
+    result.scoreComparability = "global";
   }
 
   // --- Mandatory field defaults (WS3: Schema consistency) ---
@@ -206,32 +237,61 @@ export function normalizeResult(result: AnalysisResult): AnalysisResult {
     };
   }
 
-  // --- Confidence gating (WS5) ---
+  // --- Confidence gating (WS5 + WS7) ---
   if (result.status === "complete" && result.confidenceSummary) {
     const cs = result.confidenceSummary;
     const avgConfidence =
       (cs.graphResolution + cs.domainInference + cs.sampleCoverage + cs.scenarioApplicability) / 4;
 
-    // Very low confidence: downgrade scoreValidity
-    if (avgConfidence < 0.3 && result.scoreValidity === "fully-comparable") {
-      result.scoreValidity = "partially-comparable";
-    }
-
-    // Low confidence: suppress domain and scenario scores
-    if (avgConfidence < 0.5) {
-      if (result.domainScore) {
-        result.caveats = result.caveats ?? [];
-        result.caveats.push(
-          `Domain score suppressed: overall confidence too low (${Math.round(avgConfidence * 100)}%)`,
-        );
-        delete result.domainScore;
+    // Confidence collapse: very low average confidence degrades the entire result
+    if (avgConfidence < 0.2) {
+      result.status = "degraded";
+      result.scoreValidity = "not-comparable";
+      result.degradedCategory = "confidence-collapse";
+      result.degradedReason = `Overall confidence collapsed (${Math.round(avgConfidence * 100)}%)`;
+      // Re-run degraded enforcement
+      for (const comp of result.composites) {
+        comp.score = null;
+        comp.grade = "N/A";
+        comp.confidence = 0;
       }
-      if (result.scenarioScore) {
-        result.caveats = result.caveats ?? [];
-        result.caveats.push(
-          `Scenario score suppressed: overall confidence too low (${Math.round(avgConfidence * 100)}%)`,
-        );
-        delete result.scenarioScore;
+      result.globalScores = buildGlobalScores(result.composites);
+      delete result.domainScore;
+      delete result.scenarioScore;
+      delete result.autofixSummary;
+      delete result.fixPlan;
+      result.autofixAbstentionReason = `Confidence collapse (${Math.round(avgConfidence * 100)}%)`;
+    } else {
+      // Very low confidence: downgrade scoreValidity
+      if (avgConfidence < 0.3 && result.scoreValidity === "fully-comparable") {
+        result.scoreValidity = "partially-comparable";
+      }
+
+      // Low confidence: suppress domain and scenario scores
+      if (avgConfidence < 0.5) {
+        if (result.domainScore) {
+          result.caveats = result.caveats ?? [];
+          result.caveats.push(
+            `Domain score suppressed: overall confidence too low (${Math.round(avgConfidence * 100)}%)`,
+          );
+          delete result.domainScore;
+        }
+        if (result.scenarioScore) {
+          result.caveats = result.caveats ?? [];
+          result.caveats.push(
+            `Scenario score suppressed: overall confidence too low (${Math.round(avgConfidence * 100)}%)`,
+          );
+          delete result.scenarioScore;
+        }
+      }
+
+      // Low confidence: suppress fix batches
+      if (avgConfidence < 0.4 && result.autofixSummary) {
+        const hadBatches = result.autofixSummary.fixBatches.length > 0;
+        if (hadBatches) {
+          result.autofixSummary.fixBatches = [];
+          result.autofixAbstentionReason = `Overall confidence too low for fix batches (${Math.round(avgConfidence * 100)}%)`;
+        }
       }
     }
   }
@@ -740,14 +800,28 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     );
   }
 
+  // Determine scenario applicability status based on domain confidence, graph quality, and ambiguity
+  let scenarioApplicabilityStatus: ScenarioApplicabilityStatus = "applicable";
+  const domainAmbiguityValue =
+    "domainAmbiguity" in domainInference ? domainInference.domainAmbiguity : 1;
+  if (!domainInference || domainInference.confidence < 0.3) {
+    scenarioApplicabilityStatus = "not_applicable";
+  } else if (domainInference.confidence < 0.5 || graphStats.usedFallbackGlob) {
+    scenarioApplicabilityStatus = "insufficient_evidence";
+  } else if (domainAmbiguityValue > 0.7) {
+    scenarioApplicabilityStatus = "applicable_but_weak";
+  }
+
   // Run scenario pack if domain was detected with sufficient confidence and no fallback glob
   let scenarioScore: ScenarioScore | undefined = undefined;
   let scenarioAbstentionReason: string | undefined = undefined;
-  if (!domainConfidenceMet) {
+  if (scenarioApplicabilityStatus === "not_applicable") {
     scenarioAbstentionReason =
       domainOpt === "off"
         ? "Domain scoring disabled"
-        : `Domain confidence too low (${domainInference.confidence.toFixed(2)})`;
+        : `Domain confidence too low (${domainInference.confidence.toFixed(2)}) — scenario not applicable`;
+  } else if (!domainConfidenceMet) {
+    scenarioAbstentionReason = `Domain confidence too low (${domainInference.confidence.toFixed(2)})`;
   } else if (usedFallbackGlob) {
     scenarioAbstentionReason = "Graph used fallback glob — scenario evaluation skipped";
   } else if (domainInference.confidence < SCENARIO_CONFIDENCE_THRESHOLD) {
@@ -762,6 +836,8 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       const applicabilityCheck = isScenarioApplicable(pack, consumerSurface, packageName);
       if (applicabilityCheck.applicable) {
         scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
+        // Attach applicability status to the scenario score
+        scenarioScore.scenarioApplicability = scenarioApplicabilityStatus;
       } else {
         scenarioAbstentionReason = `Scenario pack '${pack.name}' not applicable: ${applicabilityCheck.reason}`;
       }
@@ -949,8 +1025,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         typesSource: "unknown",
       };
 
+  // Determine analysis scope
+  let analysisScope: "self" | "package" | "source" = "source";
+  if (options?.profile === "autofix-agent") {
+    analysisScope = "self";
+  } else if (isPackageMode) {
+    analysisScope = "package";
+  }
+
   const result: AnalysisResult = {
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
+    analysisScope,
     caveats,
     composites,
     confidenceSummary,
@@ -983,6 +1068,29 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     result.degradedCategory = "insufficient-surface";
   }
 
+  // Compute source-mode confidence for source/self analyses
+  if (mode === "source" || analysisScope === "self") {
+    const totalIssues = dimensions.flatMap((dm) => dm.issues);
+    const ownedIssues = totalIssues.filter(
+      (ii) => ii.ownership === "source-owned" || ii.ownership === "workspace-owned",
+    );
+    const fixableIssues = totalIssues.filter((ii) => ii.fixability === "direct");
+    const resolvedOwnership = totalIssues.filter(
+      (ii) => ii.ownership !== undefined && ii.ownership !== "unresolved",
+    );
+
+    const smc: SourceModeConfidence = {
+      declarationEmitSuccess: 1,
+      fixabilityRate: totalIssues.length > 0 ? fixableIssues.length / totalIssues.length : 1,
+      ownershipClarity: totalIssues.length > 0 ? resolvedOwnership.length / totalIssues.length : 1,
+      sourceFileCoverage:
+        filesAnalyzed > 0 ? Math.min(1, filesAnalyzed / Math.max(1, sourceOnlyFiles.length)) : 0,
+      sourceOwnedExportCoverage:
+        totalIssues.length > 0 ? ownedIssues.length / totalIssues.length : 1,
+    };
+    result.sourceModeConfidence = smc;
+  }
+
   if (boundarySummary) {
     result.boundarySummary = boundarySummary;
   }
@@ -1002,6 +1110,20 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   if (options?.agent || profileInfo.profile === "autofix-agent") {
     const agentReport = buildAgentReport(result);
     result.autofixSummary = buildAutofixSummary(agentReport);
+
+    // Add abstention reason when no fix batches were emitted
+    if (result.autofixSummary.fixBatches.length === 0 && !result.autofixAbstentionReason) {
+      if (result.status === "degraded") {
+        result.autofixAbstentionReason = `Analysis degraded: ${result.degradedReason ?? "unknown"}`;
+      } else if (agentReport.actionableIssues.length === 0) {
+        result.autofixAbstentionReason = "No actionable source-owned issues found";
+      } else {
+        const stopMet = agentReport.stopConditions.find((sc) => sc.met);
+        result.autofixAbstentionReason = stopMet
+          ? `Agent stop: ${stopMet.reason}`
+          : "No fixable batches could be formed from actionable issues";
+      }
+    }
   }
 
   return result;
@@ -1583,5 +1705,51 @@ function computeFixabilityScore(dimensions: DimensionResult[]): FixabilityScore 
     notActionable,
     rationale,
     score,
+  };
+}
+
+/**
+ * Lightweight boundary-only analysis.
+ * Skips dimensions, domain detection, scenario scoring, composites, explainability.
+ * Returns only the boundary graph, summary, and quality score.
+ */
+export interface BoundaryOnlyResult {
+  boundaryQuality: ReturnType<typeof computeBoundaryQuality> | null;
+  boundarySummary: ReturnType<typeof buildBoundarySummary> | null;
+  filesAnalyzed: number;
+  projectName: string;
+  timeMs: number;
+}
+
+export function analyzeBoundariesOnly(projectPath: string): BoundaryOnlyResult {
+  const startTime = performance.now();
+  const absolutePath = resolve(projectPath);
+  const projectName = basename(absolutePath);
+
+  // Use lightweight loader — boundary analysis only needs AST traversal, not type resolution
+  const project = loadProjectLightweight(absolutePath);
+  const sourceFiles = getSourceFiles(project, undefined, absolutePath);
+  const filesAnalyzed = sourceFiles.length;
+
+  if (filesAnalyzed === 0) {
+    return {
+      boundaryQuality: null,
+      boundarySummary: null,
+      filesAnalyzed: 0,
+      projectName,
+      timeMs: Math.round(performance.now() - startTime),
+    };
+  }
+
+  const boundaryGraph = buildBoundaryGraph(sourceFiles, project);
+  const boundarySummary = buildBoundarySummary(boundaryGraph);
+  const boundaryQuality = computeBoundaryQuality(boundarySummary);
+
+  return {
+    boundaryQuality,
+    boundarySummary,
+    filesAnalyzed,
+    projectName,
+    timeMs: Math.round(performance.now() - startTime),
   };
 }

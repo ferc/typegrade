@@ -18,11 +18,11 @@
     "intent": "./bin/intent.js"
   },
   "files": [
-    "dist/*.js",
-    "dist/*.d.ts",
+    "dist",
     "skills",
     "bin",
     "!skills/_artifacts",
+    "!dist/*.map",
     "README.md",
     "LICENSE"
   ],
@@ -62,6 +62,7 @@
     "perf:cli": "tsx perf/run.ts cli",
     "perf:score": "tsx perf/run.ts score",
     "perf:benchmark": "tsx perf/run.ts benchmark",
+    "perf:ci": "tsx perf/run.ts all --ci",
     "release:dry-run": "tsx node_modules/.bin/semantic-release --dry-run",
     "intent:validate": "npx @tanstack/intent validate",
     "intent:stale": "npx @tanstack/intent stale",

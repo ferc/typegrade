@@ -1,5 +1,6 @@
 import {
   ANALYSIS_SCHEMA_VERSION,
+  type CrossPackageBoundarySummary,
   type Grade,
   type LayerViolation,
   type MonorepoConfig,
@@ -7,6 +8,8 @@ import {
   type MonorepoPackageInfo,
   type MonorepoReport,
   type PackageLayer,
+  type ViolationSeverity,
+  type ViolationSeveritySummary,
 } from "../types.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -128,8 +131,12 @@ export function analyzeMonorepo(opts: AnalyzeMonorepoOpts): MonorepoReport {
     violations,
   });
 
+  // Build cross-package boundary summary
+  const crossPackageBoundarySummary = buildCrossPackageBoundarySummary(violations);
+
   return {
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
+    crossPackageBoundarySummary,
     healthSummary,
     layerGraph,
     packages: [...packageMap.values()],
@@ -496,9 +503,11 @@ function detectViolations(
       // Check if this cross-layer dependency is allowed
       if (!allowed.includes(targetLayer)) {
         const violationType = categorizeViolation({ sourceLayer, targetLayer });
+        const severity = classifyViolationSeverity({ sourceLayer, targetLayer, violationType });
 
         violations.push({
           importPath: depName,
+          severity,
           sourceLayer,
           sourcePackage: packageInfo.name,
           targetLayer,
@@ -534,6 +543,46 @@ function categorizeViolation(opts: CategorizeViolationOpts): LayerViolation["vio
   }
 
   return "forbidden-cross-layer";
+}
+
+/**
+ * Classify the severity of a violation based on its type and the layers involved.
+ */
+function classifyViolationSeverity(violation: {
+  violationType: LayerViolation["violationType"];
+  sourceLayer: PackageLayer;
+  targetLayer: PackageLayer;
+}): ViolationSeverity {
+  // Trust-zone-crossing from core domain layers is critical
+  if (violation.violationType === "trust-zone-crossing") {
+    if (violation.sourceLayer === "domain" || violation.sourceLayer === "shared") {
+      return "critical";
+    }
+    return "high";
+  }
+
+  // Unstable-leak (shared depending on anything) is high
+  if (violation.violationType === "unstable-leak") {
+    return "high";
+  }
+
+  // Infra-bypass (domain→infra) is high
+  if (violation.violationType === "infra-bypass") {
+    return "high";
+  }
+
+  // Forbidden-cross-layer: severity depends on layer distance
+  const sourceTrust = LAYER_TRUST_LEVELS[violation.sourceLayer];
+  const targetTrust = LAYER_TRUST_LEVELS[violation.targetLayer];
+  const trustDelta = Math.abs(sourceTrust - targetTrust);
+
+  if (trustDelta >= 3) {
+    return "high";
+  }
+  if (trustDelta >= 2) {
+    return "medium";
+  }
+  return "low";
 }
 
 /**
@@ -585,13 +634,20 @@ export function detectCrossPackageBoundaryIssues(
 
       // Higher-trust package depending on lower-trust package is a crossing
       if (sourceTrust > targetTrust) {
+        const violationType = "trust-zone-crossing" as const;
+        const severity = classifyViolationSeverity({
+          sourceLayer: packageInfo.layer,
+          targetLayer: depInfo.layer,
+          violationType,
+        });
         violations.push({
           importPath: depName,
+          severity,
           sourceLayer: packageInfo.layer,
           sourcePackage: packageInfo.name,
           targetLayer: depInfo.layer,
           targetPackage: depName,
-          violationType: "trust-zone-crossing",
+          violationType,
         });
       }
     }
@@ -605,31 +661,137 @@ interface ComputeHealthSummaryOpts {
   violations: LayerViolation[];
 }
 
+/** Severity weight factors for health scoring */
+const SEVERITY_WEIGHTS: Record<ViolationSeverity, number> = {
+  critical: 20,
+  high: 10,
+  low: 2,
+  medium: 5,
+};
+
 /**
- * Compute a health summary for the monorepo based on violation counts.
+ * Compute a health summary for the monorepo based on severity-weighted violations.
  *
- * healthScore = 100 - (violations.length * 5), clamped to [0, 100].
+ * healthScore = 100 - sum(severity_weight * count), clamped to [0, 100].
  * Grade is derived from healthScore using the standard grade curve.
+ * Violation density normalizes by package count for comparability.
  */
 function computeHealthSummary(opts: ComputeHealthSummaryOpts): MonorepoHealthSummary {
   const { packages, violations } = opts;
 
   const violationsByType: Record<string, number> = {};
+  const severitySummary: ViolationSeveritySummary = { critical: 0, high: 0, low: 0, medium: 0 };
+
   for (const violation of violations) {
     const vt = violation.violationType;
     violationsByType[vt] = (violationsByType[vt] ?? 0) + 1;
+    severitySummary[violation.severity]++;
   }
 
-  const rawScore = 100 - violations.length * 5;
+  // Severity-weighted score deduction
+  const weightedDeduction =
+    severitySummary.critical * SEVERITY_WEIGHTS.critical +
+    severitySummary.high * SEVERITY_WEIGHTS.high +
+    severitySummary.medium * SEVERITY_WEIGHTS.medium +
+    severitySummary.low * SEVERITY_WEIGHTS.low;
+
+  const rawScore = 100 - weightedDeduction;
   const healthScore = Math.max(0, Math.min(100, rawScore));
   const healthGrade: Grade = computeGrade(healthScore);
+
+  // Violation density: violations per package
+  const violationDensity =
+    packages.size > 0 ? Math.round((violations.length / packages.size) * 100) / 100 : 0;
+
+  // Workspace confidence: lower when workspace discovery yielded few packages
+  // Or when many packages have default layer classification
+  const workspaceConfidence = computeWorkspaceConfidence(packages);
+
+  // Layer model confidence: how much of layer assignment is explicit vs heuristic
+  const layerModelConfidence = computeLayerModelConfidence(packages);
 
   return {
     healthGrade,
     healthScore,
+    layerModelConfidence,
     totalPackages: packages.size,
     totalViolations: violations.length,
+    violationDensity,
+    violationSeveritySummary: severitySummary,
     violationsByType,
+    workspaceConfidence,
+  };
+}
+
+/**
+ * Compute confidence in workspace discovery results.
+ * Low confidence when discovery found very few packages or none at all.
+ */
+function computeWorkspaceConfidence(packages: Map<string, MonorepoPackageInfo>): number {
+  if (packages.size === 0) {
+    return 0;
+  }
+  if (packages.size === 1) {
+    return 0.3;
+  }
+  if (packages.size <= 3) {
+    return 0.6;
+  }
+  return 0.9;
+}
+
+/**
+ * Compute confidence in layer model assignments.
+ * Higher when packages have clear layer indicators (bin, UI deps, name patterns).
+ */
+function computeLayerModelConfidence(packages: Map<string, MonorepoPackageInfo>): number {
+  if (packages.size === 0) {
+    return 0;
+  }
+  // Count packages not on the default "shared" layer (indicates active classification)
+  let classifiedCount = 0;
+  for (const [, pkg] of packages) {
+    if (pkg.layer !== "shared") {
+      classifiedCount++;
+    }
+  }
+  const classifiedRatio = classifiedCount / packages.size;
+  // Even fully-classified heuristic layers cap at 0.8 (explicit config gets 1.0)
+  return Math.min(0.8, 0.3 + classifiedRatio * 0.5);
+}
+
+/**
+ * Build a summary of cross-package boundary trust violations.
+ */
+function buildCrossPackageBoundarySummary(
+  violations: LayerViolation[],
+): CrossPackageBoundarySummary {
+  const trustCrossings = violations.filter((vv) => vv.violationType === "trust-zone-crossing");
+  const highRisk = trustCrossings.filter(
+    (vv) => vv.severity === "critical" || vv.severity === "high",
+  );
+
+  const affectedPackages = new Set<string>();
+  for (const vv of trustCrossings) {
+    affectedPackages.add(vv.sourcePackage);
+    affectedPackages.add(vv.targetPackage);
+  }
+
+  // Compute trust gap severity based on high-risk crossing count
+  let trustGapSeverity: CrossPackageBoundarySummary["trustGapSeverity"] = "none";
+  if (highRisk.length > 5) {
+    trustGapSeverity = "high";
+  } else if (highRisk.length > 2) {
+    trustGapSeverity = "moderate";
+  } else if (highRisk.length > 0) {
+    trustGapSeverity = "low";
+  }
+
+  return {
+    affectedPackages: [...affectedPackages].toSorted(),
+    highRiskCrossings: highRisk.length,
+    totalCrossings: trustCrossings.length,
+    trustGapSeverity,
   };
 }
 

@@ -1,13 +1,13 @@
 import type {
   AnalysisProfile,
   AnalysisResult,
+  BoundaryQualityScore,
+  BoundarySummary,
   FixApplicationResult,
   FixMode,
   FixPlan,
   MonorepoReport,
 } from "./types.js";
-import { buildAgentReport as buildAgentReportFromResult, renderAgentJson } from "./agent/index.js";
-import { computeDiff, renderDiffReport } from "./diff.js";
 import {
   renderDimensionTable,
   renderExplainability,
@@ -17,12 +17,7 @@ import {
 import type { AgentReport } from "./agent/types.js";
 import { Command } from "commander";
 import type { DomainType } from "./domain.js";
-import { analyzeMonorepo } from "./monorepo/index.js";
-import { analyzeProject } from "./analyzer.js";
-import { applyFixes } from "./fix/applier.js";
-import { buildFixPlan } from "./fix/planner.js";
 import pc from "picocolors";
-import { scorePackage } from "./package-scorer.js";
 
 function getAgentReadinessScore(result: AnalysisResult): number {
   const ar = result.composites.find((comp) => comp.key === "agentReadiness");
@@ -53,7 +48,7 @@ function toOutputOptions(opts: Record<string, unknown>): OutputOptions {
   };
 }
 
-function outputResult(result: AnalysisResult, opts: OutputOptions) {
+async function outputResult(result: AnalysisResult, opts: OutputOptions) {
   if (opts.color === false) {
     pc.isColorSupported = false;
   }
@@ -76,7 +71,8 @@ function outputResult(result: AnalysisResult, opts: OutputOptions) {
 
   // Agent mode: emit agent-specific JSON
   if (opts.agent && result.autofixSummary) {
-    console.log(renderAgentJson(buildAgentReportFromResult(result)));
+    const { buildAgentReport, renderAgentJson } = await import("./agent/index.js");
+    console.log(renderAgentJson(buildAgentReport(result)));
     return;
   }
 
@@ -144,20 +140,21 @@ export function runCli() {
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--profile <profile>", `Analysis profile: ${VALID_PROFILES.join("|")}`)
     .option("--agent", "Agent-optimized output (precision-first, fix batches)")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const projectPath = path ?? ".";
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const profile = opts.profile ? parseProfileOption(String(opts.profile)) : undefined;
       const agent = Boolean(opts.agent);
+      const { analyzeProject } = await import("./analyzer.js");
       const result = analyzeProject(projectPath, {
         agent,
         domain,
         explain: Boolean(opts.explain),
         profile,
       });
-      outputResult(result, toOutputOptions(opts));
+      await outputResult(result, toOutputOptions(opts));
     });
 
   program
@@ -168,13 +165,13 @@ export function runCli() {
     .option("--explain", "Show explainability report")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--no-cache", "Disable package cache (always install fresh)")
-    .action((pkg: string, cmdOpts: Record<string, unknown>) => {
+    .action(async (pkg: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
-      const result = tryScorePackage(pkg, { domain, noCache });
-      outputResult(result, toOutputOptions(opts));
+      const result = await tryScorePackage(pkg, { domain, noCache });
+      await outputResult(result, toOutputOptions(opts));
     });
 
   program
@@ -182,16 +179,18 @@ export function runCli() {
     .description("Analyze and suggest improvements (closed-loop self-improvement)")
     .option("--json", "Output as JSON")
     .option("--apply", "Apply safe fixes automatically (dry-run by default)")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const projectPath = path ?? ".";
+      const { analyzeProject } = await import("./analyzer.js");
+      const { buildAgentReport, renderAgentJson } = await import("./agent/index.js");
       const result = analyzeProject(projectPath, {
         agent: true,
         explain: true,
         profile: "autofix-agent",
       });
-      const agentReport = buildAgentReportFromResult(result);
+      const agentReport = buildAgentReport(result);
 
       if (opts.json) {
         console.log(renderAgentJson(agentReport));
@@ -206,12 +205,13 @@ export function runCli() {
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--no-cache", "Disable package cache (always install fresh)")
-    .action((pkgA: string, pkgB: string, cmdOpts: Record<string, unknown>) => {
+    .action(async (pkgA: string, pkgB: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
 
+      const { scorePackage } = await import("./package-scorer.js");
       const resultA = scorePackage(pkgA, { domain, noCache });
       const resultB = scorePackage(pkgB, { domain, noCache });
 
@@ -226,15 +226,12 @@ export function runCli() {
     .command("boundaries [path]")
     .description("Analyze boundary trust and validation coverage")
     .option("--json", "Output as JSON")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const projectPath = path ?? ".";
-      const result = analyzeProject(projectPath, {
-        agent: false,
-        explain: false,
-        profile: "application",
-      });
+      const { analyzeBoundariesOnly } = await import("./analyzer.js");
+      const result = analyzeBoundariesOnly(projectPath);
       if (opts.json) {
         console.log(
           JSON.stringify(
@@ -247,7 +244,7 @@ export function runCli() {
           ),
         );
       } else {
-        console.log(renderBoundaryReport(result));
+        console.log(renderBoundaryReportFromBoundaryResult(result));
       }
     });
 
@@ -255,10 +252,12 @@ export function runCli() {
     .command("fix-plan [path]")
     .description("Generate a fix plan for improving type quality")
     .option("--json", "Output as JSON")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const projectPath = path ?? ".";
+      const { analyzeProject } = await import("./analyzer.js");
+      const { buildFixPlan } = await import("./fix/planner.js");
       const result = analyzeProject(projectPath, {
         agent: true,
         explain: true,
@@ -277,11 +276,14 @@ export function runCli() {
     .description("Apply safe fixes from a fix plan")
     .option("--mode <mode>", "Fix mode: safe|review", "safe")
     .option("--json", "Output as JSON")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const projectPath = path ?? ".";
       const mode = (opts.mode === "review" ? "review" : "safe") as FixMode;
+      const { analyzeProject } = await import("./analyzer.js");
+      const { buildFixPlan } = await import("./fix/planner.js");
+      const { applyFixes } = await import("./fix/applier.js");
       const result = analyzeProject(projectPath, {
         agent: true,
         explain: true,
@@ -302,11 +304,13 @@ export function runCli() {
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--no-cache", "Disable package cache")
-    .action((baseline: string, target: string, cmdOpts: Record<string, unknown>) => {
+    .action(async (baseline: string, target: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
+      const { scorePackage } = await import("./package-scorer.js");
+      const { computeDiff, renderDiffReport } = await import("./diff.js");
       const baselineResult = scorePackage(baseline, { domain, noCache });
       const targetResult = scorePackage(target, { domain, noCache });
       const diff = computeDiff({ baseline: baselineResult, target: targetResult });
@@ -344,10 +348,11 @@ export function runCli() {
     .command("monorepo [path]")
     .description("Analyze monorepo workspace health and layer violations")
     .option("--json", "Output as JSON")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const rootPath = path ?? ".";
+      const { analyzeMonorepo } = await import("./monorepo/index.js");
       const report = analyzeMonorepo({ rootPath });
       if (opts.json) {
         console.log(JSON.stringify(report, null, 2));
@@ -359,11 +364,12 @@ export function runCli() {
   program.parse();
 }
 
-function tryScorePackage(
+async function tryScorePackage(
   pkg: string,
   options: { domain: "auto" | "off" | DomainType; noCache: boolean },
-): AnalysisResult {
+): Promise<AnalysisResult> {
   try {
+    const { scorePackage } = await import("./package-scorer.js");
     return scorePackage(pkg, options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -554,11 +560,18 @@ function renderSelfAnalysis(
   return lines.join("\n");
 }
 
-function renderBoundaryReport(result: AnalysisResult): string {
-  const lines: string[] = ["", pc.bold("  typegrade boundaries"), ""];
+function renderBoundaryReportFromBoundaryResult(result: {
+  boundaryQuality: BoundaryQualityScore | null;
+  boundarySummary: BoundarySummary | null;
+}): string {
+  return renderBoundaryData(result.boundarySummary, result.boundaryQuality);
+}
 
-  const summary = result.boundarySummary;
-  const quality = result.boundaryQuality;
+function renderBoundaryData(
+  summary: BoundarySummary | undefined | null,
+  quality: BoundaryQualityScore | undefined | null,
+): string {
+  const lines: string[] = ["", pc.bold("  typegrade boundaries"), ""];
 
   if (!summary || !quality) {
     lines.push("  No boundary data available. Run on a source project (not a package).");
@@ -670,9 +683,15 @@ function renderMonorepoReport(report: MonorepoReport): string {
   if (report.violations.length > 0) {
     lines.push(pc.bold("  Layer Violations:"));
     for (const violation of report.violations.slice(0, 20)) {
-      const color = violation.violationType === "trust-zone-crossing" ? pc.red : pc.yellow;
+      let severityColor = pc.dim;
+      if (violation.severity === "critical") {
+        severityColor = pc.red;
+      } else if (violation.severity === "high") {
+        severityColor = pc.yellow;
+      }
+      const typeColor = violation.violationType === "trust-zone-crossing" ? pc.red : pc.yellow;
       lines.push(
-        `    ${color(`[${violation.violationType}]`)} ${violation.sourcePackage} (${violation.sourceLayer}) -> ${violation.targetPackage} (${violation.targetLayer})`,
+        `    ${severityColor(`[${violation.severity}]`)} ${typeColor(`${violation.violationType}`)} ${violation.sourcePackage} (${violation.sourceLayer}) -> ${violation.targetPackage} (${violation.targetLayer})`,
       );
     }
     if (report.violations.length > 20) {
@@ -691,6 +710,35 @@ function renderMonorepoReport(report: MonorepoReport): string {
     lines.push(`    Score: ${gradeColor(`${hs.healthScore}/100 (${hs.healthGrade})`)}`);
     lines.push(`    Packages: ${hs.totalPackages}`);
     lines.push(`    Violations: ${hs.totalViolations}`);
+    if (hs.totalViolations > 0) {
+      const ss = hs.violationSeveritySummary;
+      const parts: string[] = [];
+      if (ss.critical > 0) {
+        parts.push(pc.red(`${ss.critical} critical`));
+      }
+      if (ss.high > 0) {
+        parts.push(pc.yellow(`${ss.high} high`));
+      }
+      if (ss.medium > 0) {
+        parts.push(`${ss.medium} medium`);
+      }
+      if (ss.low > 0) {
+        parts.push(pc.dim(`${ss.low} low`));
+      }
+      lines.push(`    Severity: ${parts.join(", ")}`);
+      lines.push(`    Density: ${hs.violationDensity} violations/package`);
+    }
+    lines.push(`    Workspace Confidence: ${Math.round(hs.workspaceConfidence * 100)}%`);
+    lines.push(`    Layer Model Confidence: ${Math.round(hs.layerModelConfidence * 100)}%`);
+    lines.push("");
+  }
+
+  if (report.crossPackageBoundarySummary && report.crossPackageBoundarySummary.totalCrossings > 0) {
+    const cb = report.crossPackageBoundarySummary;
+    lines.push(pc.bold("  Cross-Package Trust Boundaries:"));
+    lines.push(`    Total crossings: ${cb.totalCrossings}`);
+    lines.push(`    High-risk: ${cb.highRiskCrossings}`);
+    lines.push(`    Affected packages: ${cb.affectedPackages.join(", ")}`);
     lines.push("");
   }
 

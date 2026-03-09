@@ -1,5 +1,6 @@
 // Public library API — no CLI side effects on import
-export { analyzeProject, normalizeResult } from "./analyzer.js";
+export { analyzeBoundariesOnly, analyzeProject, normalizeResult } from "./analyzer.js";
+export type { BoundaryOnlyResult } from "./analyzer.js";
 export { scorePackage } from "./package-scorer.js";
 export type { ScorePackageOptions } from "./package-scorer.js";
 export {
@@ -13,7 +14,13 @@ export type { CompareResult, CompareOptions } from "./compare.js";
 
 // Agent and profile APIs
 export { buildAgentReport, enrichFixBatches, renderAgentJson } from "./agent/index.js";
-export type { AgentReport, EnrichedFixBatch, StopCondition } from "./agent/index.js";
+export type {
+  AgentReport,
+  EnrichedFixBatch,
+  FixBatchDiff,
+  RollbackRisk,
+  StopCondition,
+} from "./agent/index.js";
 export { detectProfile, gatherProfileSignals } from "./profiles/index.js";
 export { resolveFileOwnership } from "./ownership/index.js";
 export {
@@ -48,9 +55,11 @@ export type {
   AnalysisMode,
   AnalysisProfile,
   AnalysisResult,
+  AnalysisScope,
   AnalysisStatus,
   Applicability,
   AutofixSummary,
+  BoundaryFindingCategory,
   BoundaryHotspot,
   BoundaryInventoryEntry,
   BoundaryPolicyConfig,
@@ -64,6 +73,7 @@ export type {
   CompositeDiff,
   CompositeKey,
   CompositeScore,
+  CrossPackageBoundarySummary,
   ConfidenceSignal,
   ConfidenceSummary,
   CoverageDiagnostics,
@@ -74,6 +84,8 @@ export type {
   DimensionResult,
   DomainKey,
   DomainScore,
+  EvalAggregateMetrics,
+  EvalGateResult,
   EvidenceSummary,
   ExplainabilityReport,
   ExportRole,
@@ -96,13 +108,17 @@ export type {
   PackageIdentity,
   PackageLayer,
   ProfileInfo,
+  RedactedEvalSummary,
   RoleClassification,
   RootCauseCategory,
   SafeFixCategory,
+  ScenarioApplicabilityStatus,
   ScenarioScore,
   ScenarioVariant,
   ScoreComparability,
   ScoreValidity,
+  ShadowLatestResult,
+  SourceModeConfidence,
   SuggestedFixKind,
   SuppressionCategory,
   SuppressionEntry,
@@ -116,4 +132,6 @@ export type {
   ValidationSink,
   VerificationCommand,
   VerificationPlan,
+  ViolationSeverity,
+  ViolationSeveritySummary,
 } from "./types.js";

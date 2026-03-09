@@ -9,6 +9,7 @@ describe("pack smoke test", () => {
     const exportedNames = Object.keys(indexExports).toSorted();
     expect(exportedNames).toStrictEqual([
       "ANALYSIS_SCHEMA_VERSION",
+      "analyzeBoundariesOnly",
       "analyzeMonorepo",
       "analyzeProject",
       "applyFixes",

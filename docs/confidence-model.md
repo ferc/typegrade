@@ -106,8 +106,48 @@ The `scoreValidity` field reflects whether scores can be meaningfully compared t
 Key transitions:
 - **Undersampled** analysis → `"not-comparable"` (insufficient evidence for any comparison).
 - **Fallback glob** resolution → `"partially-comparable"` (some evidence, but entrypoint graph is unreliable).
+- **Confidence collapse** (<0.2 average across all four summary axes) → entire result is degraded. All composite scores are nulled, domain/scenario/fix data are stripped, and `degradedCategory` is set to `"confidence-collapse"`. This prevents analyses with near-zero evidence from producing any authoritative-looking output.
 - **Low average confidence** (<0.3 across all four summary axes) on an otherwise complete result → downgraded from `"fully-comparable"` to `"partially-comparable"`.
+- **Low average confidence** (<0.4) → fix batches are suppressed (emptied). `autofixAbstentionReason` explains why no fix batches were emitted.
 - **Low composite confidence** (<0.5 average across composites) → `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` are stripped from the result (set to `undefined`). These layers require sufficient evidence to be meaningful.
+
+## Source-mode confidence
+
+When running in source or self mode, `typegrade` computes a `SourceModeConfidence` object attached to the result as `sourceModeConfidence`. This captures confidence metrics specific to source analysis that are not applicable in package mode.
+
+| Field | Description | Formula |
+|---|---|---|
+| `sourceFileCoverage` | Proportion of source files that were actually analyzed | `min(1, filesAnalyzed / sourceFileCount)` |
+| `declarationEmitSuccess` | Whether declaration emit succeeded (1.0) or fell back (capped) | 1.0 on success, reduced on fallback |
+| `sourceOwnedExportCoverage` | Proportion of issues that are source-owned | `sourceOwnedIssues / totalIssues` |
+| `ownershipClarity` | Proportion of issues with resolved ownership | `resolvedOwnership / totalIssues` |
+| `fixabilityRate` | Proportion of issues that are directly fixable | `fixableIssues / totalIssues` |
+
+These metrics help agents assess whether a source analysis provides enough coverage and actionability to proceed with fixes. When all five fields are near 1.0, the source analysis is comprehensive and the resulting fix plan is highly actionable.
+
+## Scenario applicability gating
+
+Scenario packs are gated by multiple confidence signals before they run. The `ScenarioApplicabilityStatus` on each `ScenarioScore` indicates why a scenario was or was not evaluated:
+
+| Status | When set |
+|---|---|
+| `applicable` | Domain confidence >= 0.5, graph resolution succeeded, domain ambiguity <= 0.7 |
+| `applicable_but_weak` | Domain detected but ambiguity > 0.7 — scenario ran but results should be interpreted cautiously |
+| `insufficient_evidence` | Domain confidence < 0.5 or graph used fallback glob — not enough evidence to run scenarios reliably |
+| `not_applicable` | Domain confidence < 0.3 or domain scoring disabled — scenario evaluation skipped entirely |
+
+The gating conditions in order of precedence:
+
+1. **Domain confidence < 0.3** or domain disabled: `not_applicable` — scenario is skipped.
+2. **Domain confidence < 0.5** or fallback glob used: `insufficient_evidence` — scenario is skipped.
+3. **Domain ambiguity > 0.7**: `applicable_but_weak` — scenario runs but with reduced trust.
+4. Otherwise: `applicable` — scenario runs normally.
+
+When a scenario is skipped, `scenarioAbstentionReason` explains the specific gate that blocked it.
+
+## Multi-label domain confidence
+
+Domain inference now computes a `multiLabelConfidence` value (0-1) on `DomainInference`, indicating how strongly a secondary domain applies alongside the primary domain. When the runner-up domain has confidence > 0.4, the multi-label confidence is computed as `min(1, secondaryConfidence / primaryConfidence)`. A high multi-label confidence (e.g., > 0.5) indicates the package spans multiple domains and domain-specific scoring should be interpreted with caution.
 
 ## Interpreting confidence
 

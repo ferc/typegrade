@@ -41,6 +41,41 @@ export interface GetSourceFilesOptions {
   includeNodeModules?: boolean;
 }
 
+/**
+ * Load a project with minimal overhead — skips lib files and dependency resolution.
+ * Suitable for AST-only analysis (boundary detection, pattern matching) that
+ * does not require type resolution or type-checker queries.
+ */
+export function loadProjectLightweight(projectPath: string): Project {
+  const absolutePath = resolve(projectPath);
+  const tsconfigPath = join(absolutePath, "tsconfig.json");
+
+  if (existsSync(tsconfigPath)) {
+    return new Project({
+      skipAddingFilesFromTsConfig: false,
+      skipFileDependencyResolution: true,
+      skipLoadingLibFiles: true,
+      tsConfigFilePath: tsconfigPath,
+    });
+  }
+
+  const project = new Project({
+    compilerOptions: {
+      esModuleInterop: true,
+      module: ModuleKind.ESNext,
+      moduleResolution: ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      strict: true,
+      target: ScriptTarget.ES2015,
+    },
+    skipFileDependencyResolution: true,
+    skipLoadingLibFiles: true,
+  });
+
+  project.addSourceFilesAtPaths(join(absolutePath, "**/*.{ts,tsx}"));
+  return project;
+}
+
 export function getSourceFiles(
   project: Project,
   options?: GetSourceFilesOptions,

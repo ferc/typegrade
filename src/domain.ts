@@ -52,6 +52,8 @@ export interface DomainInference {
   ambiguityGap: number;
   /** 0 = unambiguous, 1 = very ambiguous */
   domainAmbiguity: number;
+  /** Confidence that this is a multi-domain library */
+  multiLabelConfidence?: number;
   runnerUpDomain: DomainType;
   /** Secondary domain candidates with scores */
   secondaryDomains: { domain: DomainType; score: number; confidence: number }[];
@@ -1093,6 +1095,14 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       score: Math.round(sc * 100) / 100,
     }));
 
+  // ── Compute multi-label confidence ──────────────────────────────────
+  // How likely this library spans multiple domains
+
+  const multiLabelConfidence =
+    secondaryDomains.length > 0 && secondaryDomains[0]!.confidence > 0.4
+      ? Math.min(1, secondaryDomains[0]!.confidence / confidence)
+      : 0;
+
   // ── Compute domain ambiguity ──────────────────────────────────────────
   // 0 = unambiguous (large gap), 1 = very ambiguous (no gap)
 
@@ -1154,6 +1164,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     evidenceClasses,
     falsePositiveRisk,
     matchedRules,
+    multiLabelConfidence,
     runnerUpDomain,
     secondaryDomains,
     signals,

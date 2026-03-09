@@ -17,6 +17,8 @@ Source mode analyzes your TypeScript source files directly. All 12 dimensions co
 
 If declaration emit fails, source mode falls back to analyzing raw source files for the consumer dimensions, with all confidences capped at 0.6.
 
+In source mode, a `sourceModeConfidence` object is computed with metrics specific to source analysis: source file coverage, declaration emit success, source-owned export coverage, ownership clarity, and fixability rate. See [Confidence Model: Source-mode confidence](confidence-model.md#source-mode-confidence) for details.
+
 ### Package mode (`typegrade score`)
 
 Package mode analyzes published `.d.ts` declarations — what consumers and AI agents actually import.
@@ -57,13 +59,15 @@ When analysis cannot complete normally (e.g., declaration emit fails catastrophi
 - `status` is set to `"degraded"`.
 - `scoreValidity` is set to `"not-comparable"`.
 - `degradedReason` contains a human-readable explanation of why the analysis degraded.
-- `degradedCategory` classifies the failure: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, or `insufficient-surface`.
+- `degradedCategory` classifies the failure: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, `insufficient-surface`, `confidence-collapse`, or `workspace-discovery-failure`.
+- `degradedReasonChain` provides an ordered chain of reasons (most specific first) explaining the degradation path, including the primary reason, category, and specific failure mode.
 - All composite scores are set to `null` (never fake zeros).
-- `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` are stripped entirely.
+- `domainScore`, `scenarioScore`, `autofixSummary`, `fixPlan`, `boundaryQuality`, and `boundarySummary` are stripped entirely.
+- `autofixAbstentionReason` explains why no fix batches were emitted.
 
 Consumers should check `status` before comparing scores. Degraded results are excluded from ranking and gating by default.
 
-Low-confidence results (average composite confidence < 0.5) also have `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` stripped, even when `status` is `"complete"`.
+Low-confidence results (average composite confidence < 0.5) also have `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` stripped, even when `status` is `"complete"`. When average confidence falls below 0.2, the result is auto-degraded with `degradedCategory: "confidence-collapse"`.
 
 ### Ownership classification
 
@@ -80,6 +84,20 @@ Every issue and dimension result can carry an `OwnershipClass` indicating who ow
 | `unresolved` | Ownership could not be determined |
 
 Ownership influences fix planning — `source-owned` and `workspace-owned` issues are directly actionable, while `dependency-owned` issues are flagged as `external` fixability.
+
+## Package layout classification
+
+Before building the declaration graph, `typegrade` classifies the package layout to determine the best analysis strategy and avoid unnecessary fallback/degraded results:
+
+| Layout class | Conditions | Behavior |
+|---|---|---|
+| `standard` | Has type entries + 3 or more `.d.ts` files | Normal graph-based analysis |
+| `declaration-sparse` | Has type entries but fewer than 3 `.d.ts` files | Normal analysis with compact-surface handling |
+| `no-declarations` | Zero `.d.ts` files | Degraded result (`missing-declarations`) |
+| `no-types-entry` | Has `.d.ts` files but no `types`/`typings`/`exports` entries | Falls back to analyzing all `.d.ts` files directly |
+| `unsupported-bundler` | Package uses an unsupported bundler output format | Degraded result (`unsupported-package-layout`) |
+
+This classification reduces false degraded results for packages that have usable type information but lack standard `package.json` type entries (e.g., older packages or unconventional layouts).
 
 ## Declaration graph engine
 
@@ -289,6 +307,19 @@ For each detected boundary, the analyzer checks whether downstream validation ex
 
 Unvalidated boundaries at `untrusted-external` trust level produce **taint edges** — indicating data that flows from an untrusted source without passing through a validation sink.
 
+### Taint provenance
+
+Each taint flow chain carries a `provenance` field classifying the origin of the tainted data:
+
+| Provenance | Description |
+|---|---|
+| `external-input` | Data originates from outside the system (network requests, user input) |
+| `parsed-data` | Data produced by a deserialization step (`JSON.parse`, config parsing) |
+| `cross-boundary` | Data flowing across a package or trust zone boundary |
+| `internal` | Data from internal sources that crossed an unexpected boundary |
+
+Provenance helps agents prioritize which taint flows are most critical. `external-input` and `cross-boundary` flows typically require immediate validation, while `internal` flows may be acceptable depending on context.
+
 ### Trust zones and policies
 
 When configured via `typegrade.config.ts`, the boundary analyzer enforces **trust zones** — named regions of the codebase mapped to trust levels — and **policies** — rules requiring validation at specific boundary types.
@@ -304,7 +335,7 @@ The boundary analysis produces a `BoundaryQualityScore` with:
 - **Trusted-local bonus**: +2 per trusted-local suppression (max +10), indicating awareness.
 - **Trust model accuracy**: 1 minus the ratio of missing validation hotspots.
 
-The boundary report includes taint chains, hotspots, trust zone crossings, and policy violations.
+The boundary report includes taint chains (with provenance), hotspots, trust zone crossings, policy violations, and finding categories (see [Scoring Contract: Boundary finding categories](scoring-contract.md#boundary-finding-categories)).
 
 ## Fix planning pipeline
 
@@ -337,11 +368,56 @@ The full `FixPlan` extends batches with:
 
 - **Confidence** per batch (0-1) — how likely the fix is correct.
 - **Expected score uplift** — predicted composite score improvement.
-- **Verification commands** — shell commands to validate the fix (e.g., `tsc --noEmit`, `pnpm test`).
+- **Verification plan** — typed verification commands (see below).
 - **Rollback notes** — instructions for reverting if the fix causes regressions.
 - **Dependency ordering** — `dependsOn` fields ensuring batches are applied in the correct sequence.
 
 Safe fix categories (`add-explicit-return-type`, `replace-any-with-unknown`, `insert-satisfies`, `wrap-json-parse`, `add-env-parsing`, `narrow-overloads`, `hoist-validation`) can be applied automatically. All other fixes require human review.
+
+### Agent fix batch enrichment
+
+Enriched fix batches (`EnrichedFixBatch`) extend the base batch with agent-specific metadata:
+
+- **`expectedDiffs`** — predicted code changes per file (`FixBatchDiff[]`), each with a `file`, `linesAffected`, and `changeDescription`. Helps agents preview impact before applying.
+- **`rollbackRisk`** — a risk assessment with `level` (`trivial`, `safe`, `caution`, `dangerous`), `reason`, and flags for `affectsPublicApi` and `affectsTests`. Agents can use this to decide whether human review is needed.
+- **`expectedScoreDelta`** — predicted composite score improvement from applying this batch.
+- **`verificationCommands`** — shell commands to validate the fix after applying.
+
+### Verification plan
+
+The `VerificationPlan` provides typed verification commands for post-fix validation:
+
+```typescript
+interface VerificationPlan {
+  commands: VerificationCommand[];
+  expectedOutcome: string;
+}
+
+interface VerificationCommand {
+  command: string;       // e.g. "tsc --noEmit"
+  description: string;   // e.g. "Type-check without emitting"
+  mustPass: boolean;      // Whether this command must succeed for the fix to be accepted
+}
+```
+
+Commands with `mustPass: true` are mandatory gates — if they fail after applying a fix, the agent should roll back. Commands with `mustPass: false` are informational checks (e.g., running benchmarks).
+
+### Source-mode issue ranking
+
+In source and self analysis modes, issues receive priority boosts to surface the most actionable findings first:
+
+| Signal | Priority boost |
+|---|---|
+| `source-owned` ownership | +20 |
+| Exported-surface dimension (`apiSpecificity`, `semanticLift`) | +15 |
+| Declaration-affecting fix kind (`add-type-annotation`, `replace-any`, `strengthen-generic`) | +10 |
+| Directly fixable (`fixability: "direct"`) | +10 |
+
+These boosts are additive. A source-owned issue on an exported-surface dimension with a direct fix receives up to +55 priority, ensuring it surfaces at the top of the agent's work queue.
+
+### Module cluster batching
+
+In source and self modes, fix batches cluster issues by **module directory** rather than individual file. This groups related issues across files in the same directory into a single batch, reducing context-switching for agents and encouraging holistic fixes. In package mode, batching groups by individual file as before.
 
 ## Monorepo and layering analysis
 

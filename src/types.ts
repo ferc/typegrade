@@ -15,17 +15,41 @@ export type DegradedCategory =
   | "missing-declarations"
   | "partial-graph-resolution"
   | "install-failure"
-  | "insufficient-surface";
+  | "insufficient-surface"
+  | "confidence-collapse"
+  | "workspace-discovery-failure";
+
+/** Scope of the analysis — what kind of target was analyzed */
+export type AnalysisScope = "package" | "source" | "workspace" | "self";
+
+/** Severity class for monorepo violations */
+export type ViolationSeverity = "critical" | "high" | "medium" | "low";
 
 // --- Applicability ---
 
 /** Whether a dimension is meaningful for a given library */
 export type Applicability = "applicable" | "not_applicable" | "insufficient_evidence";
 
+/** Granular scenario applicability status */
+export type ScenarioApplicabilityStatus =
+  | "applicable"
+  | "applicable_but_weak"
+  | "insufficient_evidence"
+  | "not_applicable";
+
 // --- Analysis Profiles ---
 
 /** Analysis profile determining scoring behavior and report mode */
 export type AnalysisProfile = "library" | "package" | "application" | "autofix-agent";
+
+// --- Boundary Finding Categories ---
+
+/** Category of boundary finding for classification */
+export type BoundaryFindingCategory =
+  | "library-public-boundary"
+  | "application-runtime-boundary"
+  | "tooling-trusted-local"
+  | "cross-package-trust-boundary";
 
 // --- Boundary Types ---
 
@@ -205,12 +229,14 @@ export interface ProfileInfo {
 
 /** Single boundary entry in the inventory */
 export interface BoundaryInventoryEntry {
-  file: string;
-  line: number;
   boundaryType: BoundaryType;
-  trustLevel: TrustLevel;
-  hasValidation: boolean;
   description: string;
+  file: string;
+  /** Category of boundary finding for classification */
+  findingCategory?: BoundaryFindingCategory | undefined;
+  hasValidation: boolean;
+  line: number;
+  trustLevel: TrustLevel;
 }
 
 /** Summary of boundary analysis across the codebase */
@@ -423,6 +449,8 @@ export interface ScenarioScore {
   totalScenarios: number;
   results: ScenarioResult[];
   comparability: "scenario";
+  /** Granular applicability status for this scenario evaluation */
+  scenarioApplicability?: ScenarioApplicabilityStatus;
   /** Scenario variant used for this evaluation */
   scenarioVariant?: ScenarioVariant;
 }
@@ -466,6 +494,10 @@ export interface AnalysisResult {
   degradedReason?: string;
   /** If degraded, the category of degradation */
   degradedCategory?: DegradedCategory;
+  /** Chain of reasons leading to degradation (most specific first) */
+  degradedReasonChain?: string[];
+  /** Scope of the analysis target */
+  analysisScope?: AnalysisScope;
   mode: AnalysisMode;
   scoreProfile: "source-project" | "published-declarations";
   projectName: string;
@@ -502,6 +534,8 @@ export interface AnalysisResult {
   dedupStats: { groups: number; filesRemoved: number };
   /** Confidence summary across all layers — always present */
   confidenceSummary: ConfidenceSummary;
+  /** Source-mode-specific confidence metrics */
+  sourceModeConfidence?: SourceModeConfidence | undefined;
   /** Coverage diagnostics — reachable files, positions, undersampling — always present */
   coverageDiagnostics: CoverageDiagnostics;
   explainability?: ExplainabilityReport;
@@ -526,6 +560,8 @@ export interface AnalysisResult {
   suppressions?: SuppressionEntry[];
   /** Fix plan for agent consumption */
   fixPlan?: FixPlan;
+  /** Why no fix batches were emitted (when autofixSummary has empty batches) */
+  autofixAbstentionReason?: string;
   /** Boundary report for boundaries command */
   boundaryReport?: BoundaryReport;
   /** Verification plan for post-fix validation */
@@ -711,13 +747,15 @@ export interface ValidationSink {
 
 /** A complete taint flow chain from source to sink */
 export interface TaintFlowChain {
+  isValidated: boolean;
+  /** Provenance of the taint — where it originates in the trust model */
+  provenance?: "external-input" | "parsed-data" | "cross-boundary" | "internal" | undefined;
+  sink?: ValidationSink;
   source: BoundarySource;
+  sourceExpression: string;
   sourceFile: string;
   sourceLine: number;
-  sourceExpression: string;
   steps: TaintFlowStep[];
-  sink?: ValidationSink;
-  isValidated: boolean;
 }
 
 /** Boundary report for the boundaries command */
@@ -830,6 +868,16 @@ export interface LayerViolation {
   targetLayer: PackageLayer;
   importPath: string;
   violationType: "forbidden-cross-layer" | "infra-bypass" | "unstable-leak" | "trust-zone-crossing";
+  /** Severity of this violation */
+  severity: ViolationSeverity;
+}
+
+/** Summary of violation severity distribution */
+export interface ViolationSeveritySummary {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
 }
 
 /** Summary of monorepo health derived from violation analysis */
@@ -837,8 +885,25 @@ export interface MonorepoHealthSummary {
   totalPackages: number;
   totalViolations: number;
   violationsByType: Record<string, number>;
+  /** Severity distribution of violations */
+  violationSeveritySummary: ViolationSeveritySummary;
+  /** Violations per package (normalized density) */
+  violationDensity: number;
   healthScore: number;
   healthGrade: Grade;
+  /** Confidence in the workspace discovery and classification */
+  workspaceConfidence: number;
+  /** Confidence in the layer model assignment */
+  layerModelConfidence: number;
+}
+
+/** Cross-package boundary summary for monorepo mode */
+export interface CrossPackageBoundarySummary {
+  affectedPackages: string[];
+  highRiskCrossings: number;
+  totalCrossings: number;
+  /** Overall severity of trust gaps across packages */
+  trustGapSeverity?: "none" | "low" | "moderate" | "high";
 }
 
 /** Monorepo analysis report */
@@ -848,6 +913,8 @@ export interface MonorepoReport {
   violations: LayerViolation[];
   layerGraph: Record<string, string[]>;
   healthSummary?: MonorepoHealthSummary;
+  /** Cross-package boundary summary */
+  crossPackageBoundarySummary?: CrossPackageBoundarySummary;
 }
 
 /** Package info within a monorepo */
@@ -896,6 +963,17 @@ export interface DimensionDiff {
   delta: number;
 }
 
+// --- Source Mode Confidence ---
+
+/** Source-mode-specific confidence metrics */
+export interface SourceModeConfidence {
+  declarationEmitSuccess: number;
+  fixabilityRate: number;
+  ownershipClarity: number;
+  sourceFileCoverage: number;
+  sourceOwnedExportCoverage: number;
+}
+
 // --- Verification ---
 
 /** A verification plan for post-fix validation */
@@ -909,6 +987,57 @@ export interface VerificationCommand {
   command: string;
   description: string;
   mustPass: boolean;
+}
+
+// --- Evaluation Summary (WS9) ---
+
+/** Aggregate metrics across the evaluation corpus */
+export interface EvalAggregateMetrics {
+  confidenceCalibration: number;
+  degradedRate: number;
+  domainCoverageRate: number;
+  fallbackRate: number;
+  issueNoiseRate: number;
+  monorepoTrustCalibration: number;
+  scenarioCoverageRate: number;
+  schemaConsistencyRate: number;
+  sourceModeSuccessRate: number;
+}
+
+/** Result of a single evaluation gate */
+export interface EvalGateResult {
+  metric: number;
+  name: string;
+  passed: boolean;
+  threshold: number;
+}
+
+/** Redacted evaluation summary — no per-package scores visible to builder */
+export interface RedactedEvalSummary {
+  /** Aggregate metrics (no per-package breakdown) */
+  aggregateMetrics: EvalAggregateMetrics;
+  /** Date the evaluation was run */
+  evaluatedAt: string;
+  /** Aggregate gate results */
+  gates: EvalGateResult[];
+  /** Schema version used */
+  schemaVersion: string;
+  /** Total packages evaluated */
+  totalPackages: number;
+}
+
+/** Shadow-latest comparison result */
+export interface ShadowLatestResult {
+  /** Current version metrics */
+  current: EvalAggregateMetrics;
+  /** Per-metric deltas */
+  deltas: Partial<Record<keyof EvalAggregateMetrics, number>>;
+  /** Whether any metric regressed beyond threshold */
+  hasRegression: boolean;
+  /** Which metrics regressed */
+  regressions: string[];
+  /** Previous (shadow) version metrics */
+  shadow: EvalAggregateMetrics;
 }
 
 // --- Analysis Schema ---

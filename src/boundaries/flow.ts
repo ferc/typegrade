@@ -198,6 +198,7 @@ export function buildTaintFlowChains(
 
       const chain: TaintFlowChain = {
         isValidated: matchedSink !== undefined,
+        provenance: classifyProvenance(srcNode.source),
         source: srcNode.source,
         sourceExpression: srcNode.expression,
         sourceFile: filePath,
@@ -212,6 +213,30 @@ export function buildTaintFlowChains(
   }
 
   return chains;
+}
+
+/**
+ * Classify taint provenance based on the boundary source.
+ *
+ * Provenance indicates where the taint originates in the trust model:
+ * - external-input: data from outside the process (HTTP, UI, queues)
+ * - parsed-data: structured data that was deserialized (JSON, DB results)
+ * - cross-boundary: data from another service or process (SDK, IPC)
+ * - internal: data from within the process boundary (env vars, filesystem)
+ */
+function classifyProvenance(
+  source: BoundarySource,
+): "external-input" | "parsed-data" | "cross-boundary" | "internal" {
+  if (source === "http-input" || source === "ui-input" || source === "queue-payload") {
+    return "external-input";
+  }
+  if (source === "json-parse" || source === "database-result") {
+    return "parsed-data";
+  }
+  if (source === "sdk-response" || source === "ipc-message") {
+    return "cross-boundary";
+  }
+  return "internal";
 }
 
 // --- Internal helpers ---

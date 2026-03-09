@@ -1,5 +1,11 @@
+import type {
+  BoundaryFindingCategory,
+  BoundaryInventoryEntry,
+  BoundaryQualityScore,
+  BoundarySummary,
+  Grade,
+} from "../types.js";
 import type { BoundaryGraph, BoundaryNode } from "./types.js";
-import type { BoundaryQualityScore, BoundarySummary, Grade } from "../types.js";
 import { Node, type Project, type SourceFile, SyntaxKind } from "ts-morph";
 import { classifyBoundaryType, classifyTrustLevel, getFileContext } from "./classifier.js";
 
@@ -166,6 +172,30 @@ export function buildBoundaryGraph(sourceFiles: SourceFile[], _project: Project)
 }
 
 /**
+ * Classify a boundary inventory entry into a finding category.
+ *
+ * Categories distinguish library public API boundaries from application runtime
+ * boundaries, internal tooling with trusted-local data, and cross-package trust
+ * boundaries in monorepos.
+ */
+function classifyBoundaryFinding(entry: BoundaryInventoryEntry): BoundaryFindingCategory {
+  if (entry.trustLevel === "trusted-local" || entry.trustLevel === "generated-local") {
+    return "tooling-trusted-local";
+  }
+  if (entry.trustLevel === "internal-only") {
+    return "library-public-boundary";
+  }
+  if (
+    entry.boundaryType === "network" ||
+    entry.boundaryType === "queue" ||
+    entry.boundaryType === "database"
+  ) {
+    return "application-runtime-boundary";
+  }
+  return "library-public-boundary";
+}
+
+/**
  * Build the boundary summary from a boundary graph.
  */
 export function buildBoundarySummary(graph: BoundaryGraph): BoundarySummary {
@@ -203,14 +233,18 @@ export function buildBoundarySummary(graph: BoundaryGraph): BoundarySummary {
 
   return {
     boundaryCoverage: Math.round(boundaryCoverage * 100) / 100,
-    inventory: graph.nodes.map((nd) => ({
-      boundaryType: nd.boundaryType,
-      description: nd.description,
-      file: nd.file,
-      hasValidation: nd.hasDownstreamValidation,
-      line: nd.line,
-      trustLevel: nd.trustLevel,
-    })),
+    inventory: graph.nodes.map((nd) => {
+      const entry: BoundaryInventoryEntry = {
+        boundaryType: nd.boundaryType,
+        description: nd.description,
+        file: nd.file,
+        hasValidation: nd.hasDownstreamValidation,
+        line: nd.line,
+        trustLevel: nd.trustLevel,
+      };
+      entry.findingCategory = classifyBoundaryFinding(entry);
+      return entry;
+    }),
     missingValidationHotspots,
     taintBreaks,
     totalBoundaries: total,
