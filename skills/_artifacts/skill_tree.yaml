@@ -1,0 +1,62 @@
+library:
+  name: typegrade
+  version: "0.9.0"
+  repository: ferc/typegrade
+  description: TypeScript type-safety and precision analyzer for the AI agent era
+
+generated_from:
+  domain_map: skills/_artifacts/domain_map.yaml
+
+skills:
+  - name: analyze-project
+    type: core
+    description: >
+      Analyze a local TypeScript project with typegrade analyze. Covers source mode
+      (all 12 dimensions), profile selection, verbose/explain output, and reading
+      low-confidence or undersampled results.
+    domain: analysis
+
+  - name: score-package
+    type: core
+    description: >
+      Score a published npm package with typegrade score. Covers package mode
+      (8 consumer dimensions), caching, domain overrides, and interpreting
+      confidence and coverage diagnostics.
+    domain: analysis
+
+  - name: compare-packages
+    type: core
+    description: >
+      Compare two packages side-by-side with typegrade compare. Covers global
+      score deltas, domain fit comparison, and avoiding cross-domain mistakes.
+    domain: comparison
+
+  - name: quality-gate
+    type: core
+    description: >
+      Use typegrade as a CI quality gate with --min-score. Covers exit codes,
+      JSON output consumption, and handling low-confidence failures.
+    domain: ci-integration
+
+  - name: consume-json
+    type: core
+    description: >
+      Consume typegrade JSON output programmatically. Covers stable fields,
+      confidence handling, undersampling detection, and avoiding decisions
+      based on weak evidence.
+    domain: ci-integration
+
+  - name: self-analyze
+    type: core
+    description: >
+      Run typegrade self-analyze for closed-loop improvement. Covers agent
+      output, fix batches, suppression breakdown, and safe iterative workflows.
+    domain: self-improvement
+
+  - name: maintain-skills
+    type: lifecycle
+    description: >
+      Maintain typegrade Intent skills. Covers updating skills after code
+      changes, running Intent validate and stale checks, and syncing skill
+      content with docs and CLI behavior.
+    domain: maintainer
