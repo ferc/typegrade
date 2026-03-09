@@ -3,244 +3,1094 @@
   "split": "eval-pool",
   "packages": {
     "pool-validation": [
-      { "spec": "class-validator@0.14.1", "proxyFamily": "validation", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "class-transformer@0.5.1", "proxyFamily": "validation", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "joi@17.13.3", "proxyFamily": "validation", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "vest@5.4.1", "proxyFamily": "validation", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "ow@2.0.0", "proxyFamily": "validation", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "myzod@1.12.0", "proxyFamily": "validation", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "fastest-validator@1.19.0", "proxyFamily": "validation", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "decoders@2.5.0", "proxyFamily": "validation", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "class-validator@0.14.1",
+        "proxyFamily": "validation",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "class-transformer@0.5.1",
+        "proxyFamily": "validation",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "joi@17.13.3",
+        "proxyFamily": "validation",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "vest@5.4.1",
+        "proxyFamily": "validation",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ow@2.0.0",
+        "proxyFamily": "validation",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "myzod@1.12.0",
+        "proxyFamily": "validation",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "fastest-validator@1.19.0",
+        "proxyFamily": "validation",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "decoders@2.5.0",
+        "proxyFamily": "validation",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-result": [
-      { "spec": "monet@0.9.3", "proxyFamily": "result", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "option-t@49.2.0", "proxyFamily": "result", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "oxide.ts@1.1.0", "proxyFamily": "result", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "pratica@3.1.3", "proxyFamily": "result", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "ts-results@3.3.0", "proxyFamily": "result", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "return-style@3.0.0", "proxyFamily": "result", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "monet@0.9.3",
+        "proxyFamily": "result",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "option-t@49.2.0",
+        "proxyFamily": "result",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "oxide.ts@1.1.0",
+        "proxyFamily": "result",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "pratica@3.1.3",
+        "proxyFamily": "result",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ts-results@3.3.0",
+        "proxyFamily": "result",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "return-style@3.0.0",
+        "proxyFamily": "result",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-router": [
-      { "spec": "h3@1.15.1", "proxyFamily": "router", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "itty-router@5.0.18", "proxyFamily": "router", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "polka@1.0.0-next.28", "proxyFamily": "router", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "@hapi/hapi@21.3.12", "proxyFamily": "router", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "restify@11.1.0", "proxyFamily": "router", "sizeBand": "large", "typesSourceHint": "@types" },
-      { "spec": "elysia@1.2.25", "proxyFamily": "router", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "@trpc/client@11.0.0", "proxyFamily": "router", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "express-validator@7.2.1", "proxyFamily": "router", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "h3@1.15.1",
+        "proxyFamily": "router",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "itty-router@5.0.18",
+        "proxyFamily": "router",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "polka@1.0.0-next.28",
+        "proxyFamily": "router",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "@hapi/hapi@21.3.12",
+        "proxyFamily": "router",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "restify@11.1.0",
+        "proxyFamily": "router",
+        "sizeBand": "large",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "elysia@1.2.25",
+        "proxyFamily": "router",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "@trpc/client@11.0.0",
+        "proxyFamily": "router",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "express-validator@7.2.1",
+        "proxyFamily": "router",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-orm": [
-      { "spec": "knex@3.1.0", "proxyFamily": "orm", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "objection@3.1.5", "proxyFamily": "orm", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "mongoose@8.9.5", "proxyFamily": "orm", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "sequelize@6.37.5", "proxyFamily": "orm", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "better-sqlite3@11.8.1", "proxyFamily": "orm", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "pg@8.13.1", "proxyFamily": "orm", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "@prisma/client@6.3.1", "proxyFamily": "orm", "sizeBand": "large", "typesSourceHint": "bundled" }
+      {
+        "spec": "knex@3.1.0",
+        "proxyFamily": "orm",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "objection@3.1.5",
+        "proxyFamily": "orm",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "mongoose@8.9.5",
+        "proxyFamily": "orm",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "sequelize@6.37.5",
+        "proxyFamily": "orm",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "better-sqlite3@11.8.1",
+        "proxyFamily": "orm",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "pg@8.13.1",
+        "proxyFamily": "orm",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "@prisma/client@6.3.1",
+        "proxyFamily": "orm",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-schema": [
-      { "spec": "ts-essentials@10.0.3", "proxyFamily": "schema", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "utility-types@3.11.0", "proxyFamily": "schema", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "ts-toolbelt@9.6.0", "proxyFamily": "schema", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "conditional-type-checks@1.0.6", "proxyFamily": "schema", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "expect-type@1.1.0", "proxyFamily": "schema", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "simplytyped@3.3.0", "proxyFamily": "schema", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "ts-essentials@10.0.3",
+        "proxyFamily": "schema",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "utility-types@3.11.0",
+        "proxyFamily": "schema",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ts-toolbelt@9.6.0",
+        "proxyFamily": "schema",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "conditional-type-checks@1.0.6",
+        "proxyFamily": "schema",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "expect-type@1.1.0",
+        "proxyFamily": "schema",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "simplytyped@3.3.0",
+        "proxyFamily": "schema",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-stream": [
-      { "spec": "most@2.0.0", "proxyFamily": "stream", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "xstream@11.14.0", "proxyFamily": "stream", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "wonka@6.3.4", "proxyFamily": "stream", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "highland@2.13.5", "proxyFamily": "stream", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "zen-observable@0.10.0", "proxyFamily": "stream", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "most@2.0.0",
+        "proxyFamily": "stream",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "xstream@11.14.0",
+        "proxyFamily": "stream",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "wonka@6.3.4",
+        "proxyFamily": "stream",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "highland@2.13.5",
+        "proxyFamily": "stream",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "zen-observable@0.10.0",
+        "proxyFamily": "stream",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-frontend": [
-      { "spec": "react@19.1.0", "proxyFamily": "frontend", "sizeBand": "large", "typesSourceHint": "@types" },
-      { "spec": "preact@10.25.4", "proxyFamily": "frontend", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "solid-js@1.9.5", "proxyFamily": "frontend", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "lit@3.2.1", "proxyFamily": "frontend", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "svelte@5.20.2", "proxyFamily": "frontend", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "vue@3.5.13", "proxyFamily": "frontend", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "@vue/reactivity@3.5.13", "proxyFamily": "frontend", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "react@19.1.0",
+        "proxyFamily": "frontend",
+        "sizeBand": "large",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "preact@10.25.4",
+        "proxyFamily": "frontend",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "solid-js@1.9.5",
+        "proxyFamily": "frontend",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "lit@3.2.1",
+        "proxyFamily": "frontend",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "svelte@5.20.2",
+        "proxyFamily": "frontend",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "vue@3.5.13",
+        "proxyFamily": "frontend",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "@vue/reactivity@3.5.13",
+        "proxyFamily": "frontend",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-state": [
-      { "spec": "recoil@0.7.7", "proxyFamily": "state", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "valtio@2.1.6", "proxyFamily": "state", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "nanostores@0.11.3", "proxyFamily": "state", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "effector@23.2.3", "proxyFamily": "state", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "pinia@3.0.1", "proxyFamily": "state", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "@preact/signals-core@1.8.0", "proxyFamily": "state", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "recoil@0.7.7",
+        "proxyFamily": "state",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "valtio@2.1.6",
+        "proxyFamily": "state",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "nanostores@0.11.3",
+        "proxyFamily": "state",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "effector@23.2.3",
+        "proxyFamily": "state",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "pinia@3.0.1",
+        "proxyFamily": "state",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "@preact/signals-core@1.8.0",
+        "proxyFamily": "state",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-http": [
-      { "spec": "node-fetch@3.3.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "undici@7.3.0", "proxyFamily": "general", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "ofetch@1.4.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "wretch@2.11.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "superagent@10.2.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "needle@3.3.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "node-fetch@3.3.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "undici@7.3.0",
+        "proxyFamily": "general",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ofetch@1.4.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "wretch@2.11.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "superagent@10.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "needle@3.3.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-testing": [
-      { "spec": "@testing-library/react@16.3.0", "proxyFamily": "testing", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "@testing-library/dom@10.4.0", "proxyFamily": "testing", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "supertest@7.0.0", "proxyFamily": "testing", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "nock@14.0.1", "proxyFamily": "testing", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "@playwright/test@1.50.1", "proxyFamily": "testing", "sizeBand": "large", "typesSourceHint": "bundled" }
+      {
+        "spec": "@testing-library/react@16.3.0",
+        "proxyFamily": "testing",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "@testing-library/dom@10.4.0",
+        "proxyFamily": "testing",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "supertest@7.0.0",
+        "proxyFamily": "testing",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "nock@14.0.1",
+        "proxyFamily": "testing",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "@playwright/test@1.50.1",
+        "proxyFamily": "testing",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-cli": [
-      { "spec": "inquirer@12.4.0", "proxyFamily": "cli", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "prompts@2.4.2", "proxyFamily": "cli", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "ora@8.1.1", "proxyFamily": "cli", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "listr2@8.2.5", "proxyFamily": "cli", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "meow@13.0.0", "proxyFamily": "cli", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "cac@6.7.14", "proxyFamily": "cli", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "yargs@17.7.2", "proxyFamily": "cli", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "arg@5.0.2", "proxyFamily": "cli", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "clipanion@4.0.0-rc.4", "proxyFamily": "cli", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "inquirer@12.4.0",
+        "proxyFamily": "cli",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "prompts@2.4.2",
+        "proxyFamily": "cli",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "ora@8.1.1",
+        "proxyFamily": "cli",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "listr2@8.2.5",
+        "proxyFamily": "cli",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "meow@13.0.0",
+        "proxyFamily": "cli",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "cac@6.7.14",
+        "proxyFamily": "cli",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "yargs@17.7.2",
+        "proxyFamily": "cli",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "arg@5.0.2",
+        "proxyFamily": "cli",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "clipanion@4.0.0-rc.4",
+        "proxyFamily": "cli",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-dates": [
-      { "spec": "luxon@3.5.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "date-fns-tz@3.2.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "chrono-node@2.7.7", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "luxon@3.5.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "date-fns-tz@3.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "chrono-node@2.7.7",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-logging": [
-      { "spec": "debug@4.4.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "loglevel@1.9.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "consola@3.4.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "signale@1.4.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "debug@4.4.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "loglevel@1.9.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "consola@3.4.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "signale@1.4.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-async": [
-      { "spec": "p-limit@6.2.0", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "p-retry@6.2.1", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "p-timeout@6.1.4", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "p-map@7.0.3", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "delay@6.0.0", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "execa@9.5.2", "proxyFamily": "utility", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "zx@8.3.2", "proxyFamily": "utility", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "p-limit@6.2.0",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "p-retry@6.2.1",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "p-timeout@6.1.4",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "p-map@7.0.3",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "delay@6.0.0",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "execa@9.5.2",
+        "proxyFamily": "utility",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "zx@8.3.2",
+        "proxyFamily": "utility",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-config": [
-      { "spec": "cosmiconfig@9.0.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "dotenv@16.4.7", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "conf@13.0.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "env-var@7.5.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "cosmiconfig@9.0.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "dotenv@16.4.7",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "conf@13.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "env-var@7.5.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-crypto": [
-      { "spec": "jose@6.0.8", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "jsonwebtoken@9.0.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "bcryptjs@3.0.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "tweetnacl@1.0.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "jose@6.0.8",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "jsonwebtoken@9.0.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "bcryptjs@3.0.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "tweetnacl@1.0.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-files": [
-      { "spec": "glob@11.0.1", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "micromatch@4.0.8", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "fast-glob@3.3.3", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "globby@14.0.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "fs-extra@11.2.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "chokidar@4.0.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "tmp@0.2.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "glob@11.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "micromatch@4.0.8",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "fast-glob@3.3.3",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "globby@14.0.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "fs-extra@11.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "chokidar@4.0.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "tmp@0.2.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-network": [
-      { "spec": "socket.io@4.8.1", "proxyFamily": "stream", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "ws@8.18.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "http-proxy-middleware@3.0.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "socket.io@4.8.1",
+        "proxyFamily": "stream",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ws@8.18.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "http-proxy-middleware@3.0.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-queue": [
-      { "spec": "bullmq@5.34.8", "proxyFamily": "general", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "bee-queue@1.7.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "bullmq@5.34.8",
+        "proxyFamily": "general",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "bee-queue@1.7.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-parse": [
-      { "spec": "yaml@2.7.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "json5@2.2.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "csv-parse@5.6.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "papaparse@5.5.2", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "@types" },
-      { "spec": "cheerio@1.0.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "marked@15.0.7", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "unified@11.0.5", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "remark@15.0.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "jsonc-parser@3.3.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "yaml@2.7.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "json5@2.2.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "csv-parse@5.6.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "papaparse@5.5.2",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "cheerio@1.0.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "marked@15.0.7",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "unified@11.0.5",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "remark@15.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "jsonc-parser@3.3.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-id": [
-      { "spec": "cuid2@2.2.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "ulid@2.3.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "short-uuid@5.2.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "cuid2@2.2.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ulid@2.3.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "short-uuid@5.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-semver": [
-      { "spec": "semver@7.7.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "compare-versions@6.1.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "semver@7.7.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "compare-versions@6.1.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-terminal": [
-      { "spec": "kleur@4.1.5", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "colorette@2.0.20", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "ansi-colors@4.1.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "strip-ansi@7.1.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "string-width@7.2.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "wrap-ansi@9.0.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "boxen@8.0.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "figures@6.1.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "kleur@4.1.5",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "colorette@2.0.20",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ansi-colors@4.1.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "strip-ansi@7.1.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "string-width@7.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "wrap-ansi@9.0.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "boxen@8.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "figures@6.1.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-misc-utility": [
-      { "spec": "deepmerge@4.3.1", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "mitt@3.0.1", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "eventemitter3@5.0.1", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "emittery@1.0.3", "proxyFamily": "utility", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "ms@2.1.3", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "bytes@3.1.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "pretty-bytes@6.1.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "type-is@2.0.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "mime-types@3.0.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "content-type@1.0.5", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "path-to-regexp@8.2.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "cross-fetch@4.1.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "slugify@1.6.6", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "deepmerge@4.3.1",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "mitt@3.0.1",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "eventemitter3@5.0.1",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "emittery@1.0.3",
+        "proxyFamily": "utility",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ms@2.1.3",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "bytes@3.1.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "pretty-bytes@6.1.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "type-is@2.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "mime-types@3.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "content-type@1.0.5",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "path-to-regexp@8.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "cross-fetch@4.1.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "slugify@1.6.6",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-middleware": [
-      { "spec": "helmet@8.0.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "cors@2.8.5", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "compression@1.8.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "cookie@1.0.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "multer@1.4.5-lts.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "body-parser@2.2.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "helmet@8.0.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "cors@2.8.5",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "compression@1.8.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "cookie@1.0.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "multer@1.4.5-lts.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "body-parser@2.2.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-graphql": [
-      { "spec": "graphql@16.10.0", "proxyFamily": "schema", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "type-graphql@2.0.0-rc.2", "proxyFamily": "schema", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "graphql@16.10.0",
+        "proxyFamily": "schema",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "type-graphql@2.0.0-rc.2",
+        "proxyFamily": "schema",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-di": [
-      { "spec": "inversify@7.1.1", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "tsyringe@4.8.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "typedi@0.10.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" }
+      {
+        "spec": "inversify@7.1.1",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "tsyringe@4.8.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "typedi@0.10.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-form": [
-      { "spec": "form-data@4.0.1", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "bundled" },
-      { "spec": "busboy@1.6.0", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "formidable@3.5.2", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" }
+      {
+        "spec": "form-data@4.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "busboy@1.6.0",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "formidable@3.5.2",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-archive": [
-      { "spec": "tar@7.4.3", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "adm-zip@0.5.16", "proxyFamily": "general", "sizeBand": "small", "typesSourceHint": "@types" },
-      { "spec": "archiver@7.0.1", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "@types" }
+      {
+        "spec": "tar@7.4.3",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "adm-zip@0.5.16",
+        "proxyFamily": "general",
+        "sizeBand": "small",
+        "typesSourceHint": "@types"
+      },
+      {
+        "spec": "archiver@7.0.1",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-email": [
-      { "spec": "nodemailer@6.10.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "@types" }
+      {
+        "spec": "nodemailer@6.10.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "@types"
+      }
     ],
     "pool-cloud": [
-      { "spec": "@aws-sdk/client-s3@3.721.0", "proxyFamily": "general", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "stripe@17.6.0", "proxyFamily": "general", "sizeBand": "large", "typesSourceHint": "bundled" }
+      {
+        "spec": "@aws-sdk/client-s3@3.721.0",
+        "proxyFamily": "general",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "stripe@17.6.0",
+        "proxyFamily": "general",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-i18n": [
-      { "spec": "i18next@24.2.2", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "intl-messageformat@10.7.16", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "i18next@24.2.2",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "intl-messageformat@10.7.16",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-nestjs": [
-      { "spec": "@nestjs/common@11.0.11", "proxyFamily": "router", "sizeBand": "large", "typesSourceHint": "bundled" },
-      { "spec": "@nestjs/core@11.0.11", "proxyFamily": "router", "sizeBand": "large", "typesSourceHint": "bundled" }
+      {
+        "spec": "@nestjs/common@11.0.11",
+        "proxyFamily": "router",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "@nestjs/core@11.0.11",
+        "proxyFamily": "router",
+        "sizeBand": "large",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-build": [
-      { "spec": "esbuild@0.25.1", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "rollup@4.34.9", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "esbuild@0.25.1",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "rollup@4.34.9",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ],
     "pool-data": [
-      { "spec": "redis@4.7.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" },
-      { "spec": "ioredis@5.5.0", "proxyFamily": "general", "sizeBand": "medium", "typesSourceHint": "bundled" }
+      {
+        "spec": "redis@4.7.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      },
+      {
+        "spec": "ioredis@5.5.0",
+        "proxyFamily": "general",
+        "sizeBand": "medium",
+        "typesSourceHint": "bundled"
+      }
     ]
   }
 }
