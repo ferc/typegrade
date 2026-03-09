@@ -29,16 +29,32 @@ export function loadProject(projectPath: string): Project {
   return project;
 }
 
+function normalizeScope(scopeRoot: string | undefined): string | undefined {
+  if (!scopeRoot) {
+    return undefined;
+  }
+  return scopeRoot.endsWith("/") ? scopeRoot : `${scopeRoot}/`;
+}
+
 export interface GetSourceFilesOptions {
   includeDts?: boolean;
   includeNodeModules?: boolean;
 }
 
-export function getSourceFiles(project: Project, options?: GetSourceFilesOptions): SourceFile[] {
+export function getSourceFiles(
+  project: Project,
+  options?: GetSourceFilesOptions,
+  /** When provided, only files whose path starts with this directory are included */
+  scopeRoot?: string,
+): SourceFile[] {
   const { includeDts = false, includeNodeModules = false } = options ?? {};
+  const normalizedScope = normalizeScope(scopeRoot);
 
   return project.getSourceFiles().filter((sf) => {
     const path = sf.getFilePath();
+    if (normalizedScope && !path.startsWith(normalizedScope)) {
+      return false;
+    }
     if (!includeNodeModules && path.includes("node_modules")) {
       return false;
     }

@@ -320,7 +320,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const { usedFallbackGlob } = graphStats;
 
   const project = loadProject(absolutePath);
-  let sourceFiles = getSourceFiles(project, sourceFilesOptions);
+  let sourceFiles = getSourceFiles(project, sourceFilesOptions, absolutePath);
   if (options?.fileFilter) {
     sourceFiles = sourceFiles.filter((sf) => options.fileFilter!.has(sf.getFilePath()));
   }
