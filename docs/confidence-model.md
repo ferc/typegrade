@@ -107,6 +107,7 @@ Key transitions:
 - **Undersampled** analysis → `"not-comparable"` (insufficient evidence for any comparison).
 - **Fallback glob** resolution → `"partially-comparable"` (some evidence, but entrypoint graph is unreliable).
 - **Low average confidence** (<0.3 across all four summary axes) on an otherwise complete result → downgraded from `"fully-comparable"` to `"partially-comparable"`.
+- **Low composite confidence** (<0.5 average across composites) → `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` are stripped from the result (set to `undefined`). These layers require sufficient evidence to be meaningful.
 
 ## Interpreting confidence
 
@@ -114,7 +115,7 @@ Key transitions:
 |---|---|
 | >= 0.8 | High — sufficient evidence for reliable scoring |
 | 0.5-0.8 | Moderate — score is directionally correct but may shift with more data |
-| < 0.5 | Low — score should be treated as indicative only |
+| < 0.5 | Low — score should be treated as indicative only; domain and scenario scores are suppressed |
 
 ## Confidence in JSON output
 

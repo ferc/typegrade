@@ -59,6 +59,9 @@ npx typegrade apply-fixes . --mode safe
 # Self-analyze with closed-loop improvement suggestions
 npx typegrade self-analyze .
 
+# Analyze monorepo layering and dependency health
+npx typegrade monorepo .
+
 # JSON output for automation
 npx typegrade score zod --json
 
@@ -262,6 +265,12 @@ Returns an `AnalysisResult` with:
     "reachableFiles": 12,
     "measuredPositions": 156,
     "undersampled": false
+  },
+  "evidenceSummary": {
+    "totalDeclarations": 45,
+    "totalPositions": 156,
+    "totalFiles": 12,
+    "coverageClass": "complete"
   },
   "dimensions": [/* 8 dimension results with scores, metrics, issues */],
   "topIssues": [/* top 10 issues by severity */]

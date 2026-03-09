@@ -8,7 +8,7 @@ description: >
   Use when evaluating an npm dependency.
 type: core
 library: typegrade
-library_version: "0.10.0"
+library_version: "0.11.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -109,8 +109,11 @@ Check `status` and `coverageDiagnostics` in JSON output:
   `degradedReason` for details. Degraded results no longer emit fake zeros.
 - `coverageDiagnostics.undersampled: true` means very few public declarations
   were found. Scores are capped at 65 and confidence is low.
-- `packageIdentity.typesSource: "bundled"` means types ship with the package.
-  `"@types"` means they come from `@types/`.
+- `packageIdentity.typesSource` (always present): `"bundled"` means types
+  ship with the package. `"@types"` means they come from `@types/`.
+  `"mixed"` or `"unknown"` for other layouts.
+- `packageIdentity.entrypointStrategy` (always present): `"exports-map"`,
+  `"types-field"`, `"main-field"`, `"fallback-glob"`, or `"unknown"`.
 
 ## Common Mistakes
 

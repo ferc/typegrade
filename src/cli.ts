@@ -4,6 +4,7 @@ import type {
   FixApplicationResult,
   FixMode,
   FixPlan,
+  MonorepoReport,
 } from "./types.js";
 import { buildAgentReport as buildAgentReportFromResult, renderAgentJson } from "./agent/index.js";
 import { computeDiff, renderDiffReport } from "./diff.js";
@@ -16,6 +17,7 @@ import {
 import type { AgentReport } from "./agent/types.js";
 import { Command } from "commander";
 import type { DomainType } from "./domain.js";
+import { analyzeMonorepo } from "./monorepo/index.js";
 import { analyzeProject } from "./analyzer.js";
 import { applyFixes } from "./fix/applier.js";
 import { buildFixPlan } from "./fix/planner.js";
@@ -60,11 +62,15 @@ function outputResult(result: AnalysisResult, opts: OutputOptions) {
   if (!opts.json) {
     if (result.status === "degraded") {
       console.log(
-        pc.yellow(`\u26A0 Analysis degraded: ${result.degradedReason ?? "unknown reason"}`),
+        pc.yellow(
+          `\u26A0 Analysis degraded (${result.degradedCategory ?? "unknown"}): ${result.degradedReason ?? "unknown reason"}`,
+        ),
       );
-    }
-    if (result.scoreValidity === "not-comparable") {
+      console.log(pc.dim("  Degraded results have null scores and cannot be compared or ranked."));
+    } else if (result.scoreValidity === "not-comparable") {
       console.log(pc.yellow("\u26A0 Scores are not comparable to other results"));
+    } else if (result.scoreValidity === "partially-comparable") {
+      console.log(pc.yellow("\u26A0 Scores are partially comparable (reduced confidence)"));
     }
   }
 
@@ -334,6 +340,22 @@ export function runCli() {
       }
     });
 
+  program
+    .command("monorepo [path]")
+    .description("Analyze monorepo workspace health and layer violations")
+    .option("--json", "Output as JSON")
+    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+      const rootPath = path ?? ".";
+      const report = analyzeMonorepo({ rootPath });
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(renderMonorepoReport(report));
+      }
+    });
+
   program.parse();
 }
 
@@ -390,18 +412,42 @@ function renderComparison(opts: ComparisonOpts): string {
     typeSafety: "Type Safety",
   };
 
+  // Warn about degraded results in comparison
+  const degradedA = resultA.status === "degraded";
+  const degradedB = resultB.status === "degraded";
+  if (degradedA) {
+    lines.push(pc.yellow(`  \u26A0 ${nameA} is degraded — scores are not comparable`));
+  }
+  if (degradedB) {
+    lines.push(pc.yellow(`  \u26A0 ${nameB} is degraded — scores are not comparable`));
+  }
+  if (degradedA || degradedB) {
+    lines.push("");
+  }
+
   for (const key of compositeKeys) {
-    const scoreA = resultA.composites.find((comp) => comp.key === key)?.score ?? 0;
-    const scoreB = resultB.composites.find((comp) => comp.key === key)?.score ?? 0;
-    const delta = scoreA - scoreB;
-    let deltaStr = "0";
-    if (delta > 0) {
-      deltaStr = pc.green(`+${delta}`);
-    } else if (delta < 0) {
-      deltaStr = pc.red(`${delta}`);
+    const compA = resultA.composites.find((comp) => comp.key === key);
+    const compB = resultB.composites.find((comp) => comp.key === key);
+    const scoreA = compA?.score;
+    const scoreB = compB?.score;
+    const displayA = scoreA === null || scoreA === undefined ? "N/A" : String(scoreA);
+    const displayB = scoreB === null || scoreB === undefined ? "N/A" : String(scoreB);
+
+    let deltaStr = "";
+    if (scoreA !== null && scoreA !== undefined && scoreB !== null && scoreB !== undefined) {
+      const delta = scoreA - scoreB;
+      if (delta === 0) {
+        deltaStr = "0";
+      } else if (delta > 0) {
+        deltaStr = pc.green(`+${delta}`);
+      } else {
+        deltaStr = pc.red(`${delta}`);
+      }
+    } else {
+      deltaStr = pc.dim("n/a");
     }
     const label = (labels[key] ?? key).padEnd(22);
-    lines.push(`  ${label}${String(scoreA).padEnd(16)}${String(scoreB).padEnd(16)}${deltaStr}`);
+    lines.push(`  ${label}${displayA.padEnd(16)}${displayB.padEnd(16)}${deltaStr}`);
   }
 
   // Domain scores if available
@@ -603,6 +649,48 @@ function renderFixPlanReport(plan: FixPlan): string {
     for (const cmd of plan.verificationCommands) {
       lines.push(`    $ ${cmd}`);
     }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function renderMonorepoReport(report: MonorepoReport): string {
+  const lines: string[] = [
+    "",
+    pc.bold("  typegrade monorepo"),
+    "",
+    pc.bold("  Workspace Packages:"),
+  ];
+  for (const pkg of report.packages) {
+    lines.push(`    ${pkg.name.padEnd(30)} [${pkg.layer}]`);
+  }
+  lines.push("");
+
+  if (report.violations.length > 0) {
+    lines.push(pc.bold("  Layer Violations:"));
+    for (const violation of report.violations.slice(0, 20)) {
+      const color = violation.violationType === "trust-zone-crossing" ? pc.red : pc.yellow;
+      lines.push(
+        `    ${color(`[${violation.violationType}]`)} ${violation.sourcePackage} (${violation.sourceLayer}) -> ${violation.targetPackage} (${violation.targetLayer})`,
+      );
+    }
+    if (report.violations.length > 20) {
+      lines.push(pc.dim(`    ... and ${report.violations.length - 20} more`));
+    }
+    lines.push("");
+  } else {
+    lines.push(pc.green("  No layer violations found."));
+    lines.push("");
+  }
+
+  if (report.healthSummary) {
+    const hs = report.healthSummary;
+    const gradeColor = scoreToColor(hs.healthScore);
+    lines.push(pc.bold("  Health Summary:"));
+    lines.push(`    Score: ${gradeColor(`${hs.healthScore}/100 (${hs.healthGrade})`)}`);
+    lines.push(`    Packages: ${hs.totalPackages}`);
+    lines.push(`    Violations: ${hs.totalViolations}`);
     lines.push("");
   }
 

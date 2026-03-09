@@ -7,7 +7,7 @@ description: >
   and avoiding false failures. Use when adding typegrade to a CI pipeline.
 type: core
 library: typegrade
-library_version: "0.10.0"
+library_version: "0.11.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
@@ -168,6 +168,35 @@ Correct:
 
 Start with `--min-score 55` or `60` and increase the threshold as the
 project improves. Scores above 85 require elite type discipline.
+
+### HIGH — Using domain/scenario data from degraded or low-confidence results
+
+Wrong:
+
+```typescript
+const result = JSON.parse(execSync('npx typegrade score pkg --json').toString());
+if (result.domainScore?.score < 50) {
+  throw new Error('Domain quality too low');
+}
+```
+
+Correct:
+
+```typescript
+const result = JSON.parse(execSync('npx typegrade score pkg --json').toString());
+// Degraded results have domainScore stripped (undefined)
+// Low-confidence results (< 0.5) also strip domainScore
+if (result.domainScore) {
+  // Only present on complete, sufficiently-confident results
+  if (result.domainScore.score < 50) {
+    throw new Error('Domain quality too low');
+  }
+}
+```
+
+Degraded results and results with overall confidence below 0.5 have
+`domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` stripped
+entirely. Gate logic that depends on these fields must handle `undefined`.
 
 ### MEDIUM — Not capturing the report on failure
 

@@ -15,10 +15,18 @@ export function buildAgentReport(
   result: AnalysisResult,
   opts?: { minConfidence?: number; includeIndirect?: boolean; issueBudget?: number },
 ): AgentReport {
-  // Truly degraded results (all null scores) must not emit fix batches.
-  // Source-mode analyses can be "degraded" (undersampled) but still have valid scores.
+  // Degraded results must never emit fix batches.
+  // Also block on ambiguous/low-confidence analyses to prevent agent churn.
   const allNullScores = result.composites.every((comp) => comp.score === null);
-  if (result.status === "degraded" && allNullScores) {
+  const isLowConfidence = result.confidenceSummary
+    ? (result.confidenceSummary.graphResolution +
+        result.confidenceSummary.sampleCoverage +
+        result.confidenceSummary.domainInference) /
+        3 <
+      0.3
+    : false;
+
+  if ((result.status === "degraded" && allNullScores) || result.status === "degraded") {
     return {
       actionableIssues: [],
       enrichedBatches: [],
@@ -30,6 +38,27 @@ export function buildAgentReport(
           kind: "no-actionable-issues",
           met: true,
           reason: `Analysis is degraded: ${result.degradedReason ?? "unknown reason"}. No fix batches emitted.`,
+        },
+      ],
+      suppressedCount: 0,
+      suppressionReasons: [],
+      verificationSteps: [],
+    };
+  }
+
+  // Very low confidence: block fix batches even on "complete" analyses
+  if (isLowConfidence && result.scoreValidity === "not-comparable") {
+    return {
+      actionableIssues: [],
+      enrichedBatches: [],
+      executionOrder: [],
+      expectedScoreImprovement: 0,
+      fixBatches: [],
+      stopConditions: [
+        {
+          kind: "no-actionable-issues",
+          met: true,
+          reason: `Analysis confidence too low for fix batches (scoreValidity: ${result.scoreValidity}). No fix batches emitted.`,
         },
       ],
       suppressedCount: 0,
@@ -56,8 +85,12 @@ export function buildAgentReport(
       return false;
     }
 
-    // Ownership gate: only source-owned
-    if (issue.ownership && issue.ownership !== "source-owned") {
+    // Ownership gate: only source-owned or workspace-owned
+    if (
+      issue.ownership &&
+      issue.ownership !== "source-owned" &&
+      issue.ownership !== "workspace-owned"
+    ) {
       return false;
     }
 

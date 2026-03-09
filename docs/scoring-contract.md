@@ -10,7 +10,7 @@ This document is the canonical reference for `typegrade`'s scoring model: all di
 | Domain | `domainFitScore` | Within same domain | Domain-adjusted score with weight multipliers |
 | Scenario | `scenarioScore` | Within same scenario pack | Consumer benchmark tests for domain-specific DX |
 
-**Rule**: every library always gets the three global scores. Domain and scenario scores are additional layers, never replacements.
+**Rule**: every library always gets the three global scores. Domain and scenario scores are additional layers, never replacements. When average composite confidence is below 0.5, domain and scenario scores are stripped from the result to prevent low-evidence data from misleading consumers.
 
 ## Global composite weights
 

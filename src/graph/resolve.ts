@@ -137,7 +137,10 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
         exports: value as Record<string, unknown>,
         pkgDir,
       });
-    } else if (key.startsWith(".") && typeof value === "string") {
+    } else if (key.startsWith(".") && key.includes("*") && typeof value === "string") {
+      // Wildcard subpath with direct string target (e.g., "./*": "./dist/*.d.ts")
+      resolveWildcardStringExport({ entrypoints, pattern: key, pkgDir, target: value });
+    } else if (key.startsWith(".") && !key.includes("*") && typeof value === "string") {
       // Direct string subpath export (e.g., "./utils": "./dist/utils.d.ts")
       const resolved = resolveDeclarationFile(pkgDir, value);
       if (resolved) {
@@ -183,6 +186,24 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
       (key === "default" || key === "import" || key === "require")
     ) {
       // Condition string value — try resolving as declaration file
+      const resolved = resolveDeclarationFile(pkgDir, value);
+      if (resolved) {
+        entrypoints.push({
+          condition: conditionLabel(currentSubpath, key),
+          filePath: resolved,
+          subpath: currentSubpath,
+        });
+      }
+    } else if (
+      !key.startsWith(".") &&
+      typeof value === "string" &&
+      (key === "node" ||
+        key === "browser" ||
+        key === "edge-light" ||
+        key === "worker" ||
+        key === "deno")
+    ) {
+      // Platform-specific condition — try resolving companion .d.ts
       const resolved = resolveDeclarationFile(pkgDir, value);
       if (resolved) {
         entrypoints.push({
@@ -290,6 +311,59 @@ function resolveWildcardSubpathExport(opts: {
     }
   } catch {
     // Directory scan failed — skip wildcard expansion
+  }
+}
+
+/**
+ * Resolve a wildcard subpath export with a direct string target.
+ * Example: "./*": "./dist/*.d.ts" — expand by scanning the target directory.
+ */
+function resolveWildcardStringExport(opts: {
+  pattern: string;
+  target: string;
+  pkgDir: string;
+  entrypoints: ResolvedEntrypoint[];
+}): void {
+  const { pattern, target, pkgDir, entrypoints } = opts;
+  if (!target.includes("*")) {
+    return;
+  }
+
+  const [targetPrefix, targetSuffix] = target.split("*");
+  if (targetPrefix === undefined || targetSuffix === undefined) {
+    return;
+  }
+
+  // Only resolve if the target looks like a declaration file
+  if (!targetSuffix.includes(".d.")) {
+    return;
+  }
+
+  const targetDir = join(pkgDir, targetPrefix);
+  if (!existsSync(targetDir)) {
+    return;
+  }
+
+  try {
+    const entries = readdirSync(targetDir);
+    for (const entry of entries) {
+      const entryName = String(entry);
+      if (!entryName.endsWith(targetSuffix)) {
+        continue;
+      }
+      const stem = entryName.slice(0, entryName.length - targetSuffix.length);
+      const filePath = join(targetDir, entryName);
+      if (existsSync(filePath)) {
+        const subpath = pattern.replace("*", stem);
+        entrypoints.push({
+          condition: conditionLabel(subpath, "types"),
+          filePath,
+          subpath,
+        });
+      }
+    }
+  } catch {
+    // Directory scan failed
   }
 }
 

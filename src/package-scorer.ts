@@ -118,7 +118,8 @@ function detectEntrypointStrategy(
 
 /**
  * Build a degraded AnalysisResult when the package cannot be fully analyzed.
- * Populates all mandatory fields with safe defaults.
+ * Populates ALL mandatory fields with safe defaults — no optional fields left missing.
+ * Degraded results never emit domain scores, scenario scores, or fix batches.
  */
 function buildDegradedResult(opts: {
   packageName: string;
@@ -143,18 +144,45 @@ function buildDegradedResult(opts: {
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     caveats: [opts.errorMessage],
     composites: [consumerApi, agentReadiness, typeSafety],
+    confidenceSummary: {
+      domainInference: 0,
+      graphResolution: 0,
+      sampleCoverage: 0,
+      scenarioApplicability: 0,
+    },
+    coverageDiagnostics: {
+      ...(opts.category === "install-failure"
+        ? { coverageFailureMode: "install-failure" as const }
+        : {}),
+      measuredDeclarations: 0,
+      measuredPositions: 0,
+      reachableFiles: 0,
+      samplingClass: "undersampled",
+      typesSource: "unknown",
+      undersampled: true,
+      undersampledReasons: [opts.errorMessage],
+    },
     dedupStats: { filesRemoved: 0, groups: 0 },
     degradedCategory: opts.category,
     degradedReason: opts.errorMessage,
     dimensions: [],
+    evidenceSummary: {
+      coreSurfaceCoverage: 0,
+      domainEvidence: 0,
+      exportCoverage: 0,
+      scenarioEvidence: 0,
+      specializationEvidence: 0,
+    },
     filesAnalyzed: 0,
     globalScores: { agentReadiness, consumerApi, typeSafety },
     graphStats: makeFallbackGraphStats(),
     mode: "package",
     packageIdentity: {
       displayName: opts.packageName,
+      entrypointStrategy: "unknown",
       resolvedSpec: opts.spec,
       resolvedVersion: opts.version,
+      typesSource: "unknown",
     },
     profileInfo: {
       profile: "package",

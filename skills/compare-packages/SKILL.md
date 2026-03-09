@@ -8,7 +8,7 @@ description: >
   dependencies.
 type: core
 library: typegrade
-library_version: "0.10.0"
+library_version: "0.11.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"

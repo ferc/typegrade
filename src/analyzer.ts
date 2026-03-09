@@ -101,23 +101,50 @@ function makeDefaultGraphStats(): GraphStats {
  * and degraded results never masquerade as normal scores.
  *
  * This is the final pass applied to every result before it leaves the pipeline.
+ * It enforces the following invariants:
+ *
+ * 1. Degraded results never emit comparable scores, domain/scenario data, or fix batches
+ * 2. All mandatory schema fields are present with safe defaults
+ * 3. Low-confidence results have domain/scenario suppressed
+ * 4. PackageIdentity always has typesSource and entrypointStrategy
  */
 export function normalizeResult(result: AnalysisResult): AnalysisResult {
   // Ensure schema version
   result.analysisSchemaVersion = result.analysisSchemaVersion || ANALYSIS_SCHEMA_VERSION;
 
-  // Ensure degraded results have null scores (never 0 masquerading as a real score)
+  // --- Degraded-result enforcement (WS1) ---
   if (result.status === "degraded") {
     result.scoreValidity = "not-comparable";
+
+    // Null out all composite scores (never 0 masquerading as a real score)
     for (const comp of result.composites) {
-      if (comp.score === 0) {
+      if (comp.score === 0 || comp.score !== null) {
         comp.score = null;
         comp.grade = "N/A";
+        comp.confidence = 0;
+        comp.compositeConfidenceReasons = [
+          ...(comp.compositeConfidenceReasons ?? []),
+          "Degraded analysis — scores are not comparable",
+        ];
       }
     }
+
     // Rebuild globalScores to reflect nulled composites
     result.globalScores = buildGlobalScores(result.composites);
+
+    // Strip domain/scenario scores — degraded results must never emit these
+    delete result.domainScore;
+    delete result.scenarioScore;
+
+    // Strip fix batches and autofix summary — degraded results must not guide agents
+    delete result.autofixSummary;
+    delete result.fixPlan;
+
+    // Ensure degradedCategory is always set
+    result.degradedCategory = result.degradedCategory ?? "insufficient-surface";
   }
+
+  // --- Mandatory field defaults (WS3: Schema consistency) ---
 
   // Ensure profileInfo
   if (!result.profileInfo) {
@@ -128,26 +155,123 @@ export function normalizeResult(result: AnalysisResult): AnalysisResult {
     };
   }
 
-  // Ensure packageIdentity
-  if (!result.packageIdentity) {
+  // Ensure packageIdentity with mandatory sub-fields
+  if (result.packageIdentity) {
+    // Backfill mandatory sub-fields if missing
+    result.packageIdentity.typesSource = result.packageIdentity.typesSource ?? "unknown";
+    result.packageIdentity.entrypointStrategy =
+      result.packageIdentity.entrypointStrategy ?? "unknown";
+  } else {
     result.packageIdentity = {
       displayName: result.projectName,
+      entrypointStrategy: "unknown",
       resolvedSpec: result.projectName,
       resolvedVersion: null,
+      typesSource: "unknown",
     };
   }
 
-  // Confidence gating: if overall confidence is very low, downgrade scoreValidity
+  // Ensure evidenceSummary
+  if (!result.evidenceSummary) {
+    result.evidenceSummary = {
+      coreSurfaceCoverage: 0,
+      domainEvidence: 0,
+      exportCoverage: 0,
+      scenarioEvidence: 0,
+      specializationEvidence: 0,
+    };
+  }
+
+  // Ensure confidenceSummary
+  if (!result.confidenceSummary) {
+    result.confidenceSummary = {
+      domainInference: 0,
+      graphResolution: 0,
+      sampleCoverage: 0,
+      scenarioApplicability: 0,
+    };
+  }
+
+  // Ensure coverageDiagnostics
+  if (!result.coverageDiagnostics) {
+    result.coverageDiagnostics = {
+      measuredDeclarations: 0,
+      measuredPositions: 0,
+      reachableFiles: result.filesAnalyzed,
+      samplingClass: result.filesAnalyzed > 0 ? "complete" : "undersampled",
+      typesSource: result.packageIdentity.typesSource ?? "unknown",
+      undersampled: result.filesAnalyzed === 0,
+      undersampledReasons:
+        result.filesAnalyzed === 0 ? ["No files analyzed — no coverage data"] : [],
+    };
+  }
+
+  // --- Confidence gating (WS5) ---
   if (result.status === "complete" && result.confidenceSummary) {
     const cs = result.confidenceSummary;
     const avgConfidence =
       (cs.graphResolution + cs.domainInference + cs.sampleCoverage + cs.scenarioApplicability) / 4;
+
+    // Very low confidence: downgrade scoreValidity
     if (avgConfidence < 0.3 && result.scoreValidity === "fully-comparable") {
       result.scoreValidity = "partially-comparable";
     }
+
+    // Low confidence: suppress domain and scenario scores
+    if (avgConfidence < 0.5) {
+      if (result.domainScore) {
+        result.caveats = result.caveats ?? [];
+        result.caveats.push(
+          `Domain score suppressed: overall confidence too low (${Math.round(avgConfidence * 100)}%)`,
+        );
+        delete result.domainScore;
+      }
+      if (result.scenarioScore) {
+        result.caveats = result.caveats ?? [];
+        result.caveats.push(
+          `Scenario score suppressed: overall confidence too low (${Math.round(avgConfidence * 100)}%)`,
+        );
+        delete result.scenarioScore;
+      }
+    }
   }
 
+  // --- Stable issue IDs (WS7) ---
+  assignStableIssueIds(result);
+
   return result;
+}
+
+/**
+ * Assign deterministic, stable issue IDs to all issues in the result.
+ * ID format: dimension:file:line:col — stable across runs on the same codebase.
+ */
+function assignStableIssueIds(result: AnalysisResult): void {
+  // Assign IDs to dimension issues
+  for (const dim of result.dimensions) {
+    for (const issue of dim.issues) {
+      if (!issue.issueId) {
+        issue.issueId = computeIssueId(issue);
+      }
+    }
+  }
+  // Assign IDs to topIssues
+  for (const issue of result.topIssues) {
+    if (!issue.issueId) {
+      issue.issueId = computeIssueId(issue);
+    }
+  }
+}
+
+function computeIssueId(issue: {
+  dimension: string;
+  file: string;
+  line: number;
+  column: number;
+}): string {
+  // Use relative-looking path (strip common prefixes) for stability
+  const shortFile = issue.file.replace(/.*node_modules\//, "").replace(/.*\/src\//, "src/");
+  return `${issue.dimension}:${shortFile}:${issue.line}:${issue.column}`;
 }
 
 /**
@@ -330,27 +454,83 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   if (filesAnalyzed === 0) {
     const timeMs = Math.round(performance.now() - startTime);
     const emptyComposites: CompositeScore[] = [
-      { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: null },
-      { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: null },
-      { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: null },
-      { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
+      {
+        confidence: 0,
+        grade: "N/A",
+        key: "agentReadiness",
+        rationale: ["No files found"],
+        score: null,
+      },
+      {
+        confidence: 0,
+        grade: "N/A",
+        key: "consumerApi",
+        rationale: ["No files found"],
+        score: null,
+      },
+      {
+        confidence: 0,
+        grade: "N/A",
+        key: "typeSafety",
+        rationale: ["No files found"],
+        score: null,
+      },
+      {
+        confidence: 0,
+        grade: "N/A",
+        key: "implementationQuality",
+        rationale: ["No files found"],
+        score: null,
+      },
     ];
     return {
       analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
       caveats: [],
       composites: emptyComposites,
+      confidenceSummary: {
+        domainInference: 0,
+        graphResolution: 0,
+        sampleCoverage: 0,
+        scenarioApplicability: 0,
+      },
+      coverageDiagnostics: {
+        measuredDeclarations: 0,
+        measuredPositions: 0,
+        reachableFiles: 0,
+        samplingClass: "undersampled" as const,
+        typesSource: (options?.packageContext?.typesSource ?? "unknown") as
+          | "bundled"
+          | "@types"
+          | "mixed"
+          | "unknown",
+        undersampled: true,
+        undersampledReasons: ["No source files found to analyze"],
+      },
       dedupStats: { filesRemoved: 0, groups: 0 },
       degradedCategory: "missing-declarations",
       degradedReason: "No source files found to analyze",
       dimensions: [],
+      evidenceSummary: {
+        coreSurfaceCoverage: 0,
+        domainEvidence: 0,
+        exportCoverage: 0,
+        scenarioEvidence: 0,
+        specializationEvidence: 0,
+      },
       filesAnalyzed: 0,
       globalScores: buildGlobalScores(emptyComposites),
       graphStats,
       mode,
       packageIdentity: {
         displayName: projectName,
+        entrypointStrategy: "unknown",
         resolvedSpec: absolutePath,
         resolvedVersion: null,
+        typesSource: (options?.packageContext?.typesSource ?? "unknown") as
+          | "bundled"
+          | "@types"
+          | "mixed"
+          | "unknown",
       },
       profileInfo: {
         profile: isPackageMode ? "package" : "library",
@@ -604,12 +784,13 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   };
   // Ownership priority: source-owned first, dependency-owned last
   const ownershipOrder: Record<string, number> = {
-    "dependency-owned": 3,
-    generated: 2,
-    mixed: 1,
+    "dependency-owned": 4,
+    generated: 3,
+    mixed: 2,
     "source-owned": 0,
-    "standard-library-owned": 4,
-    unresolved: 5,
+    "standard-library-owned": 5,
+    unresolved: 6,
+    "workspace-owned": 1,
   };
   const topIssues = allIssues
     .toSorted((lhs, rhs) => {
@@ -755,13 +936,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const packageIdentity: PackageIdentity = options?.packageContext
     ? {
         displayName: options.packageContext.packageName,
+        entrypointStrategy: "unknown",
         resolvedSpec: options.packageContext.packageRoot,
         resolvedVersion: null,
+        typesSource: options.packageContext.typesSource ?? "unknown",
       }
     : {
         displayName: projectName,
+        entrypointStrategy: "unknown",
         resolvedSpec: absolutePath,
         resolvedVersion: null,
+        typesSource: "unknown",
       };
 
   const result: AnalysisResult = {
@@ -1208,7 +1393,8 @@ function enrichIssueOwnership(dimensions: DimensionResult[], projectRoot: string
       // Set fixability based on ownership
       if (!issue.fixability) {
         switch (issue.ownership) {
-          case "source-owned": {
+          case "source-owned":
+          case "workspace-owned": {
             issue.fixability = "direct";
             break;
           }
@@ -1251,7 +1437,9 @@ function enrichIssueOwnership(dimensions: DimensionResult[], projectRoot: string
 
     // Set dimension-level ownership and fixability
     if (!dim.ownership && dim.issues.length > 0) {
-      const sourceOwned = dim.issues.filter((iss) => iss.ownership === "source-owned").length;
+      const sourceOwned = dim.issues.filter(
+        (iss) => iss.ownership === "source-owned" || iss.ownership === "workspace-owned",
+      ).length;
       dim.ownership = sourceOwned > dim.issues.length / 2 ? "source-owned" : "mixed";
     }
     if (!dim.fixability && dim.issues.length > 0) {
@@ -1327,7 +1515,7 @@ function computeAgentPriority(issue: Issue): number {
   }
 
   // Ownership boost
-  if (issue.ownership === "source-owned") {
+  if (issue.ownership === "source-owned" || issue.ownership === "workspace-owned") {
     priority += 10;
   } else if (issue.ownership === "dependency-owned") {
     priority -= 20;

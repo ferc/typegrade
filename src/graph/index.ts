@@ -20,17 +20,27 @@ export { resolveEntrypoints } from "./resolve.js";
 const LAST_RESORT_PATHS = [
   "index.d.ts",
   "index.d.mts",
+  "index.d.cts",
   "dist/index.d.ts",
   "dist/index.d.mts",
+  "dist/index.d.cts",
   "lib/index.d.ts",
   "lib/index.d.mts",
   "build/index.d.ts",
+  "build/index.d.mts",
   "types/index.d.ts",
   "typings/index.d.ts",
   "dist/types/index.d.ts",
   "dist/typings/index.d.ts",
   "dist/src/index.d.ts",
   "out/index.d.ts",
+  "src/index.d.ts",
+  "source/index.d.ts",
+  "esm/index.d.ts",
+  "cjs/index.d.ts",
+  "module/index.d.ts",
+  "dist/esm/index.d.ts",
+  "dist/cjs/index.d.ts",
 ] as const;
 
 /**

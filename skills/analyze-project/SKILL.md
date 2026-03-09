@@ -8,7 +8,7 @@ description: >
   undersampled results. Use when running typegrade on a local codebase.
 type: core
 library: typegrade
-library_version: "0.10.0"
+library_version: "0.11.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -147,6 +147,18 @@ npx typegrade diff my-lib@1.0 my-lib@2.0 --json
 
 Compares two package versions and shows per-composite and per-dimension
 score deltas.
+
+### Monorepo workspace analysis
+
+```bash
+npx typegrade monorepo .
+npx typegrade monorepo . --json
+```
+
+Analyzes monorepo workspace health: discovers workspace packages, classifies
+them into layers (app, domain, infra, ui, data, shared, tooling), detects
+layer violations (forbidden cross-layer dependencies, infra bypass, unstable
+leaks, trust-zone crossings), and computes a health score.
 
 ## Common Mistakes
 

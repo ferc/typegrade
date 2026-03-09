@@ -73,7 +73,7 @@ export function resolveFileOwnership(filePath: string, projectRoot: string): Own
       if (match?.[1]) {
         return {
           confidence: 0.95,
-          ownershipClass: "source-owned",
+          ownershipClass: "workspace-owned",
           reason: `Workspace package: ${match[1]}`,
           workspacePackage: match[1],
         };
@@ -153,8 +153,8 @@ export function classifyBulkOwnership(resolutions: OwnershipResolution[]): Owner
     return resolutions[0]!.ownershipClass;
   }
 
-  // If majority source-owned, classify as source-owned
-  const sourceCount = counts.get("source-owned") ?? 0;
+  // If majority source-owned or workspace-owned, classify as source-owned
+  const sourceCount = (counts.get("source-owned") ?? 0) + (counts.get("workspace-owned") ?? 0);
   if (sourceCount > resolutions.length / 2) {
     return "source-owned";
   }

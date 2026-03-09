@@ -54,6 +54,7 @@ export type FixabilityKind = "direct" | "indirect" | "external" | "not_actionabl
 /** Who owns the code where an issue originates */
 export type OwnershipClass =
   | "source-owned"
+  | "workspace-owned"
   | "generated"
   | "dependency-owned"
   | "standard-library-owned"
@@ -172,12 +173,12 @@ export interface PackageIdentity {
   displayName: string;
   resolvedSpec: string;
   resolvedVersion: string | null;
-  /** How types are provided */
-  typesSource?: "bundled" | "@types" | "mixed" | "unknown";
+  /** How types are provided — always present */
+  typesSource: "bundled" | "@types" | "mixed" | "unknown";
   /** Module system of the package */
   moduleKind?: "esm" | "cjs" | "dual" | "unknown";
-  /** How entrypoints were resolved */
-  entrypointStrategy?: "exports-map" | "types-field" | "main-field" | "fallback-glob" | "unknown";
+  /** How entrypoints were resolved — always present */
+  entrypointStrategy: "exports-map" | "types-field" | "main-field" | "fallback-glob" | "unknown";
 }
 
 // --- Evidence Summary ---
@@ -382,6 +383,8 @@ export interface Issue {
   message: string;
   severity: "error" | "warning" | "info";
   dimension: string;
+  /** Stable identifier for this issue (deterministic across runs) */
+  issueId?: string;
   /** Confidence in this finding (0-1) */
   confidence?: number;
   /** Who owns the code where this issue originates */
@@ -497,13 +500,13 @@ export interface AnalysisResult {
   /** Graph and dedup stats — mandatory in package mode */
   graphStats: GraphStats;
   dedupStats: { groups: number; filesRemoved: number };
-  /** Confidence summary across all layers */
-  confidenceSummary?: ConfidenceSummary;
-  /** Coverage diagnostics — reachable files, positions, undersampling */
-  coverageDiagnostics?: CoverageDiagnostics;
+  /** Confidence summary across all layers — always present */
+  confidenceSummary: ConfidenceSummary;
+  /** Coverage diagnostics — reachable files, positions, undersampling — always present */
+  coverageDiagnostics: CoverageDiagnostics;
   explainability?: ExplainabilityReport;
-  /** Summary of evidence quality across scoring layers */
-  evidenceSummary?: EvidenceSummary;
+  /** Summary of evidence quality across scoring layers — always present */
+  evidenceSummary: EvidenceSummary;
   /** Role breakdown of exported declarations */
   roleBreakdown?: { role: ExportRole; count: number; avgCentrality: number }[];
   benchmarkDiagnostics?: BenchmarkDiagnostics;

@@ -8,7 +8,7 @@ description: >
   automation, dashboards, or agent workflows that ingest typegrade output.
 type: core
 library: typegrade
-library_version: "0.10.0"
+library_version: "0.11.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/types.ts"
@@ -67,10 +67,10 @@ interface AnalysisResult {
   domainScore?: DomainScore;       // Present when domain detected or overridden
   scenarioScore?: ScenarioScore;   // Present when a scenario pack applies
 
-  // --- Optional diagnostics ---
-  confidenceSummary?: ConfidenceSummary;   // Confidence signals
-  coverageDiagnostics?: CoverageDiagnostics; // Coverage and sampling info
-  evidenceSummary?: EvidenceSummary;
+  // --- Always-present diagnostics ---
+  confidenceSummary: ConfidenceSummary;    // Confidence signals (always present)
+  coverageDiagnostics: CoverageDiagnostics; // Coverage and sampling info (always present)
+  evidenceSummary: EvidenceSummary;         // Evidence quality (always present)
 
   // --- Optional analysis extras ---
   boundaryQuality?: BoundaryQualityScore;  // Source mode
@@ -83,9 +83,10 @@ interface AnalysisResult {
 
 - **`status`**: `"complete"` means all dimensions scored normally. `"degraded"`
   means some dimensions could not be scored (e.g. install failure, missing
-  types) — check `degradedReason` for details. Degraded results no longer
-  emit fake zero scores; instead, affected dimensions are marked as
-  inapplicable.
+  types) — check `degradedReason` for details. Degraded results have
+  `score: null` on all composites, and `domainScore`, `scenarioScore`,
+  `autofixSummary`, and `fixPlan` are stripped entirely. Never use degraded
+  results for ranking or comparison.
 - **`scoreValidity`**: Tells you how comparable this result is to others.
   `"fully-comparable"` means all global composites are reliable.
   `"not-comparable"` means scores should not be used for cross-package ranking.
@@ -97,9 +98,9 @@ interface AnalysisResult {
 ```typescript
 interface CompositeScore {
   key: 'consumerApi' | 'agentReadiness' | 'typeSafety';
-  score: number;       // 0-100
-  grade: Grade;        // 'A+' | 'A' | 'B' | 'C' | 'D' | 'F'
-  confidence: number;  // 0-1
+  score: number | null; // 0-100, null when degraded
+  grade: Grade;         // 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' | 'N/A'
+  confidence: number;   // 0-1
 }
 ```
 
@@ -195,7 +196,7 @@ if (result.status === 'degraded') {
 const { agentReadiness } = result.globalScores;
 console.log(`Agent Readiness: ${agentReadiness.score} (${agentReadiness.grade})`);
 
-if (result.coverageDiagnostics?.undersampled) {
+if (result.coverageDiagnostics.undersampled) {
   console.warn('Result is undersampled — treat as indicative');
 }
 
@@ -231,7 +232,7 @@ const ar = result.globalScores.agentReadiness;
 
 if (ar.score === null) {
   // No score available
-} else if (result.coverageDiagnostics?.undersampled) {
+} else if (result.coverageDiagnostics.undersampled) {
   // Undersampled: score capped at 65, unreliable
 } else if (ar.confidence < 0.5) {
   // Low confidence: treat as directional only
@@ -245,6 +246,12 @@ if (ar.score === null) {
 Confidence below 0.7 triggers score moderation — scores above the baseline
 (50) are pulled proportionally toward 50. This prevents overconfident
 high scores from limited evidence.
+
+When overall confidence drops below 0.5, `domainScore` and `scenarioScore`
+are automatically suppressed (removed from the result). When confidence
+drops below 0.3, `scoreValidity` is downgraded to `"partially-comparable"`.
+This means domain and scenario data may be absent even on `"complete"`
+analyses if evidence quality is too low.
 
 ## Common Mistakes
 
@@ -267,7 +274,7 @@ if (result.status !== 'complete' || result.scoreValidity === 'not-comparable') {
   console.warn(`Analysis ${result.status}, scores not reliable`);
   return;
 }
-if (result.coverageDiagnostics?.undersampled) {
+if (result.coverageDiagnostics.undersampled) {
   console.warn('Undersampled package — skipping gate');
   return;
 }

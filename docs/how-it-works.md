@@ -45,7 +45,10 @@ The following fields are always present on every `AnalysisResult`, regardless of
 - `scoreValidity` — the `ScoreValidity` value.
 - `globalScores` — structured global composite scores (Consumer API, Agent Readiness, Type Safety).
 - `profileInfo` — resolved analysis profile and its signals.
-- `packageIdentity` — resolved package name, version, and source metadata.
+- `packageIdentity` — resolved package name, version, and source metadata (`typesSource` and `entrypointStrategy` are always present).
+- `confidenceSummary` — confidence across graph resolution, domain inference, sample coverage, and scenario applicability.
+- `coverageDiagnostics` — reachable files, measured positions, undersampling flag, and types source.
+- `evidenceSummary` — aggregate evidence counts (total declarations, positions, files, and coverage class).
 
 ### Degraded result semantics
 
@@ -56,8 +59,11 @@ When analysis cannot complete normally (e.g., declaration emit fails catastrophi
 - `degradedReason` contains a human-readable explanation of why the analysis degraded.
 - `degradedCategory` classifies the failure: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, or `insufficient-surface`.
 - All composite scores are set to `null` (never fake zeros).
+- `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` are stripped entirely.
 
 Consumers should check `status` before comparing scores. Degraded results are excluded from ranking and gating by default.
+
+Low-confidence results (average composite confidence < 0.5) also have `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` stripped, even when `status` is `"complete"`.
 
 ### Ownership classification
 
@@ -66,13 +72,14 @@ Every issue and dimension result can carry an `OwnershipClass` indicating who ow
 | Value | Meaning |
 |-------|---------|
 | `source-owned` | Code written and maintained in this project |
+| `workspace-owned` | Code in a sibling workspace package within a monorepo |
 | `dependency-owned` | Code originating from an external dependency |
 | `generated` | Machine-generated code (codegen, build output) |
 | `standard-library-owned` | TypeScript or platform standard library types |
 | `mixed` | Finding spans both owned and external code |
 | `unresolved` | Ownership could not be determined |
 
-Ownership influences fix planning — `source-owned` issues are directly actionable, while `dependency-owned` issues are flagged as `external` fixability.
+Ownership influences fix planning — `source-owned` and `workspace-owned` issues are directly actionable, while `dependency-owned` issues are flagged as `external` fixability.
 
 ## Declaration graph engine
 

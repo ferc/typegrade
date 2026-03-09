@@ -8,7 +8,7 @@ description: >
   or documentation.
 type: lifecycle
 library: typegrade
-library_version: "0.10.0"
+library_version: "0.11.0"
 sources:
   - "ferc/typegrade:AGENTS.md"
   - "ferc/typegrade:skills/_artifacts/domain_map.yaml"
@@ -153,7 +153,7 @@ Wrong:
 
 ```yaml
 # In SKILL.md frontmatter after a 0.10.0 -> 0.11.0 release
-library_version: "0.10.0"
+library_version: "0.11.0"
 ```
 
 Correct:
