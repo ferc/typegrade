@@ -159,6 +159,68 @@ describe(analyzePrecision, () => {
     expect(iface.score).toBeGreaterThan(wide.score);
     expect(wide.score).toBeGreaterThan(any_.score);
   });
+
+  it("tracks anyPaths for direct any", () => {
+    const result = analyzePrecision(getTypeFromCode("type T = any;"));
+    expect(result.anyPaths).toStrictEqual([["any"]]);
+  });
+
+  it("tracks anyPaths through object properties", () => {
+    const result = analyzePrecision(getTypeFromCode("type T = { a: string; b: { c: any } };"));
+    expect(result.containsAny).toBeTruthy();
+    expect(result.anyPaths).toBeDefined();
+    expect(result.anyPaths![0]).toContain("any");
+    expect(result.anyPaths![0]!.some((seg) => seg.startsWith("."))).toBeTruthy();
+  });
+
+  it("tracks anyPaths through containers", () => {
+    const result = analyzePrecision(getTypeFromCode("type T = Array<any>;"));
+    expect(result.anyPaths).toStrictEqual([["[element]", "any"]]);
+  });
+
+  it("reports anyDensity for partial any in objects", () => {
+    const result = analyzePrecision(
+      getTypeFromCode(`type T = {
+        name: string; age: number; score: number; flag: boolean;
+        data: any;
+        label: string; count: number; active: boolean; id: string; category: string;
+      };`),
+    );
+    expect(result.containsAny).toBeTruthy();
+    expect(result.anyDensity).toBeDefined();
+    expect(result.anyDensity).toBeCloseTo(0.1, 1);
+  });
+
+  it("reports anyDensity = 1 for all-any objects", () => {
+    const result = analyzePrecision(getTypeFromCode("type T = { a: any; b: any; c: any };"));
+    expect(result.anyDensity).toBe(1);
+  });
+
+  it("partial any object scores higher than all-any object", () => {
+    const partial = analyzePrecision(
+      getTypeFromCode(`type T = {
+        name: string; age: number; score: number; flag: boolean;
+        data: any;
+        label: string; count: number; active: boolean; id: string; category: string;
+      };`),
+    );
+    const allAny = analyzePrecision(getTypeFromCode("type T = { a: any; b: any; c: any };"));
+    expect(partial.score).toBeGreaterThan(allAny.score);
+  });
+
+  it("monotonic: more any properties produce lower scores", () => {
+    const oneAny = analyzePrecision(
+      getTypeFromCode("type T = { a: string; b: number; c: boolean; d: string; e: any };"),
+    );
+    const threeAny = analyzePrecision(
+      getTypeFromCode("type T = { a: any; b: number; c: any; d: string; e: any };"),
+    );
+    const allAny = analyzePrecision(
+      getTypeFromCode("type T = { a: any; b: any; c: any; d: any; e: any };"),
+    );
+    expect(oneAny.score).toBeGreaterThan(threeAny.score);
+    expect(threeAny.score).toBeGreaterThan(allAny.score);
+  });
 });
 
 describe(isDiscriminatedUnion, () => {

@@ -500,6 +500,14 @@ export interface PrecisionFeatures {
   reasons: string[];
   /** Per-feature counts for density calculation */
   featureCounts?: Record<string, number>;
+  /** Property paths where 'any' was found (e.g., [[".opts", "[index]", "any"]]) */
+  anyPaths?: string[][];
+  /** If 'any' originates from a dependency type, the source info */
+  anyOrigin?: { sourceFilePath: string; packageName: string | undefined };
+  /** Fraction of child positions containing 'any' (0-1). Only set for compound types. */
+  anyDensity?: number;
+  /** Fraction of child positions containing 'unknown' (0-1). Only set for compound types. */
+  unknownDensity?: number;
 }
 
 export interface ExplainabilityEntry {

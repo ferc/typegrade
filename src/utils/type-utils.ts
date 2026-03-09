@@ -3,13 +3,29 @@ import type { PrecisionFeatures } from "../types.js";
 
 const MAX_DEPTH = 6;
 const MAX_PROPERTIES = 20;
+const MAX_ANY_PATHS = 3;
+const NODE_MODULES_SEGMENT = "/node_modules/";
+
+interface PrecisionCtx {
+  depth: number;
+  visited: Map<number, PrecisionFeatures>;
+  path: string[];
+}
+
+function childCtx(ctx: PrecisionCtx, segment: string): PrecisionCtx {
+  return { depth: ctx.depth + 1, path: [...ctx.path, segment], visited: ctx.visited };
+}
 
 export function analyzePrecision(
   type: Type,
   depth = 0,
   visited = new Map<number, PrecisionFeatures>(),
 ): PrecisionFeatures {
-  if (depth > MAX_DEPTH) {
+  return analyzePrecisionWithPath(type, { depth, path: [], visited });
+}
+
+function analyzePrecisionWithPath(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
+  if (ctx.depth > MAX_DEPTH) {
     return {
       containsAny: false,
       containsUnknown: false,
@@ -21,8 +37,8 @@ export function analyzePrecision(
 
   // Cache by compiler type id (internal ts API, not in public ts.Type)
   const typeId: number | undefined = (type.compilerType as { id?: number }).id;
-  if (typeId !== undefined && visited.has(typeId)) {
-    return visited.get(typeId)!;
+  if (typeId !== undefined && ctx.visited.has(typeId)) {
+    return ctx.visited.get(typeId)!;
   }
 
   // Reserve spot to handle circular references
@@ -34,27 +50,33 @@ export function analyzePrecision(
     score: 45,
   };
   if (typeId !== undefined) {
-    visited.set(typeId, placeholder);
+    ctx.visited.set(typeId, placeholder);
   }
 
-  const result = computePrecision(type, depth, visited);
+  const result = computePrecision(type, ctx);
 
   if (typeId !== undefined) {
-    visited.set(typeId, result);
+    ctx.visited.set(typeId, result);
   }
   return result;
 }
 
-function computePrecision(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function computePrecision(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const flags = type.getFlags();
 
   // Any
   if (flags & TypeFlags.Any) {
-    return { containsAny: true, containsUnknown: false, features: [], reasons: ["any"], score: 0 };
+    const anyPath = [...ctx.path, "any"];
+    const origin = resolveAnyOrigin(type);
+    return {
+      anyOrigin: origin,
+      anyPaths: [anyPath],
+      containsAny: true,
+      containsUnknown: false,
+      features: [],
+      reasons: ["any"],
+      score: 0,
+    };
   }
 
   // Unknown
@@ -159,40 +181,40 @@ function computePrecision(
 
   // Union types
   if (type.isUnion()) {
-    return analyzeUnion(type, depth, visited);
+    return analyzeUnion(type, ctx);
   }
 
   // Intersection types
   if (type.isIntersection()) {
-    return analyzeIntersection(type, depth, visited);
+    return analyzeIntersection(type, ctx);
   }
 
   // Check for Record alias before resolving to object
   const aliasName = type.getAliasSymbol()?.getName();
   if (aliasName === "Record") {
-    return analyzeRecord(type, depth, visited);
+    return analyzeRecord(type, ctx);
   }
 
   // Arrays and tuples
   if (type.isTuple()) {
-    return analyzeTuple(type, depth, visited);
+    return analyzeTuple(type, ctx);
   }
   if (type.isArray()) {
-    return analyzeContainer(type, depth, visited);
+    return analyzeContainer(type, ctx);
   }
 
   // Check for known container types: Promise, Set, Map, ReadonlyArray
   const symbolName = type.getSymbol()?.getName();
   if (symbolName === "Promise" || symbolName === "Set" || symbolName === "ReadonlyArray") {
-    return analyzeContainer(type, depth, visited);
+    return analyzeContainer(type, ctx);
   }
   if (symbolName === "Map") {
-    return analyzeMap(type, depth, visited);
+    return analyzeMap(type, ctx);
   }
 
   // Object/interface types
   if (type.isObject() || type.isInterface()) {
-    return analyzeObject(type, depth, visited);
+    return analyzeObject(type, ctx);
   }
 
   // Wide primitives
@@ -215,11 +237,7 @@ function computePrecision(
   };
 }
 
-function analyzeUnion(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeUnion(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const members = type.getUnionTypes();
 
   // Boolean is internally `true | false` — treat as wide primitive
@@ -233,13 +251,17 @@ function analyzeUnion(
     };
   }
 
-  const childResults = members.map((member) => analyzePrecision(member, depth + 1, visited));
+  const childResults = members.map((member, idx) =>
+    analyzePrecisionWithPath(member, childCtx(ctx, `|${idx}`)),
+  );
   const avgScore = childResults.reduce((sum, cr) => sum + cr.score, 0) / childResults.length;
   let score = Math.round(avgScore);
   const features: string[] = [];
   const reasons: string[] = [];
-  const containsAny = childResults.some((cr) => cr.containsAny);
+  const anyMemberCount = childResults.filter((cr) => cr.containsAny).length;
+  const containsAny = anyMemberCount > 0;
   const containsUnknown = childResults.some((cr) => cr.containsUnknown);
+  const unionAnyDensity = childResults.length > 0 ? anyMemberCount / childResults.length : 0;
 
   // All literal members bonus
   if (
@@ -259,10 +281,11 @@ function analyzeUnion(
     reasons.push("+15 discriminated union");
   }
 
-  // Penalties
+  // Density-proportional any penalty
   if (containsAny) {
-    score -= 20;
-    reasons.push("-20 member contains any");
+    const anyPenalty = Math.round(20 * unionAnyDensity);
+    score -= anyPenalty;
+    reasons.push(`-${anyPenalty} any density (${anyMemberCount}/${childResults.length})`);
   }
 
   // Mix of broad primitives + broad objects
@@ -285,16 +308,22 @@ function analyzeUnion(
   }
 
   score = clamp(score);
-  return { containsAny, containsUnknown, features, reasons, score };
+  return {
+    ...collectAnyMeta(childResults),
+    anyDensity: childResults.length > 0 ? unionAnyDensity : undefined,
+    containsAny,
+    containsUnknown,
+    features,
+    reasons,
+    score,
+  };
 }
 
-function analyzeIntersection(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeIntersection(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const members = type.getIntersectionTypes();
-  const childResults = members.map((member) => analyzePrecision(member, depth + 1, visited));
+  const childResults = members.map((member, idx) =>
+    analyzePrecisionWithPath(member, childCtx(ctx, `&${idx}`)),
+  );
   const avgScore = childResults.reduce((sum, cr) => sum + cr.score, 0) / childResults.length;
   let score = Math.round(avgScore);
   const features: string[] = [];
@@ -320,14 +349,17 @@ function analyzeIntersection(
   }
 
   score = clamp(score);
-  return { containsAny, containsUnknown, features, reasons, score };
+  return {
+    ...collectAnyMeta(childResults),
+    containsAny,
+    containsUnknown,
+    features,
+    reasons,
+    score,
+  };
 }
 
-function analyzeContainer(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeContainer(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const name = type.isArray() ? "Array" : (type.getSymbol()?.getName() ?? "Container");
   const [firstArg] = type.getTypeArguments();
   if (!firstArg) {
@@ -340,10 +372,13 @@ function analyzeContainer(
     };
   }
 
-  const child = analyzePrecision(firstArg, depth + 1, visited);
+  const child = analyzePrecisionWithPath(firstArg, childCtx(ctx, "[element]"));
   // Container formula: 0.35 * 45 + 0.65 * child
   const score = clamp(Math.round(0.35 * 45 + 0.65 * child.score));
+  const origin = child.anyOrigin ?? (child.containsAny ? resolveTypeOrigin(type) : undefined);
   return {
+    anyOrigin: origin,
+    anyPaths: child.anyPaths,
     containsAny: child.containsAny,
     containsUnknown: child.containsUnknown,
     features: [name.toLowerCase(), ...child.features],
@@ -352,11 +387,7 @@ function analyzeContainer(
   };
 }
 
-function analyzeMap(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeMap(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const [mapKeyArg, mapValueArg] = type.getTypeArguments();
   if (!mapKeyArg || !mapValueArg) {
     return {
@@ -368,11 +399,12 @@ function analyzeMap(
     };
   }
 
-  const key = analyzePrecision(mapKeyArg, depth + 1, visited);
-  const value = analyzePrecision(mapValueArg, depth + 1, visited);
+  const key = analyzePrecisionWithPath(mapKeyArg, childCtx(ctx, "[key]"));
+  const value = analyzePrecisionWithPath(mapValueArg, childCtx(ctx, "[value]"));
   // Map formula: 15 + 0.25 * key + 0.60 * value
   const score = clamp(Math.round(15 + 0.25 * key.score + 0.6 * value.score));
   return {
+    ...collectAnyMeta([key, value]),
     containsAny: key.containsAny || value.containsAny,
     containsUnknown: key.containsUnknown || value.containsUnknown,
     features: ["map", ...key.features, ...value.features],
@@ -381,11 +413,7 @@ function analyzeMap(
   };
 }
 
-function analyzeRecord(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeRecord(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const [recKeyArg, recValueArg] = type.getAliasTypeArguments();
   if (!recKeyArg || !recValueArg) {
     return {
@@ -397,8 +425,8 @@ function analyzeRecord(
     };
   }
 
-  const key = analyzePrecision(recKeyArg, depth + 1, visited);
-  const value = analyzePrecision(recValueArg, depth + 1, visited);
+  const key = analyzePrecisionWithPath(recKeyArg, childCtx(ctx, "[key]"));
+  const value = analyzePrecisionWithPath(recValueArg, childCtx(ctx, "[value]"));
   // Record formula: 10 + 0.35 * key + 0.55 * value, then -15 if key is plain string/number
   let score = Math.round(10 + 0.35 * key.score + 0.55 * value.score);
 
@@ -409,6 +437,7 @@ function analyzeRecord(
 
   score = clamp(score);
   return {
+    ...collectAnyMeta([key, value]),
     containsAny: key.containsAny || value.containsAny,
     containsUnknown: key.containsUnknown || value.containsUnknown,
     features: ["record", ...key.features, ...value.features],
@@ -417,11 +446,7 @@ function analyzeRecord(
   };
 }
 
-function analyzeTuple(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeTuple(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const elements = type.getTupleElements();
   if (elements.length === 0) {
     return {
@@ -433,7 +458,9 @@ function analyzeTuple(
     };
   }
 
-  const childResults = elements.map((el) => analyzePrecision(el, depth + 1, visited));
+  const childResults = elements.map((el, idx) =>
+    analyzePrecisionWithPath(el, childCtx(ctx, `[${idx}]`)),
+  );
   const avgScore = childResults.reduce((sum, cr) => sum + cr.score, 0) / childResults.length;
 
   let score = Math.round(20 + avgScore);
@@ -448,6 +475,7 @@ function analyzeTuple(
   score = clamp(score);
   const features = ["tuple", ...childResults.flatMap((cr) => cr.features)];
   return {
+    ...collectAnyMeta(childResults),
     containsAny: childResults.some((cr) => cr.containsAny),
     containsUnknown: childResults.some((cr) => cr.containsUnknown),
     features,
@@ -456,11 +484,7 @@ function analyzeTuple(
   };
 }
 
-function analyzeObject(
-  type: Type,
-  depth: number,
-  visited: Map<number, PrecisionFeatures>,
-): PrecisionFeatures {
+function analyzeObject(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const properties = type.getProperties().slice(0, MAX_PROPERTIES);
   const features: string[] = [];
   const reasons: string[] = [];
@@ -468,13 +492,15 @@ function analyzeObject(
   // Detect Record-like mapped types: index signature + no named properties
   const indexType = type.getStringIndexType() || type.getNumberIndexType();
   if (indexType && properties.length === 0) {
-    const valueResult = analyzePrecision(indexType, depth + 1, visited);
+    const valueResult = analyzePrecisionWithPath(indexType, childCtx(ctx, "[index]"));
     // Treat as Record<string/number, V>: use Record-like formula
     let score = Math.round(10 + 0.55 * valueResult.score);
     // Penalty for broad key (string/number index = broad key)
     score -= 15;
     score = clamp(score);
     return {
+      anyOrigin: valueResult.anyOrigin,
+      anyPaths: valueResult.anyPaths,
       containsAny: valueResult.containsAny,
       containsUnknown: valueResult.containsUnknown,
       features: ["record-like", ...valueResult.features],
@@ -532,42 +558,63 @@ function analyzeObject(
   let propertyAvg = 50;
   let containsAny = false;
   let containsUnknown = false;
+  let anyCount = 0;
+  let unknownCount = 0;
+  const allPropResults: PrecisionFeatures[] = [];
 
   if (properties.length > 0) {
     const propResults: PrecisionFeatures[] = [];
     for (const prop of properties) {
       const propType = getPropertyType(prop);
       if (propType) {
-        const result = analyzePrecision(propType, depth + 1, visited);
+        const result = analyzePrecisionWithPath(propType, childCtx(ctx, `.${prop.getName()}`));
         propResults.push(result);
+        if (result.containsAny) {
+          anyCount++;
+        } else if (result.containsUnknown) {
+          unknownCount++;
+        }
       }
     }
     if (propResults.length > 0) {
       propertyAvg = propResults.reduce((sum, pr) => sum + pr.score, 0) / propResults.length;
-      containsAny = propResults.some((pr) => pr.containsAny);
-      containsUnknown = propResults.some((pr) => pr.containsUnknown);
+      containsAny = anyCount > 0;
+      containsUnknown = unknownCount > 0;
+      allPropResults.push(...propResults);
     }
   }
 
   // Index signature analysis (for objects that have BOTH properties and index signatures)
   if (indexType) {
-    const idxResult = analyzePrecision(indexType, depth + 1, visited);
+    const idxResult = analyzePrecisionWithPath(indexType, childCtx(ctx, "[index]"));
     if (idxResult.score < 50) {
       shapeBonus -= 15;
       reasons.push("-15 weak index signature");
     }
+    if (idxResult.containsAny) {
+      anyCount++;
+    } else if (idxResult.containsUnknown) {
+      unknownCount++;
+    }
     containsAny = containsAny || idxResult.containsAny;
     containsUnknown = containsUnknown || idxResult.containsUnknown;
+    allPropResults.push(idxResult);
   }
 
-  // Apply containsAny/containsUnknown penalties AFTER all children analyzed
-  if (containsAny) {
-    shapeBonus -= 25;
-    reasons.push("-25 member contains any");
+  // Apply density-proportional containsAny/containsUnknown penalties
+  const totalChildren = allPropResults.length;
+  const objAnyDensity = totalChildren > 0 ? anyCount / totalChildren : 0;
+  const objUnknownDensity = totalChildren > 0 ? unknownCount / totalChildren : 0;
+
+  if (objAnyDensity > 0) {
+    const anyPenalty = Math.round(25 * objAnyDensity);
+    shapeBonus -= anyPenalty;
+    reasons.push(`-${anyPenalty} any density (${anyCount}/${totalChildren})`);
   }
-  if (containsUnknown) {
-    shapeBonus -= 10;
-    reasons.push("-10 member contains unknown");
+  if (objUnknownDensity > 0) {
+    const unknownPenalty = Math.round(10 * objUnknownDensity);
+    shapeBonus -= unknownPenalty;
+    reasons.push(`-${unknownPenalty} unknown density (${unknownCount}/${totalChildren})`);
   }
 
   // All members primitive with no computed-type syntax
@@ -598,7 +645,22 @@ function analyzeObject(
   shapeBonus = Math.max(0, Math.min(100, shapeBonus));
   const score = clamp(Math.round(20 + 0.6 * propertyAvg + 0.4 * shapeBonus));
 
-  return { containsAny, containsUnknown, features, reasons, score };
+  const anyMeta = collectAnyMeta(allPropResults);
+  // If any was found in children but no origin detected, check the parent type itself
+  if (containsAny && !anyMeta.anyOrigin) {
+    anyMeta.anyOrigin = resolveTypeOrigin(type);
+  }
+
+  return {
+    ...anyMeta,
+    anyDensity: totalChildren > 0 ? objAnyDensity : undefined,
+    containsAny,
+    containsUnknown,
+    features,
+    reasons,
+    score,
+    unknownDensity: totalChildren > 0 ? objUnknownDensity : undefined,
+  };
 }
 
 function detectAdvancedSyntaxInDecl(decl: Node): string[] {
@@ -768,6 +830,83 @@ function classifyConstraint(constraint: Type): { level: string; feature: string;
 
   // Default: some constraint but not classifiable as strong
   return { feature: "constraint-basic", level: "basic", score: 65 };
+}
+
+/**
+ * Collect anyPaths and anyOrigin from child results, capped at MAX_ANY_PATHS.
+ */
+function collectAnyMeta(
+  children: PrecisionFeatures[],
+): Pick<PrecisionFeatures, "anyOrigin" | "anyPaths"> {
+  const paths: string[][] = [];
+  let origin: PrecisionFeatures["anyOrigin"] = undefined;
+  for (const child of children) {
+    if (child.anyPaths) {
+      for (const ap of child.anyPaths) {
+        if (paths.length < MAX_ANY_PATHS) {
+          paths.push(ap);
+        }
+      }
+    }
+    if (!origin && child.anyOrigin) {
+      origin = child.anyOrigin;
+    }
+  }
+  return {
+    anyOrigin: origin,
+    anyPaths: paths.length > 0 ? paths : undefined,
+  };
+}
+
+/**
+ * When a type is `any`, check its declaration source to detect dependency origin.
+ * Note: bare `any` is intrinsic and has no useful declarations, so this only
+ * catches explicitly aliased `any` types. Container-level origin detection
+ * in analyzeObject/analyzeContainer handles the common case.
+ */
+function resolveAnyOrigin(type: Type): PrecisionFeatures["anyOrigin"] {
+  const symbol = type.getAliasSymbol() ?? type.getSymbol();
+  if (!symbol) {
+    return undefined;
+  }
+  for (const decl of symbol.getDeclarations()) {
+    const filePath = decl.getSourceFile().getFilePath();
+    if (filePath.includes(NODE_MODULES_SEGMENT)) {
+      return { packageName: extractPackageFromPath(filePath), sourceFilePath: filePath };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Check if a type is declared in node_modules and return its origin info.
+ */
+function resolveTypeOrigin(type: Type): PrecisionFeatures["anyOrigin"] {
+  const declarations = getTypeDeclarations(type);
+  for (const decl of declarations) {
+    const filePath = decl.getSourceFile().getFilePath();
+    if (filePath.includes(NODE_MODULES_SEGMENT)) {
+      return { packageName: extractPackageFromPath(filePath), sourceFilePath: filePath };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract package name from a node_modules file path.
+ */
+function extractPackageFromPath(filePath: string): string | undefined {
+  const nmIdx = filePath.lastIndexOf("node_modules/");
+  if (nmIdx === -1) {
+    return undefined;
+  }
+  const afterNm = filePath.slice(nmIdx + "node_modules/".length);
+  if (afterNm.startsWith("@")) {
+    const parts = afterNm.split("/");
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : undefined;
+  }
+  const slashIdx = afterNm.indexOf("/");
+  return slashIdx > 0 ? afterNm.slice(0, slashIdx) : afterNm;
 }
 
 function clamp(score: number): number {

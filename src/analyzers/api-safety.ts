@@ -1,4 +1,4 @@
-import type { DimensionResult, Issue } from "../types.js";
+import type { DimensionResult, Issue, PrecisionFeatures } from "../types.js";
 import type { PublicSurface, SurfacePosition } from "../surface/index.js";
 import { DIMENSION_CONFIGS } from "../constants.js";
 import { analyzePrecision } from "../utils/type-utils.js";
@@ -31,7 +31,7 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
 
       if (result.containsAny) {
         anyPositions++;
-        pushAnyIssue(pos, issues);
+        pushAnyIssue(pos, issues, result);
       } else if (result.containsUnknown) {
         // Suppress unknown warnings for function params in validation libraries
         if (suppressUnknownParams && pos.role === "param" && pos.declarationKind === "function") {
@@ -95,7 +95,7 @@ export function analyzeApiSafety(surface: PublicSurface, packageName?: string): 
  * - Interface/type-alias/variable: any → error only
  * - Class positions: no issues (just counted)
  */
-function pushAnyIssue(pos: SurfacePosition, issues: Issue[]): void {
+function pushAnyIssue(pos: SurfacePosition, issues: Issue[], precision: PrecisionFeatures): void {
   // Class positions don't generate issues
   if (pos.declarationKind === "class") {
     return;
@@ -116,14 +116,44 @@ function pushAnyIssue(pos: SurfacePosition, issues: Issue[]): void {
     return;
   }
 
-  issues.push({
+  // Append property path detail if available
+  const pathSuffix = formatAnyPath(precision);
+  if (pathSuffix) {
+    message += ` ${pathSuffix}`;
+  }
+
+  // Downgrade to warning when any is low-density and nested (not a direct `any` type)
+  const isLowDensity =
+    precision.anyDensity !== undefined && precision.anyDensity > 0 && precision.anyDensity <= 0.15;
+  const severity: Issue["severity"] = isLowDensity ? "warning" : "error";
+
+  const issue: Issue = {
     column: pos.column,
     dimension: CONFIG.label,
     file: pos.filePath,
     line: pos.line,
     message,
-    severity: "error",
-  });
+    severity,
+  };
+
+  // Pre-tag dependency ownership if the any originates from an external type
+  if (precision.anyOrigin) {
+    issue.ownership = "dependency-owned";
+    issue.fixability = "external";
+    issue.rootCauseCategory = "opaque-dependency";
+  }
+
+  issues.push(issue);
+}
+
+function formatAnyPath(precision: PrecisionFeatures): string {
+  const firstPath = precision.anyPaths?.[0];
+  if (!firstPath || firstPath.length <= 1) {
+    return "";
+  }
+  const origin = precision.anyOrigin?.packageName;
+  const via = `via ${firstPath.join(" \u2192 ")}`;
+  return origin ? `${via} (from ${origin})` : via;
 }
 
 function pushUnknownIssue(pos: SurfacePosition, issues: Issue[]): void {
