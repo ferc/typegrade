@@ -364,4 +364,4 @@ Suppressions are configured via `typegrade.config.ts` or applied programmaticall
 
 ## Zero-file behavior
 
-When no source files are found: all composites get score 0, grade `N/A`.
+When no source files are found: all composites get `score: null`, grade `N/A`, and the result is marked `status: "degraded"` with `degradedCategory: "missing-declarations"`. This prevents degraded results from masquerading as real zero scores.

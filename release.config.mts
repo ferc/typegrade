@@ -8,7 +8,8 @@ const config: Options = {
       {
         preset: "conventionalcommits",
         releaseRules: [
-          { breaking: true, release: "major" },
+          // Pre-1.0: breaking changes bump minor, not major
+          { breaking: true, release: "minor" },
           { release: "minor", type: "feat" },
           { release: "patch", type: "fix" },
           { release: "patch", type: "perf" },

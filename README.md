@@ -277,6 +277,7 @@ import {
   comparePackages,
   buildFixPlan,
   computeDiff,
+  normalizeResult,
   buildTaintFlowChains,
   analyzeMonorepo,
   loadConfig,

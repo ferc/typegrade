@@ -217,6 +217,71 @@ function hashSpec(spec: string): string {
   return createHash("sha256").update(spec).digest("hex").slice(0, 12);
 }
 
+// ─── Structural Manifest Validation ───────────────────────────────────────
+
+/** Validate a package spec has the required format: name@version */
+function isValidPackageSpec(spec: string): boolean {
+  // Scoped: @scope/name@version
+  if (spec.startsWith("@")) {
+    const slashIdx = spec.indexOf("/");
+    if (slashIdx < 2) {
+      return false;
+    }
+    const afterSlash = spec.slice(slashIdx + 1);
+    const atIdx = afterSlash.indexOf("@");
+    // Must have @version suffix
+    return atIdx > 0 && afterSlash.length > atIdx + 1;
+  }
+  // Unscoped: name@version
+  const atIdx = spec.indexOf("@");
+  return atIdx > 0 && spec.length > atIdx + 1;
+}
+
+/** Validation error for a manifest entry */
+export interface ManifestValidationError {
+  tier: string;
+  spec: string;
+  reason: string;
+}
+
+/**
+ * Validate all entries in a manifest structurally (no network calls).
+ * Checks that every spec has an explicit version (no "latest" or bare names).
+ * Returns an array of validation errors (empty = valid).
+ */
+export function validateManifestStructure(manifest: BenchmarkManifestV2): ManifestValidationError[] {
+  const errors: ManifestValidationError[] = [];
+  const seen = new Set<string>();
+
+  for (const [tier, packages] of Object.entries(manifest.packages)) {
+    if (!Array.isArray(packages)) {
+      errors.push({ reason: "Tier value is not an array", spec: "(none)", tier });
+      continue;
+    }
+    for (const pkg of packages) {
+      const normalized = normalizeEntry(pkg);
+      const { spec } = normalized;
+
+      if (!spec || spec.trim().length === 0) {
+        errors.push({ reason: "Empty spec", spec: "(empty)", tier });
+        continue;
+      }
+
+      if (!isValidPackageSpec(spec)) {
+        errors.push({ reason: "Spec must be name@version (no bare names or 'latest')", spec, tier });
+        continue;
+      }
+
+      if (seen.has(spec)) {
+        errors.push({ reason: "Duplicate spec in manifest", spec, tier });
+      }
+      seen.add(spec);
+    }
+  }
+
+  return errors;
+}
+
 // ─── Quarantine Guards ─────────────────────────────────────────────────────
 
 /**

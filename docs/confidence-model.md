@@ -93,6 +93,21 @@ interface ConfidenceSignal {
 }
 ```
 
+## Score validity
+
+The `scoreValidity` field reflects whether scores can be meaningfully compared to other results. It is set based on confidence and coverage signals:
+
+| Value | When set | Meaning |
+|---|---|---|
+| `fully-comparable` | Complete analysis with adequate coverage | Scores are reliable and comparable |
+| `partially-comparable` | Fallback glob resolution or low average confidence (<0.3) | Scores are directionally correct but may not rank accurately |
+| `not-comparable` | Undersampled or degraded analysis | Scores should not be used for ranking or gating |
+
+Key transitions:
+- **Undersampled** analysis → `"not-comparable"` (insufficient evidence for any comparison).
+- **Fallback glob** resolution → `"partially-comparable"` (some evidence, but entrypoint graph is unreliable).
+- **Low average confidence** (<0.3 across all four summary axes) on an otherwise complete result → downgraded from `"fully-comparable"` to `"partially-comparable"`.
+
 ## Interpreting confidence
 
 | Confidence | Interpretation |

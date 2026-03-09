@@ -98,9 +98,10 @@ npx typegrade analyze . --json
 ```
 
 Returns an `AnalysisResult` object with mandatory envelope fields: `status`,
-`scoreValidity`, `analysisSchemaVersion`, `globalScores`, `profileInfo`, and
-`packageIdentity`. Degraded results use `status: "degraded"` instead of fake
-zero scores. See the `consume-json` skill for field details.
+`scoreValidity`, `analysisSchemaVersion`, `globalScores`, `profileInfo`,
+`packageIdentity`, and `degradedCategory` (when degraded). Degraded results use
+`status: "degraded"` with `score: null` composites instead of fake zero scores.
+See the `consume-json` skill for field details.
 
 ### Agent-optimized output
 

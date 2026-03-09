@@ -97,6 +97,60 @@ function makeDefaultGraphStats(): GraphStats {
 }
 
 /**
+ * Normalize an AnalysisResult to ensure all mandatory fields are present
+ * and degraded results never masquerade as normal scores.
+ *
+ * This is the final pass applied to every result before it leaves the pipeline.
+ */
+export function normalizeResult(result: AnalysisResult): AnalysisResult {
+  // Ensure schema version
+  result.analysisSchemaVersion = result.analysisSchemaVersion || ANALYSIS_SCHEMA_VERSION;
+
+  // Ensure degraded results have null scores (never 0 masquerading as a real score)
+  if (result.status === "degraded") {
+    result.scoreValidity = "not-comparable";
+    for (const comp of result.composites) {
+      if (comp.score === 0) {
+        comp.score = null;
+        comp.grade = "N/A";
+      }
+    }
+    // Rebuild globalScores to reflect nulled composites
+    result.globalScores = buildGlobalScores(result.composites);
+  }
+
+  // Ensure profileInfo
+  if (!result.profileInfo) {
+    result.profileInfo = {
+      profile: result.mode === "package" ? "package" : "library",
+      profileConfidence: 0,
+      profileReasons: ["Default profile — not explicitly detected"],
+    };
+  }
+
+  // Ensure packageIdentity
+  if (!result.packageIdentity) {
+    result.packageIdentity = {
+      displayName: result.projectName,
+      resolvedSpec: result.projectName,
+      resolvedVersion: null,
+    };
+  }
+
+  // Confidence gating: if overall confidence is very low, downgrade scoreValidity
+  if (result.status === "complete" && result.confidenceSummary) {
+    const cs = result.confidenceSummary;
+    const avgConfidence =
+      (cs.graphResolution + cs.domainInference + cs.sampleCoverage + cs.scenarioApplicability) / 4;
+    if (avgConfidence < 0.3 && result.scoreValidity === "fully-comparable") {
+      result.scoreValidity = "partially-comparable";
+    }
+  }
+
+  return result;
+}
+
+/**
  * Detect undersampling — packages where we have too little data
  * to produce a reliable score.
  *
@@ -276,9 +330,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   if (filesAnalyzed === 0) {
     const timeMs = Math.round(performance.now() - startTime);
     const emptyComposites: CompositeScore[] = [
-      { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: 0 },
-      { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: 0 },
-      { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: 0 },
+      { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: null },
+      { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: null },
+      { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: null },
       { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
     ];
     return {
@@ -286,6 +340,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       caveats: [],
       composites: emptyComposites,
       dedupStats: { filesRemoved: 0, groups: 0 },
+      degradedCategory: "missing-declarations",
       degradedReason: "No source files found to analyze",
       dimensions: [],
       filesAnalyzed: 0,
@@ -507,25 +562,35 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   // Run scenario pack if domain was detected with sufficient confidence and no fallback glob
   let scenarioScore: ScenarioScore | undefined = undefined;
-  if (
-    domainConfidenceMet &&
-    !usedFallbackGlob &&
-    domainInference.confidence >= SCENARIO_CONFIDENCE_THRESHOLD
-  ) {
+  let scenarioAbstentionReason: string | undefined = undefined;
+  if (!domainConfidenceMet) {
+    scenarioAbstentionReason =
+      domainOpt === "off"
+        ? "Domain scoring disabled"
+        : `Domain confidence too low (${domainInference.confidence.toFixed(2)})`;
+  } else if (usedFallbackGlob) {
+    scenarioAbstentionReason = "Graph used fallback glob — scenario evaluation skipped";
+  } else if (domainInference.confidence < SCENARIO_CONFIDENCE_THRESHOLD) {
+    scenarioAbstentionReason = `Domain confidence ${domainInference.confidence.toFixed(2)} below scenario threshold`;
+  } else {
     const pack = getScenarioPackWithVariant(
       domainInference.domain as DomainKey,
       consumerSurface,
       packageName,
     );
     if (pack) {
-      // Check scenario applicability before running
       const applicabilityCheck = isScenarioApplicable(pack, consumerSurface, packageName);
       if (applicabilityCheck.applicable) {
         scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
       } else {
-        caveats.push(`Scenario pack '${pack.name}' skipped: ${applicabilityCheck.reason}`);
+        scenarioAbstentionReason = `Scenario pack '${pack.name}' not applicable: ${applicabilityCheck.reason}`;
       }
+    } else {
+      scenarioAbstentionReason = `No scenario pack for domain '${domainInference.domain}'`;
     }
+  }
+  if (scenarioAbstentionReason && !scenarioScore) {
+    caveats.push(scenarioAbstentionReason);
   }
 
   // Collect top issues
@@ -537,8 +602,24 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     indirect: 1,
     not_actionable: 3,
   };
+  // Ownership priority: source-owned first, dependency-owned last
+  const ownershipOrder: Record<string, number> = {
+    "dependency-owned": 3,
+    generated: 2,
+    mixed: 1,
+    "source-owned": 0,
+    "standard-library-owned": 4,
+    unresolved: 5,
+  };
   const topIssues = allIssues
     .toSorted((lhs, rhs) => {
+      // Source-owned issues sort first
+      const byOwnership =
+        (ownershipOrder[lhs.ownership ?? "source-owned"] ?? 0) -
+        (ownershipOrder[rhs.ownership ?? "source-owned"] ?? 0);
+      if (byOwnership !== 0) {
+        return byOwnership;
+      }
       const bySeverity = (severityOrder[lhs.severity] ?? 0) - (severityOrder[rhs.severity] ?? 0);
       if (bySeverity !== 0) {
         return bySeverity;
@@ -661,7 +742,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const isFallbackGlob = usedFallbackGlob;
   const analysisStatus: AnalysisStatus = isUndersampled ? "degraded" : "complete";
   let scoreValidity: ScoreValidity = "fully-comparable";
-  if (isFallbackGlob || isUndersampled) {
+  if (isUndersampled) {
+    scoreValidity = "not-comparable";
+  } else if (isFallbackGlob) {
     scoreValidity = "partially-comparable";
   }
   const degradedReason: string | undefined = isUndersampled
@@ -712,6 +795,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   if (degradedReason) {
     result.degradedReason = degradedReason;
+    result.degradedCategory = "insufficient-surface";
   }
 
   if (boundarySummary) {

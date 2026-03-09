@@ -1,10 +1,11 @@
-import type {
-  AnalysisResult,
-  CompositeDiff,
-  CompositeKey,
-  DiffResult,
-  DimensionDiff,
-  Issue,
+import {
+  ANALYSIS_SCHEMA_VERSION,
+  type AnalysisResult,
+  type CompositeDiff,
+  type CompositeKey,
+  type DiffResult,
+  type DimensionDiff,
+  type Issue,
 } from "./types.js";
 import pc from "picocolors";
 
@@ -262,6 +263,7 @@ export function computeDiff(opts: {
   const summary = buildSummary({ compositeDiffs, newIssues, resolvedIssues });
 
   const result: DiffResult = {
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     baseline: opts.baseline,
     compositeDiffs,
     dimensionDiffs,

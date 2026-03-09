@@ -8,10 +8,36 @@ import { computeExecutionOrder, enrichFixBatches, groupFixBatches } from "./fix-
  * Filters to only high-confidence, source-owned, directly fixable findings.
  * Groups into fix batches and suggests execution order.
  */
+/** Maximum actionable issues to include in agent report */
+const AGENT_ISSUE_BUDGET = 50;
+
 export function buildAgentReport(
   result: AnalysisResult,
-  opts?: { minConfidence?: number; includeIndirect?: boolean },
+  opts?: { minConfidence?: number; includeIndirect?: boolean; issueBudget?: number },
 ): AgentReport {
+  // Truly degraded results (all null scores) must not emit fix batches.
+  // Source-mode analyses can be "degraded" (undersampled) but still have valid scores.
+  const allNullScores = result.composites.every((comp) => comp.score === null);
+  if (result.status === "degraded" && allNullScores) {
+    return {
+      actionableIssues: [],
+      enrichedBatches: [],
+      executionOrder: [],
+      expectedScoreImprovement: 0,
+      fixBatches: [],
+      stopConditions: [
+        {
+          kind: "no-actionable-issues",
+          met: true,
+          reason: `Analysis is degraded: ${result.degradedReason ?? "unknown reason"}. No fix batches emitted.`,
+        },
+      ],
+      suppressedCount: 0,
+      suppressionReasons: [],
+      verificationSteps: [],
+    };
+  }
+
   const minConfidence = opts?.minConfidence ?? 0.7;
   const includeIndirect = opts?.includeIndirect ?? false;
 
@@ -48,28 +74,34 @@ export function buildAgentReport(
     return true;
   });
 
-  // Count suppressions
-  const suppressedCount = allIssues.length - actionableIssues.length;
-  const suppressionReasons = computeSuppressionBreakdown(allIssues, actionableIssues);
+  // Apply issue budget — prioritize by agentPriority, then cap
+  const budget = opts?.issueBudget ?? AGENT_ISSUE_BUDGET;
+  const budgetedIssues = actionableIssues
+    .toSorted((lhs, rhs) => (rhs.agentPriority ?? 0) - (lhs.agentPriority ?? 0))
+    .slice(0, budget);
+
+  // Count suppressions (includes budget-trimmed issues)
+  const suppressedCount = allIssues.length - budgetedIssues.length;
+  const suppressionReasons = computeSuppressionBreakdown(allIssues, budgetedIssues);
 
   // Group into fix batches
-  const fixBatches = groupFixBatches(actionableIssues);
+  const fixBatches = groupFixBatches(budgetedIssues);
   const executionOrder = computeExecutionOrder(fixBatches);
 
   // Enrich batches with score deltas and verification commands
-  const enrichedBatches = enrichFixBatches(fixBatches, actionableIssues);
+  const enrichedBatches = enrichFixBatches(fixBatches, budgetedIssues);
 
   // Estimate total score improvement
-  const expectedScoreImprovement = estimateScoreImprovement(actionableIssues, allIssues.length);
+  const expectedScoreImprovement = estimateScoreImprovement(budgetedIssues, allIssues.length);
 
   // Compute stop conditions
-  const stopConditions = computeStopConditions(actionableIssues, expectedScoreImprovement);
+  const stopConditions = computeStopConditions(budgetedIssues, expectedScoreImprovement);
 
   // Default verification steps for the entire report
   const verificationSteps = ["npx tsc --noEmit", "npx vitest run", "npx typegrade analyze --json"];
 
   return {
-    actionableIssues,
+    actionableIssues: budgetedIssues,
     enrichedBatches,
     executionOrder,
     expectedScoreImprovement,

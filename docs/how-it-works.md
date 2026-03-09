@@ -54,6 +54,8 @@ When analysis cannot complete normally (e.g., declaration emit fails catastrophi
 - `status` is set to `"degraded"`.
 - `scoreValidity` is set to `"not-comparable"`.
 - `degradedReason` contains a human-readable explanation of why the analysis degraded.
+- `degradedCategory` classifies the failure: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, or `insufficient-surface`.
+- All composite scores are set to `null` (never fake zeros).
 
 Consumers should check `status` before comparing scores. Degraded results are excluded from ranking and gating by default.
 
@@ -299,7 +301,7 @@ The boundary report includes taint chains, hotspots, trust zone crossings, and p
 
 ## Fix planning pipeline
 
-The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption.
+The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption. Actionable issues are capped at 50 (the agent issue budget), sorted by `agentPriority` descending with source-owned issues prioritized first. Degraded results with all-null composite scores emit an empty report with no fix batches.
 
 ### Issue enrichment
 
@@ -363,7 +365,7 @@ Violations are classified as:
 | `unstable-leak` | Stable layer depending on an unstable layer |
 | `trust-zone-crossing` | Data flow crossing trust zone boundaries |
 
-The monorepo report includes the package list with layers, all violations, the layer dependency graph, and an optional `MonorepoHealthSummary` with:
+The monorepo report includes `analysisSchemaVersion`, the package list with layers, all violations, the layer dependency graph, and an optional `MonorepoHealthSummary` with:
 
 - `healthScore` — numeric score (0-100) reflecting overall monorepo layering health.
 - `healthGrade` — letter grade derived from the health score.
@@ -376,7 +378,7 @@ The `compare` command (`typegrade compare <pkgA> <pkgB>`) performs a side-by-sid
 
 Programmatically, the `comparePackages(pkgA, pkgB, options?)` function returns both `AnalysisResult` objects and an optional rendered text comparison.
 
-The type system also supports a `DiffResult` for comparing two analysis runs of the same project (e.g., before and after a change). A diff result includes:
+The type system also supports a `DiffResult` for comparing two analysis runs of the same project (e.g., before and after a change). Each `DiffResult` carries `analysisSchemaVersion` for compatibility verification. A diff result includes:
 
 - **Composite diffs**: delta for each composite score (`consumerApi`, `agentReadiness`, `typeSafety`).
 - **Dimension diffs**: delta for each individual dimension score.

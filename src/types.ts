@@ -8,6 +8,15 @@ export type AnalysisStatus = "complete" | "degraded" | "invalid-input" | "unsupp
 /** How comparable the scores in this result are */
 export type ScoreValidity = "fully-comparable" | "partially-comparable" | "not-comparable";
 
+/** Category of degradation explaining why an analysis could not complete normally */
+export type DegradedCategory =
+  | "invalid-package-spec"
+  | "unsupported-package-layout"
+  | "missing-declarations"
+  | "partial-graph-resolution"
+  | "install-failure"
+  | "insufficient-surface";
+
 // --- Applicability ---
 
 /** Whether a dimension is meaningful for a given library */
@@ -452,6 +461,8 @@ export interface AnalysisResult {
   scoreValidity: ScoreValidity;
   /** If degraded, why */
   degradedReason?: string;
+  /** If degraded, the category of degradation */
+  degradedCategory?: DegradedCategory;
   mode: AnalysisMode;
   scoreProfile: "source-project" | "published-declarations";
   projectName: string;
@@ -829,6 +840,7 @@ export interface MonorepoHealthSummary {
 
 /** Monorepo analysis report */
 export interface MonorepoReport {
+  analysisSchemaVersion: string;
   packages: MonorepoPackageInfo[];
   violations: LayerViolation[];
   layerGraph: Record<string, string[]>;
@@ -847,6 +859,7 @@ export interface MonorepoPackageInfo {
 
 /** Result of comparing two analysis runs */
 export interface DiffResult {
+  analysisSchemaVersion: string;
   baseline: AnalysisResult;
   target: AnalysisResult;
   compositeDiffs: CompositeDiff[];

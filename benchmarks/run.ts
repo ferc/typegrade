@@ -5,7 +5,7 @@ import type { AnalysisResult, ScenarioScore } from "../src/types.js";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS, UNDERSAMPLED_ANCHOR_WAIVERS } from "./assertions.js";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
-import { flattenManifest, loadManifest, loadManifestByFilename, normalizeEntry, samplePool } from "./split-loader.js";
+import { flattenManifest, loadManifest, loadManifestByFilename, normalizeEntry, samplePool, validateManifestStructure } from "./split-loader.js";
 import type { BenchmarkSplit, ManifestEntry } from "./types.js";
 import { runPool } from "./pool.js";
 
@@ -112,6 +112,19 @@ async function main() {
   let packages: { tier: string; entry: ManifestEntry }[] = [];
   let poolManifestHash: string | undefined;
   let poolSampledHashes: string[] | undefined;
+
+  // Structural validation before any scoring
+  const preValidationManifest = poolCount > 0 || poolSampleCount > 0
+    ? loadManifest(poolCount > 0 || poolSampleCount > 0 ? "eval-pool" : "train")
+    : loadManifestByFilename(manifestFilename);
+  const validationErrors = validateManifestStructure(preValidationManifest);
+  if (validationErrors.length > 0) {
+    console.error(`Manifest structural validation failed (${validationErrors.length} error(s)):\n`);
+    for (const err of validationErrors) {
+      console.error(`  [${err.tier}] ${err.spec}: ${err.reason}`);
+    }
+    process.exit(1);
+  }
 
   if (poolCount > 0) {
     // Pool sampling mode — stratified sample from eval-pool

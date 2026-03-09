@@ -1,5 +1,5 @@
 // Public library API — no CLI side effects on import
-export { analyzeProject } from "./analyzer.js";
+export { analyzeProject, normalizeResult } from "./analyzer.js";
 export { scorePackage } from "./package-scorer.js";
 export type { ScorePackageOptions } from "./package-scorer.js";
 export {
@@ -68,6 +68,7 @@ export type {
   ConfidenceSummary,
   CoverageDiagnostics,
   CoverageFailureMode,
+  DegradedCategory,
   DiffResult,
   DimensionDiff,
   DimensionResult,

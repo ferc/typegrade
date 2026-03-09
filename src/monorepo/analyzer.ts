@@ -1,11 +1,12 @@
-import type {
-  Grade,
-  LayerViolation,
-  MonorepoConfig,
-  MonorepoHealthSummary,
-  MonorepoPackageInfo,
-  MonorepoReport,
-  PackageLayer,
+import {
+  ANALYSIS_SCHEMA_VERSION,
+  type Grade,
+  type LayerViolation,
+  type MonorepoConfig,
+  type MonorepoHealthSummary,
+  type MonorepoPackageInfo,
+  type MonorepoReport,
+  type PackageLayer,
 } from "../types.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -128,6 +129,7 @@ export function analyzeMonorepo(opts: AnalyzeMonorepoOpts): MonorepoReport {
   });
 
   return {
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     healthSummary,
     layerGraph,
     packages: [...packageMap.values()],

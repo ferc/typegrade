@@ -8,6 +8,7 @@
 | `status` | `AnalysisStatus` | Always | `'complete' \| 'degraded' \| 'invalid-input' \| 'unsupported-package'` |
 | `scoreValidity` | `ScoreValidity` | Always | `'fully-comparable' \| 'partially-comparable' \| 'not-comparable'` |
 | `degradedReason` | `string` | When degraded | Why the analysis is degraded |
+| `degradedCategory` | `DegradedCategory` | When degraded | Category: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, `insufficient-surface` |
 | `mode` | `'source' \| 'package'` | Always | Analysis mode |
 | `scoreProfile` | `string` | Always | `'source-project' \| 'published-declarations'` |
 | `projectName` | `string` | Always | Project or package name |

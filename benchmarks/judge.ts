@@ -821,6 +821,13 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics): { gate: string; passed: 
       gate: "eval-train-drift-<2.0",
       passed: metrics.trainEvalDrift === undefined || metrics.trainEvalDrift < 2.0,
     },
+    {
+      detail: metrics.confidenceModerationRate !== undefined
+        ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%`
+        : "n/a",
+      gate: "eval-confidence-moderation-<20%",
+      passed: metrics.confidenceModerationRate === undefined || metrics.confidenceModerationRate < 0.2,
+    },
   ];
 }
 

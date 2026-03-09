@@ -27,6 +27,7 @@ describe("pack smoke test", () => {
       "evaluateBoundaryPolicies",
       "gatherProfileSignals",
       "loadConfig",
+      "normalizeResult",
       "renderAgentJson",
       "renderDiffReport",
       "renderDimensionTable",

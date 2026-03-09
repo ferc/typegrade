@@ -2,6 +2,7 @@ import {
   ANALYSIS_SCHEMA_VERSION,
   type AnalysisResult,
   type AnalysisStatus,
+  type DegradedCategory,
   type PackageAnalysisContext,
   type ScoreValidity,
 } from "./types.js";
@@ -124,6 +125,7 @@ function buildDegradedResult(opts: {
   spec: string;
   version: string | null;
   errorMessage: string;
+  category: DegradedCategory;
 }): AnalysisResult {
   const zeroComposite = (key: "consumerApi" | "agentReadiness" | "typeSafety") => ({
     compositeConfidenceReasons: ["Degraded analysis — scores are not comparable"],
@@ -142,6 +144,7 @@ function buildDegradedResult(opts: {
     caveats: [opts.errorMessage],
     composites: [consumerApi, agentReadiness, typeSafety],
     dedupStats: { filesRemoved: 0, groups: 0 },
+    degradedCategory: opts.category,
     degradedReason: opts.errorMessage,
     dimensions: [],
     filesAnalyzed: 0,
@@ -198,6 +201,7 @@ function stampResultStatus(result: AnalysisResult): void {
     result.scoreValidity = "not-comparable";
     result.degradedReason =
       result.degradedReason ?? "All composite scores are zero with degraded coverage";
+    result.degradedCategory = result.degradedCategory ?? "insufficient-surface";
   } else {
     result.status = result.status ?? ("complete" as AnalysisStatus);
     result.scoreValidity = result.scoreValidity ?? ("fully-comparable" as ScoreValidity);
@@ -518,6 +522,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return buildDegradedResult({
+      category: "install-failure",
       errorMessage: `Package install failed: ${message}`,
       packageName,
       spec: nameOrPath,

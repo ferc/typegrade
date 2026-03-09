@@ -67,11 +67,12 @@ Output:
 npx typegrade self-analyze . --json
 ```
 
-Returns an `AgentReport` with:
+Returns an `AgentReport` with up to 50 actionable issues (capped by the agent
+issue budget), sorted by `agentPriority` with source-owned issues first:
 
 ```typescript
 interface AgentReport {
-  actionableIssues: Issue[];
+  actionableIssues: Issue[];  // Capped at 50, ownership-prioritized
   fixBatches: FixBatch[];
   enrichedBatches: EnrichedFixBatch[];  // Batches with score deltas and verification
   suppressedCount: number;

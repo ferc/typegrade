@@ -69,14 +69,17 @@ describe("e2e: analyzeProject", () => {
     expect(innerUnknownWarnings).toHaveLength(0);
   });
 
-  it("returns 0/N/A when no source files found", () => {
+  it("returns null/N/A when no source files found", () => {
     const emptyDir = resolve(tmpdir(), `typegrade-empty-${Date.now()}`);
     mkdirSync(emptyDir, { recursive: true });
     try {
       const result = analyzeProject(emptyDir);
       expect(result.filesAnalyzed).toBe(0);
+      expect(result.status).toBe("degraded");
+      expect(result.scoreValidity).toBe("not-comparable");
+      expect(result.degradedCategory).toBe("missing-declarations");
       const ar = getComposite(result, "agentReadiness");
-      expect(ar!.score).toBe(0);
+      expect(ar!.score).toBeNull();
       expect(ar!.grade).toBe("N/A");
       expect(result.dimensions).toHaveLength(0);
     } finally {
@@ -352,5 +355,47 @@ describe("e2e: analyzeProject", () => {
     expect(result.coverageDiagnostics!.typesSource).toBe("bundled");
     // With 10 reachable files and enough declarations, should not be undersampled
     expect(result.coverageDiagnostics!.undersampled).toBeFalsy();
+  });
+
+  describe("schema consistency invariants", () => {
+    it("every result has all mandatory fields", () => {
+      const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+      expect(result.analysisSchemaVersion).toBe("0.11.0");
+      // Status can be complete or degraded depending on fixture size
+      expect(["complete", "degraded"]).toContain(result.status);
+      expect(result.globalScores).toBeDefined();
+      expect(result.globalScores.consumerApi).toBeDefined();
+      expect(result.globalScores.agentReadiness).toBeDefined();
+      expect(result.globalScores.typeSafety).toBeDefined();
+      expect(result.profileInfo).toBeDefined();
+      expect(result.profileInfo.profile).toBeDefined();
+      expect(result.profileInfo.profileConfidence).toBeGreaterThanOrEqual(0);
+      expect(result.packageIdentity).toBeDefined();
+      expect(result.packageIdentity.displayName).toBeDefined();
+      expect(result.scoreComparability).toBe("global");
+    });
+
+    it("degraded result has null scores and degradedCategory", () => {
+      const emptyDir = resolve(tmpdir(), `typegrade-invariant-${Date.now()}`);
+      mkdirSync(emptyDir, { recursive: true });
+      try {
+        const result = analyzeProject(emptyDir);
+        expect(result.status).toBe("degraded");
+        expect(result.scoreValidity).toBe("not-comparable");
+        expect(result.degradedReason).toBeDefined();
+        expect(result.degradedCategory).toBeDefined();
+        // All composites must have null scores, never 0
+        for (const comp of result.composites) {
+          expect(comp.score).toBeNull();
+          expect(comp.grade).toBe("N/A");
+        }
+        // GlobalScores must reflect null composites
+        expect(result.globalScores.consumerApi.score).toBeNull();
+        expect(result.globalScores.agentReadiness.score).toBeNull();
+        expect(result.globalScores.typeSafety.score).toBeNull();
+      } finally {
+        rmSync(emptyDir, { force: true, recursive: true });
+      }
+    });
   });
 });

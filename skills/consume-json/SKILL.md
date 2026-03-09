@@ -47,6 +47,7 @@ interface AnalysisResult {
   status: AnalysisStatus;         // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
   scoreValidity: ScoreValidity;   // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
   degradedReason?: string;        // Present when status is 'degraded'
+  degradedCategory?: DegradedCategory; // Classifies why analysis degraded
 
   mode: 'source' | 'package';
   scoreProfile: 'source-project' | 'published-declarations';
