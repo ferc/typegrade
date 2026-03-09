@@ -54,7 +54,15 @@ interface ResultEntry {
 interface BenchmarkSnapshot {
   timestamp: string;
   entries: ResultEntry[];
-  assertions: { assertion: string; class: string; result: string; higherScore?: number | null; lowerScore?: number | null; delta?: number | null; minDelta?: number }[];
+  assertions: {
+    assertion: string;
+    class: string;
+    result: string;
+    higherScore?: number | null;
+    lowerScore?: number | null;
+    delta?: number | null;
+    minDelta?: number;
+  }[];
   summary: {
     mustPass: { passed: number; failed: number; total: number };
     hardDiagnostic?: { passed: number; failed: number; total: number };
@@ -208,7 +216,10 @@ function getDimensionScore(entry: ResultEntry, dimensionKey: string): number | n
 function computePerDimensionConcordance(
   snapshot: BenchmarkSnapshot,
 ): Record<string, { concordant: number; discordant: number; total: number; rate: number }> {
-  const results: Record<string, { concordant: number; discordant: number; total: number; rate: number }> = {};
+  const results: Record<
+    string,
+    { concordant: number; discordant: number; total: number; rate: number }
+  > = {};
   const entryMap = new Map<string, ResultEntry>();
   for (const entry of snapshot.entries) {
     entryMap.set(entry.name, entry);
@@ -293,8 +304,11 @@ function computePerDimensionConcordance(
   return results;
 }
 
-function computeTieAnalysis(entries: ResultEntry[]): Array<{ pkgA: string; pkgB: string; scoreA: number; scoreB: number; delta: number }> {
-  const ties: Array<{ pkgA: string; pkgB: string; scoreA: number; scoreB: number; delta: number }> = [];
+function computeTieAnalysis(
+  entries: ResultEntry[],
+): Array<{ pkgA: string; pkgB: string; scoreA: number; scoreB: number; delta: number }> {
+  const ties: Array<{ pkgA: string; pkgB: string; scoreA: number; scoreB: number; delta: number }> =
+    [];
 
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
@@ -318,9 +332,31 @@ function computeTieAnalysis(entries: ResultEntry[]): Array<{ pkgA: string; pkgB:
   return ties.sort((a, b) => a.delta - b.delta);
 }
 
-function computeFalseEquivalence(entries: ResultEntry[]): Array<{ pkgA: string; pkgB: string; tierA: string; tierB: string; scoreA: number; scoreB: number }> {
-  const falseEquivs: Array<{ pkgA: string; pkgB: string; tierA: string; tierB: string; scoreA: number; scoreB: number }> = [];
-  const tierOrder: Record<string, number> = { elite: 4, solid: 3, loose: 1, stretch: 2, "stretch-2": 2 };
+function computeFalseEquivalence(
+  entries: ResultEntry[],
+): Array<{
+  pkgA: string;
+  pkgB: string;
+  tierA: string;
+  tierB: string;
+  scoreA: number;
+  scoreB: number;
+}> {
+  const falseEquivs: Array<{
+    pkgA: string;
+    pkgB: string;
+    tierA: string;
+    tierB: string;
+    scoreA: number;
+    scoreB: number;
+  }> = [];
+  const tierOrder: Record<string, number> = {
+    elite: 4,
+    solid: 3,
+    loose: 1,
+    stretch: 2,
+    "stretch-2": 2,
+  };
 
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
@@ -347,9 +383,18 @@ function computeFalseEquivalence(entries: ResultEntry[]): Array<{ pkgA: string; 
   return falseEquivs;
 }
 
-function computeMarginAnalysis(evals: AssertionEval[]): Array<{ assertion: string; class: string; delta: number }> {
+function computeMarginAnalysis(
+  evals: AssertionEval[],
+): Array<{ assertion: string; class: string; delta: number }> {
   return evals
-    .filter((ev) => ev.result !== "skip" && ev.delta !== null && ev.delta > 0 && ev.delta < 5 && ev.class === "must-pass")
+    .filter(
+      (ev) =>
+        ev.result !== "skip" &&
+        ev.delta !== null &&
+        ev.delta > 0 &&
+        ev.delta < 5 &&
+        ev.class === "must-pass",
+    )
     .map((ev) => ({
       assertion: ev.assertion,
       class: ev.class,
@@ -358,7 +403,10 @@ function computeMarginAnalysis(evals: AssertionEval[]): Array<{ assertion: strin
     .sort((a, b) => a.delta - b.delta);
 }
 
-function recomputeConsumerApi(entry: ResultEntry, weightOverrides: Record<string, number>): number | null {
+function recomputeConsumerApi(
+  entry: ResultEntry,
+  weightOverrides: Record<string, number>,
+): number | null {
   if (!entry.dimensions) return entry.consumerApi;
 
   let weightedSum = 0;
@@ -378,8 +426,20 @@ function recomputeConsumerApi(entry: ResultEntry, weightOverrides: Record<string
 
 function computeWeightSensitivity(
   snapshot: BenchmarkSnapshot,
-): Array<{ dimension: string; currentWeight: number; sensitivity: string; assertionsAffectedUp: number; assertionsAffectedDown: number }> {
-  const sensitivity: Array<{ dimension: string; currentWeight: number; sensitivity: string; assertionsAffectedUp: number; assertionsAffectedDown: number }> = [];
+): Array<{
+  dimension: string;
+  currentWeight: number;
+  sensitivity: string;
+  assertionsAffectedUp: number;
+  assertionsAffectedDown: number;
+}> {
+  const sensitivity: Array<{
+    dimension: string;
+    currentWeight: number;
+    sensitivity: string;
+    assertionsAffectedUp: number;
+    assertionsAffectedDown: number;
+  }> = [];
 
   const hasDimensions = snapshot.entries.some((e) => e.dimensions && e.dimensions.length > 0);
   const entryMap = new Map<string, ResultEntry>();
@@ -455,8 +515,22 @@ function computeWeightSensitivity(
   return sensitivity;
 }
 
-function computeDeltaHistogram(evals: AssertionEval[]): { bucket: string; count: number; mustPass: number; diagnostic: number; hardDiagnostic: number }[] {
-  const buckets: { key: string; count: number; mustPass: number; diagnostic: number; hardDiagnostic: number }[] = [
+function computeDeltaHistogram(
+  evals: AssertionEval[],
+): {
+  bucket: string;
+  count: number;
+  mustPass: number;
+  diagnostic: number;
+  hardDiagnostic: number;
+}[] {
+  const buckets: {
+    key: string;
+    count: number;
+    mustPass: number;
+    diagnostic: number;
+    hardDiagnostic: number;
+  }[] = [
     { count: 0, diagnostic: 0, hardDiagnostic: 0, key: "< 0 (fail)", mustPass: 0 },
     { count: 0, diagnostic: 0, hardDiagnostic: 0, key: "0-5", mustPass: 0 },
     { count: 0, diagnostic: 0, hardDiagnostic: 0, key: "5-10", mustPass: 0 },
@@ -469,23 +543,49 @@ function computeDeltaHistogram(evals: AssertionEval[]): { bucket: string; count:
     if (ev.delta === null) continue;
 
     let idx: number;
-    if (ev.delta < 0) {idx = 0;}
-    else if (ev.delta <= 5) {idx = 1;}
-    else if (ev.delta <= 10) {idx = 2;}
-    else if (ev.delta <= 20) {idx = 3;}
-    else if (ev.delta <= 30) {idx = 4;}
-    else {idx = 5;}
+    if (ev.delta < 0) {
+      idx = 0;
+    } else if (ev.delta <= 5) {
+      idx = 1;
+    } else if (ev.delta <= 10) {
+      idx = 2;
+    } else if (ev.delta <= 20) {
+      idx = 3;
+    } else if (ev.delta <= 30) {
+      idx = 4;
+    } else {
+      idx = 5;
+    }
 
     buckets[idx].count++;
-    if (ev.class === "must-pass") {buckets[idx].mustPass++;}
-    else if (ev.class === "hard-diagnostic") {buckets[idx].hardDiagnostic++;}
-    else {buckets[idx].diagnostic++;}
+    if (ev.class === "must-pass") {
+      buckets[idx].mustPass++;
+    } else if (ev.class === "hard-diagnostic") {
+      buckets[idx].hardDiagnostic++;
+    } else {
+      buckets[idx].diagnostic++;
+    }
   }
 
-  return buckets.map((b) => ({ bucket: b.key, count: b.count, diagnostic: b.diagnostic, hardDiagnostic: b.hardDiagnostic, mustPass: b.mustPass }));
+  return buckets.map((b) => ({
+    bucket: b.key,
+    count: b.count,
+    diagnostic: b.diagnostic,
+    hardDiagnostic: b.hardDiagnostic,
+    mustPass: b.mustPass,
+  }));
 }
 
-function computeTopMisranked(evals: AssertionEval[], entries: ResultEntry[]): Array<{ pkg: string; tier: string; score: number | null; failsAsHigher: number; failsAsLower: number }> {
+function computeTopMisranked(
+  evals: AssertionEval[],
+  entries: ResultEntry[],
+): Array<{
+  pkg: string;
+  tier: string;
+  score: number | null;
+  failsAsHigher: number;
+  failsAsLower: number;
+}> {
   const failMap = new Map<string, { failsAsHigher: number; failsAsLower: number }>();
 
   for (const ev of evals) {
@@ -506,11 +606,11 @@ function computeTopMisranked(evals: AssertionEval[], entries: ResultEntry[]): Ar
       const entry = entries.find((e) => e.name === pkg);
       return { pkg, tier: entry?.tier ?? "unknown", score: entry?.consumerApi ?? null, ...data };
     })
-    .sort((a, b) => (b.failsAsHigher + b.failsAsLower) - (a.failsAsHigher + a.failsAsLower))
+    .sort((a, b) => b.failsAsHigher + b.failsAsLower - (a.failsAsHigher + a.failsAsLower))
     .slice(0, 5);
 }
 
-function main() {
+async function main() {
   const snapshot = findLatestResults();
   if (!snapshot) {
     console.error("No benchmark results found in benchmarks/results/. Run benchmarks first.");
@@ -519,17 +619,23 @@ function main() {
 
   // 1. Print scores sorted by consumerApi
   console.log("=== Current Scores (sorted by consumerApi) ===\n");
-  console.log("Package".padEnd(25) + "Tier".padEnd(12) + "ConsumerAPI".padEnd(14) + "AgentReady".padEnd(14) + "TypeSafety");
+  console.log(
+    "Package".padEnd(25) +
+      "Tier".padEnd(12) +
+      "ConsumerAPI".padEnd(14) +
+      "AgentReady".padEnd(14) +
+      "TypeSafety",
+  );
   console.log("-".repeat(79));
 
   const sorted = [...snapshot.entries].sort((a, b) => (b.consumerApi ?? 0) - (a.consumerApi ?? 0));
   for (const entry of sorted) {
     console.log(
       entry.name.padEnd(25) +
-      entry.tier.padEnd(12) +
-      String(entry.consumerApi ?? "n/a").padEnd(14) +
-      String(entry.agentReadiness ?? "n/a").padEnd(14) +
-      String(entry.typeSafety ?? "n/a"),
+        entry.tier.padEnd(12) +
+        String(entry.consumerApi ?? "n/a").padEnd(14) +
+        String(entry.agentReadiness ?? "n/a").padEnd(14) +
+        String(entry.typeSafety ?? "n/a"),
     );
   }
 
@@ -550,7 +656,8 @@ function main() {
         : `(${ev.higherScore} vs ${ev.lowerScore}, delta=${ev.delta})`;
     const minDeltaNote = ev.minDelta ? ` [minDelta=${ev.minDelta}]` : "";
     const classLabel = ev.class === "must-pass" ? "" : ` (${ev.class})`;
-    const compositeLabel = ev.composite && ev.composite !== "consumerApi" ? ` [${ev.composite}]` : "";
+    const compositeLabel =
+      ev.composite && ev.composite !== "consumerApi" ? ` [${ev.composite}]` : "";
     console.log(`${icon}${classLabel}: ${ev.assertion} ${detail}${minDeltaNote}${compositeLabel}`);
   }
 
@@ -592,7 +699,9 @@ function main() {
     console.log("No near-ties found.");
   } else {
     for (const tie of ties) {
-      console.log(`  ${tie.pkgA} (${tie.scoreA}) ~ ${tie.pkgB} (${tie.scoreB})  delta=${tie.delta}`);
+      console.log(
+        `  ${tie.pkgA} (${tie.scoreA}) ~ ${tie.pkgB} (${tie.scoreB})  delta=${tie.delta}`,
+      );
     }
   }
 
@@ -630,7 +739,9 @@ function main() {
   const histogram = computeDeltaHistogram(evals);
   for (const { bucket, count, diagnostic, hardDiagnostic, mustPass } of histogram) {
     const bar = "#".repeat(count);
-    console.log(`  ${bucket.padEnd(14)} ${bar} (${count}: must-pass=${mustPass}, hard-diag=${hardDiagnostic}, diagnostic=${diagnostic})`);
+    console.log(
+      `  ${bucket.padEnd(14)} ${bar} (${count}: must-pass=${mustPass}, hard-diag=${hardDiagnostic}, diagnostic=${diagnostic})`,
+    );
   }
 
   // 9. Top misranked packages
@@ -640,7 +751,9 @@ function main() {
     console.log("No misranked packages.");
   } else {
     for (const m of topMisranked) {
-      console.log(`  ${m.pkg.padEnd(25)} tier=${m.tier.padEnd(10)} score=${String(m.score ?? "n/a").padEnd(6)} failsAsHigher=${m.failsAsHigher} failsAsLower=${m.failsAsLower}`);
+      console.log(
+        `  ${m.pkg.padEnd(25)} tier=${m.tier.padEnd(10)} score=${String(m.score ?? "n/a").padEnd(6)} failsAsHigher=${m.failsAsHigher} failsAsLower=${m.failsAsLower}`,
+      );
     }
   }
 
@@ -675,13 +788,47 @@ function main() {
   ).length;
 
   const targets = [
-    { name: "must-pass = 100%", met: mustPassFailed === 0, actual: `${mustPassPassed}/${mustPassPassed + mustPassFailed}` },
-    { name: "hard-diagnostic >= 95%", met: hardDiagEvals.length === 0 || hardDiagPassed / hardDiagEvals.length >= 0.95, actual: hardDiagEvals.length > 0 ? `${(hardDiagPassed / hardDiagEvals.length * 100).toFixed(1)}%` : "n/a" },
-    { name: "diagnostic >= 90%", met: diagnosticEvals.length === 0 || diagnosticPassed / diagnosticEvals.length >= 0.90, actual: diagnosticEvals.length > 0 ? `${(diagnosticPassed / diagnosticEvals.length * 100).toFixed(1)}%` : "n/a" },
-    { name: "global ranking loss < 6%", met: rankingLoss < 0.06, actual: `${(rankingLoss * 100).toFixed(1)}%` },
-    { name: "false equivalence = 0", met: falseEquivs.length === 0, actual: `${falseEquivs.length}` },
-    { name: "fallbackGlob = 0", met: !snapshot.entries.some((e: ResultEntry) => e.graphStats?.usedFallbackGlob), actual: `${snapshot.entries.filter((e: ResultEntry) => e.graphStats?.usedFallbackGlob).length}` },
-    { name: "undersampled-anchor = 0", met: undersampledAnchorCount === 0, actual: `${undersampledAnchorCount}` },
+    {
+      name: "must-pass = 100%",
+      met: mustPassFailed === 0,
+      actual: `${mustPassPassed}/${mustPassPassed + mustPassFailed}`,
+    },
+    {
+      name: "hard-diagnostic >= 95%",
+      met: hardDiagEvals.length === 0 || hardDiagPassed / hardDiagEvals.length >= 0.95,
+      actual:
+        hardDiagEvals.length > 0
+          ? `${((hardDiagPassed / hardDiagEvals.length) * 100).toFixed(1)}%`
+          : "n/a",
+    },
+    {
+      name: "diagnostic >= 90%",
+      met: diagnosticEvals.length === 0 || diagnosticPassed / diagnosticEvals.length >= 0.9,
+      actual:
+        diagnosticEvals.length > 0
+          ? `${((diagnosticPassed / diagnosticEvals.length) * 100).toFixed(1)}%`
+          : "n/a",
+    },
+    {
+      name: "global ranking loss < 6%",
+      met: rankingLoss < 0.06,
+      actual: `${(rankingLoss * 100).toFixed(1)}%`,
+    },
+    {
+      name: "false equivalence = 0",
+      met: falseEquivs.length === 0,
+      actual: `${falseEquivs.length}`,
+    },
+    {
+      name: "fallbackGlob = 0",
+      met: !snapshot.entries.some((e: ResultEntry) => e.graphStats?.usedFallbackGlob),
+      actual: `${snapshot.entries.filter((e: ResultEntry) => e.graphStats?.usedFallbackGlob).length}`,
+    },
+    {
+      name: "undersampled-anchor = 0",
+      met: undersampledAnchorCount === 0,
+      actual: `${undersampledAnchorCount}`,
+    },
   ];
 
   for (const t of targets) {
@@ -769,7 +916,9 @@ function main() {
         console.log(`    ${dim.padEnd(22)} ${weight.toFixed(2)} (${diffStr})`);
       }
     } else {
-      console.log(`  Current weights are already optimal (${candidatesEvaluated} candidates evaluated)`);
+      console.log(
+        `  Current weights are already optimal (${candidatesEvaluated} candidates evaluated)`,
+      );
       console.log(`  Concordance: ${(currentConcordance * 100).toFixed(1)}%`);
     }
   } else {
@@ -778,7 +927,12 @@ function main() {
 
   // 13. Domain accuracy from snapshot
   console.log("\n=== Domain Accuracy ===\n");
-  const domainAccuracy: { correct: number; wrong: number; abstained: number; total: number } = { abstained: 0, correct: 0, total: 0, wrong: 0 };
+  const domainAccuracy: { correct: number; wrong: number; abstained: number; total: number } = {
+    abstained: 0,
+    correct: 0,
+    total: 0,
+    wrong: 0,
+  };
   const { EXPECTED_DOMAINS: expectedDomains } = await import("./assertions.js");
   for (const entry of snapshot.entries) {
     const expected = expectedDomains[entry.name as keyof typeof expectedDomains];
@@ -796,9 +950,13 @@ function main() {
   if (domainAccuracy.total > 0) {
     const accuracy = domainAccuracy.correct / domainAccuracy.total;
     const wrongRate = domainAccuracy.wrong / domainAccuracy.total;
-    console.log(`  Correct: ${domainAccuracy.correct}/${domainAccuracy.total} (${(accuracy * 100).toFixed(1)}%)`);
+    console.log(
+      `  Correct: ${domainAccuracy.correct}/${domainAccuracy.total} (${(accuracy * 100).toFixed(1)}%)`,
+    );
     console.log(`  Abstained: ${domainAccuracy.abstained}/${domainAccuracy.total}`);
-    console.log(`  Wrong-specific: ${domainAccuracy.wrong}/${domainAccuracy.total} (${(wrongRate * 100).toFixed(1)}%)`);
+    console.log(
+      `  Wrong-specific: ${domainAccuracy.wrong}/${domainAccuracy.total} (${(wrongRate * 100).toFixed(1)}%)`,
+    );
   }
 
   // Save calibration report
