@@ -1,3 +1,25 @@
+## [0.13.0](https://github.com/ferc/typegrade/compare/v0.12.0...v0.13.0) (2026-03-09)
+
+### Features
+
+* add output trust contract with TrustSummary, ResolutionDiagnostics, holdout split, and shadow validation ([e261ed5](https://github.com/ferc/typegrade/commit/e261ed5fa2ad83951c184b93d3a0fe836dde768c))
+* add signal-hygiene layer and comparison decision report ([f7a9042](https://github.com/ferc/typegrade/commit/f7a904259b3c4b1c51ab9dfeb800e217d852ca05))
+* harden degraded results, confidence gating, and ownership model ([180cd7d](https://github.com/ferc/typegrade/commit/180cd7d8843f550d8f64519565adfdc7d9d8e275))
+* implement remaining trust workstreams (WS2, WS4, WS5, WS8, WS9, WS10) ([6d7757c](https://github.com/ferc/typegrade/commit/6d7757c1d8ca61f876fbeb05c9974cb6cfd401a8))
+* implement trustworthiness hardening across 12 workstreams ([503d69c](https://github.com/ferc/typegrade/commit/503d69c9efd1e37a61536ee19c8756bbd60fa39c))
+
+### Bug Fixes
+
+* expand holdout corpus to 18 packages and tune CI gates for small n ([07b9b7d](https://github.com/ferc/typegrade/commit/07b9b7df0b5be4483be1ee308f2e73b6918bb133))
+* harden benchmark plumbing with CI-bound gates, install-failure accounting, and comparable tracking ([75af7c7](https://github.com/ferc/typegrade/commit/75af7c742d592f0d18393d55f172d4322786754c))
+* restore train benchmark by making package analysis graph-first ([2724059](https://github.com/ferc/typegrade/commit/2724059186298e66f54f3570ef8531ceec998981))
+* scope source files to target directory in monorepo analysis ([8b8422f](https://github.com/ferc/typegrade/commit/8b8422f833ebd715cd3ecfaea1c3c3734d79af20))
+* skip degraded-package assertions and fix exactOptionalPropertyTypes errors ([343ab20](https://github.com/ferc/typegrade/commit/343ab20f116c64d7a65b0019336adbbd810803c5))
+
+### Performance Improvements
+
+* optimize CLI startup, result caching, and subpath exports ([3958096](https://github.com/ferc/typegrade/commit/395809609b5b5d35f8a7a34771ae90f4dbfb6d73))
+
 ## [0.12.0](https://github.com/ferc/typegrade/compare/v0.11.0...v0.12.0) (2026-03-09)
 
 ### Features
