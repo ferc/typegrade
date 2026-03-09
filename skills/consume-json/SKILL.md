@@ -140,7 +140,7 @@ interface ConfidenceSummary {
 
 ```typescript
 interface CoverageDiagnostics {
-  typesSource: 'bundled' | 'definitelyTyped' | 'source';
+  typesSource: 'bundled' | '@types' | 'mixed' | 'unknown';
   reachableFiles: number;
   measuredPositions: number;
   undersampled: boolean;  // true = very few declarations, scores unreliable
@@ -296,8 +296,8 @@ Correct:
 const zod = scorePackage('zod');
 const express = scorePackage('express');
 // Compare global scores — these use fixed weights
-const zodAR = zod.composites.find(c => c.key === 'agentReadiness')?.score ?? 0;
-const expressAR = express.composites.find(c => c.key === 'agentReadiness')?.score ?? 0;
+const zodAR = zod.globalScores.agentReadiness.score ?? 0;
+const expressAR = express.globalScores.agentReadiness.score ?? 0;
 ```
 
 Domain scores use domain-specific weight adjustments. A validation library's

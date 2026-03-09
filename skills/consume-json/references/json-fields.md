@@ -96,7 +96,7 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `typesSource` | `string` | `'bundled' \| 'definitelyTyped' \| 'source'` |
+| `typesSource` | `string` | `'bundled' \| '@types' \| 'mixed' \| 'unknown'` |
 | `reachableFiles` | `number` | Number of reachable declaration files |
 | `measuredPositions` | `number` | Type positions measured |
 | `undersampled` | `boolean` | True if too few declarations for reliable scoring |
@@ -107,9 +107,9 @@
 |---|---|---|
 | `exportCoverage` | `number` | Fraction of exports measured |
 | `coreSurfaceCoverage` | `number` | Core surface coverage |
-| `specializationEvidence` | `string` | Specialization evidence level |
-| `domainEvidence` | `string` | Domain evidence level |
-| `scenarioEvidence` | `string` | Scenario evidence level |
+| `specializationEvidence` | `number` | Specialization evidence level (0-1) |
+| `domainEvidence` | `number` | Domain evidence level (0-1) |
+| `scenarioEvidence` | `number` | Scenario evidence level (0-1) |
 
 ## PackageIdentity
 
@@ -152,7 +152,7 @@
 |---|---|---|
 | `batches` | `FixPlanBatch[]` | Ordered fix batches with dependencies |
 | `totalExpectedUplift` | `number` | Total expected score improvement |
-| `analysisSchemaVersion` | `number` | Schema version for compatibility |
+| `analysisSchemaVersion` | `string` | Schema version for compatibility (e.g. `"0.11.0"`) |
 | `verificationCommands` | `string[]` | Commands to verify fixes |
 
 ## FixPlanBatch
