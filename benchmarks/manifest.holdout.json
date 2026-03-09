@@ -1,8 +1,8 @@
 {
   "packages": {
-    "holdout-elite": ["typebox@0.34.33"],
-    "holdout-solid": ["@trpc/server@11.0.0", "ts-rest@3.52.0"],
-    "holdout-loose": ["chalk@5.4.1", "commander@13.1.0"],
-    "holdout-stretch": ["mobx@6.13.6"]
+    "holdout-elite": ["@sinclair/typebox@0.34.48", "@effect/schema@0.75.5"],
+    "holdout-solid": ["@trpc/server@11.0.0", "@ts-rest/core@3.52.1", "@tanstack/react-query@5.90.21", "decimal.js@10.6.0", "openai@6.27.0"],
+    "holdout-stretch": ["mobx@6.13.6", "@reduxjs/toolkit@2.11.2", "vue@3.5.30", "next@16.1.6", "ajv@8.18.0"],
+    "holdout-loose": ["chalk@5.4.1", "commander@13.1.0", "esbuild@0.27.3", "ioredis@5.10.0", "change-case@5.4.4", "socket.io-client@4.8.3"]
   }
 }

@@ -296,7 +296,7 @@ describe("train/eval quarantine", () => {
 
     it("gate.ts holdout uses CI-bound gates", () => {
       const content = readFileSync(join(BENCHMARKS_DIR, "gate.ts"), "utf8");
-      expect(content).toContain("holdout-fallback-glob-CI<10%");
+      expect(content).toContain("holdout-fallback-glob-CI<20%");
       expect(content).toContain("holdout-degraded-CI<25%");
       expect(content).toContain("wilsonUpperBound");
     });

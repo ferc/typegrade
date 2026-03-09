@@ -75,8 +75,9 @@ export function formatCIDetail(
   pointRate: number,
   upperBound: number,
   threshold: number,
+  confidence: ConfidenceLevel = 99,
 ): string {
-  return `${(pointRate * 100).toFixed(1)}% (${failures}/${total}), 99%CI upper: ${(upperBound * 100).toFixed(1)}%, threshold: <${(threshold * 100).toFixed(1)}%`;
+  return `${(pointRate * 100).toFixed(1)}% (${failures}/${total}), ${confidence}%CI upper: ${(upperBound * 100).toFixed(1)}%, threshold: <${(threshold * 100).toFixed(1)}%`;
 }
 
 /**
@@ -91,6 +92,7 @@ export function formatCILowerDetail(
   pointRate: number,
   lowerBound: number,
   threshold: number,
+  confidence: ConfidenceLevel = 99,
 ): string {
-  return `${(pointRate * 100).toFixed(1)}% (${successes}/${total}), 99%CI lower: ${(lowerBound * 100).toFixed(1)}%, threshold: >${(threshold * 100).toFixed(1)}%`;
+  return `${(pointRate * 100).toFixed(1)}% (${successes}/${total}), ${confidence}%CI lower: ${(lowerBound * 100).toFixed(1)}%, threshold: >${(threshold * 100).toFixed(1)}%`;
 }
