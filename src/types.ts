@@ -21,6 +21,9 @@ export type BoundaryType =
   | "serialization"
   | "IPC"
   | "UI-input"
+  | "queue"
+  | "database"
+  | "sdk"
   | "trusted-local"
   | "unknown";
 
@@ -62,6 +65,12 @@ export type RootCauseCategory =
   | "opaque-dependency"
   | "config-gap"
   | "boundary-leak"
+  | "export-vagueness"
+  | "unsafe-external-input"
+  | "architecture-bypass"
+  | "declaration-drift"
+  | "missing-strict-config"
+  | "unresolved-package-surface"
   | "other";
 
 // --- Suggested Fix Kinds ---
@@ -75,6 +84,11 @@ export type SuggestedFixKind =
   | "add-type-guard"
   | "strengthen-generic"
   | "add-overload"
+  | "insert-satisfies"
+  | "wrap-json-parse"
+  | "add-env-parsing"
+  | "narrow-overloads"
+  | "hoist-validation"
   | "other";
 
 // --- Suppression Categories ---
@@ -468,6 +482,14 @@ export interface AnalysisResult {
   fixabilityScore?: FixabilityScore;
   /** Suppressions applied during analysis */
   suppressions?: SuppressionEntry[];
+  /** Fix plan for agent consumption */
+  fixPlan?: FixPlan;
+  /** Boundary report for boundaries command */
+  boundaryReport?: BoundaryReport;
+  /** Verification plan for post-fix validation */
+  verificationPlan?: VerificationPlan;
+  /** Analysis schema version */
+  analysisSchemaVersion?: string;
 }
 
 export interface PrecisionFeatures {
@@ -530,7 +552,7 @@ export interface CoverageDiagnostics {
   /** Whether a coverage penalty was applied to scores */
   coveragePenaltyApplied?: boolean;
   /** Classification of sampling quality */
-  samplingClass: "complete" | "compact" | "undersampled";
+  samplingClass: "complete" | "compact" | "compact-complete" | "compact-partial" | "undersampled";
   /** If compact, explanation for why it's compact-but-complete */
   compactReason?: string;
   /** Specific failure mode that caused coverage issues */
@@ -546,3 +568,283 @@ export interface PackageAnalysisContext {
   /** Whether types come from @types/* package */
   typesSource?: "bundled" | "@types" | "mixed" | "unknown";
 }
+
+// --- Configuration ---
+
+/** Project-level configuration loaded from typegrade.config.ts */
+export interface TypegradeConfig {
+  /** Domain mode override */
+  domain?: "auto" | "off" | DomainKey;
+  /** Analysis profile override */
+  profile?: AnalysisProfile;
+  /** Boundary policy configuration */
+  boundaries?: BoundaryPolicyConfig;
+  /** Monorepo layering configuration */
+  monorepo?: MonorepoConfig;
+  /** Suppression overrides */
+  suppressions?: SuppressionOverrides;
+  /** Minimum score for CI gate */
+  minScore?: number;
+}
+
+/** Boundary policy configuration */
+export interface BoundaryPolicyConfig {
+  /** Trust zone definitions mapping paths to trust levels */
+  trustZones?: TrustZoneDefinition[];
+  /** Boundary validation policies */
+  policies?: BoundaryPolicyRule[];
+}
+
+/** A named trust zone mapping file paths to a trust level */
+export interface TrustZoneDefinition {
+  name: string;
+  paths: string[];
+  trustLevel: TrustLevel;
+}
+
+/** A validation policy for a specific boundary type */
+export interface BoundaryPolicyRule {
+  name: string;
+  source: BoundaryType;
+  requiresValidation: boolean;
+  severity: "error" | "warning" | "info";
+}
+
+/** Monorepo configuration */
+export interface MonorepoConfig {
+  /** Layer assignments for packages */
+  layers?: Record<string, PackageLayer>;
+  /** Allowed layer dependencies (source → targets) */
+  allowedDependencies?: Record<PackageLayer, PackageLayer[]>;
+}
+
+/** Suppression budget overrides */
+export interface SuppressionOverrides {
+  /** Maximum suppressed issues per category before warning */
+  budgets?: Record<string, number>;
+  /** Categories that must never grow (budget = 0 growth) */
+  protectedCategories?: string[];
+}
+
+// --- Boundary Flow Analysis ---
+
+/** Classification of a data ingress source */
+export type BoundarySource =
+  | "http-input"
+  | "env-var"
+  | "filesystem-read"
+  | "queue-payload"
+  | "database-result"
+  | "json-parse"
+  | "sdk-response"
+  | "ipc-message"
+  | "ui-input";
+
+/** A single step in a taint propagation chain */
+export interface TaintFlowStep {
+  kind: "assignment" | "return" | "parameter" | "property-access" | "wrapper";
+  file: string;
+  line: number;
+  expression: string;
+}
+
+/** A validation or sanitization sink that terminates a taint chain */
+export interface ValidationSink {
+  kind:
+    | "schema-parser"
+    | "type-guard"
+    | "assert-function"
+    | "branded-constructor"
+    | "encoding-helper";
+  file: string;
+  line: number;
+  expression: string;
+}
+
+/** A complete taint flow chain from source to sink */
+export interface TaintFlowChain {
+  source: BoundarySource;
+  sourceFile: string;
+  sourceLine: number;
+  sourceExpression: string;
+  steps: TaintFlowStep[];
+  sink?: ValidationSink;
+  isValidated: boolean;
+}
+
+/** Boundary report for the boundaries command */
+export interface BoundaryReport {
+  summary: BoundarySummary;
+  quality: BoundaryQualityScore;
+  taintChains: TaintFlowChain[];
+  hotspots: BoundaryHotspot[];
+  trustZoneCrossings: TrustZoneCrossing[];
+  policyViolations: BoundaryPolicyViolation[];
+}
+
+/** A hotspot where unvalidated data crosses trust boundaries */
+export interface BoundaryHotspot {
+  file: string;
+  line: number;
+  boundaryType: BoundaryType;
+  trustLevel: TrustLevel;
+  riskScore: number;
+  description: string;
+}
+
+/** A trust zone crossing event */
+export interface TrustZoneCrossing {
+  fromZone: string;
+  toZone: string;
+  file: string;
+  line: number;
+  dataFlow: string;
+}
+
+/** A boundary policy violation */
+export interface BoundaryPolicyViolation {
+  policy: string;
+  file: string;
+  line: number;
+  boundaryType: BoundaryType;
+  severity: "error" | "warning" | "info";
+  description: string;
+}
+
+// --- Fix Planning ---
+
+/** Category of safe, deterministic fixes */
+export type SafeFixCategory =
+  | "add-explicit-return-type"
+  | "replace-any-with-unknown"
+  | "insert-satisfies"
+  | "wrap-json-parse"
+  | "add-env-parsing"
+  | "narrow-overloads"
+  | "hoist-validation";
+
+/** Fix application mode */
+export type FixMode = "safe" | "review";
+
+/** A planned fix batch with confidence and verification metadata */
+export interface FixPlanBatch {
+  id: string;
+  title: string;
+  rationale: string;
+  targetFiles: string[];
+  issueIds: string[];
+  risk: "low" | "medium" | "high";
+  expectedImpact: number;
+  requiresPublicApiChange: boolean;
+  requiresHumanReview: boolean;
+  /** Confidence that this fix is correct (0-1) */
+  confidence: number;
+  /** Expected score uplift from this batch */
+  expectedScoreUplift: number;
+  /** Commands to verify the fix */
+  verificationCommands: string[];
+  /** Rollback instructions */
+  rollbackNotes: string;
+  /** IDs of batches that must be applied first */
+  dependsOn: string[];
+  /** Category of safe fix, if applicable */
+  fixCategory?: SafeFixCategory;
+}
+
+/** Complete fix plan with ordered batches and verification */
+export interface FixPlan {
+  batches: FixPlanBatch[];
+  totalExpectedUplift: number;
+  verificationCommands: string[];
+  rollbackNotes: string[];
+  analysisSchemaVersion: string;
+}
+
+/** Result of applying fixes */
+export interface FixApplicationResult {
+  applied: { batchId: string; filesModified: string[] }[];
+  skipped: { batchId: string; reason: string }[];
+  verificationPassed: boolean;
+  scoreBefore: number;
+  scoreAfter: number | null;
+}
+
+// --- Monorepo Analysis ---
+
+/** Layer classification for a package in a monorepo */
+export type PackageLayer = "app" | "domain" | "infra" | "ui" | "data" | "shared" | "tooling";
+
+/** A layer dependency violation */
+export interface LayerViolation {
+  sourcePackage: string;
+  targetPackage: string;
+  sourceLayer: PackageLayer;
+  targetLayer: PackageLayer;
+  importPath: string;
+  violationType: "forbidden-cross-layer" | "infra-bypass" | "unstable-leak" | "trust-zone-crossing";
+}
+
+/** Monorepo analysis report */
+export interface MonorepoReport {
+  packages: MonorepoPackageInfo[];
+  violations: LayerViolation[];
+  layerGraph: Record<string, string[]>;
+}
+
+/** Package info within a monorepo */
+export interface MonorepoPackageInfo {
+  name: string;
+  layer: PackageLayer;
+  path: string;
+  dependencies: string[];
+}
+
+// --- Diff Analysis ---
+
+/** Result of comparing two analysis runs */
+export interface DiffResult {
+  baseline: AnalysisResult;
+  target: AnalysisResult;
+  compositeDiffs: CompositeDiff[];
+  dimensionDiffs: DimensionDiff[];
+  newIssues: Issue[];
+  resolvedIssues: Issue[];
+  summary: string;
+}
+
+/** Score diff for a composite */
+export interface CompositeDiff {
+  key: CompositeKey;
+  baseline: number;
+  target: number;
+  delta: number;
+}
+
+/** Score diff for a dimension */
+export interface DimensionDiff {
+  key: string;
+  label: string;
+  baseline: number;
+  target: number;
+  delta: number;
+}
+
+// --- Verification ---
+
+/** A verification plan for post-fix validation */
+export interface VerificationPlan {
+  commands: VerificationCommand[];
+  expectedOutcome: string;
+}
+
+/** A single verification command */
+export interface VerificationCommand {
+  command: string;
+  description: string;
+  mustPass: boolean;
+}
+
+// --- Analysis Schema ---
+
+/** Current schema version for analysis output */
+export const ANALYSIS_SCHEMA_VERSION = "0.9.0";

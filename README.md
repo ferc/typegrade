@@ -44,6 +44,21 @@ npx typegrade score express@5
 # Compare two packages side-by-side
 npx typegrade compare zod valibot
 
+# Compare score changes between two packages or versions
+npx typegrade diff zod@3.22 zod@3.23
+
+# Analyze boundary trust and validation coverage
+npx typegrade boundaries .
+
+# Generate an actionable fix plan with confidence and verification
+npx typegrade fix-plan .
+
+# Apply safe, deterministic fixes automatically
+npx typegrade apply-fixes . --mode safe
+
+# Self-analyze with closed-loop improvement suggestions
+npx typegrade self-analyze .
+
 # JSON output for automation
 npx typegrade score zod --json
 
@@ -86,6 +101,23 @@ typegrade score my-sdk --json | jq '.globalScores.agentReadiness'
 # Use the score in agent prompts, tool selection, or CI decisions
 ```
 
+**Agent-driven improvement loop:**
+
+```bash
+# Generate a fix plan, apply safe fixes, verify, compare
+typegrade fix-plan . --json > plan.json
+typegrade apply-fixes . --mode safe
+typegrade analyze . --json > after.json
+typegrade diff before.json after.json
+```
+
+**Boundary audit for application security:**
+
+```bash
+typegrade boundaries . --json | jq '.boundarySummary.missingValidationHotspots'
+# Find unvalidated I/O boundaries: HTTP, env, filesystem, queue, database, SDK
+```
+
 **CI gate for regression prevention:**
 
 ```yaml
@@ -106,12 +138,14 @@ AI coding agents work against your exported types, not your intentions. When tho
 
 ## How it works
 
-1. **Load** a TypeScript project or install/resolve an npm package.
+1. **Load** a TypeScript project or install/resolve an npm package (supports conditional exports, subpath exports, typesVersions, `@types/*` siblings, and multi-entry packages).
 2. **Build** a declaration graph (package mode) or emit in-memory `.d.ts` (source mode) to see what consumers see.
 3. **Extract** the public surface — every exported function, type, interface, class, and their type positions.
 4. **Run analyzers** over that surface — 12 dimensions covering specificity, safety, semantic lift, specialization, usability, and more.
-5. **Compute scores** — global composites, domain-adjusted scores, and scenario benchmarks.
-6. **Attach diagnostics** — confidence, coverage, undersampling warnings, and actionable issues.
+5. **Compute scores** — global composites, domain-adjusted scores, and scenario benchmarks with subfamily variant selection (e.g., router-server vs router-client, validation-schema vs validation-decoder).
+6. **Analyze boundaries** — track data flow from untrusted sources (HTTP, env, filesystem, queue, database, SDK) through assignments and returns to validation sinks.
+7. **Build fix plans** — group actionable issues into batches with confidence, expected uplift, verification commands, and rollback notes.
+8. **Attach diagnostics** — confidence, coverage classification (complete, compact-complete, compact-partial, undersampled), and coverage failure modes.
 
 For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 
@@ -149,7 +183,7 @@ For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 
 ## Benchmark proof
 
-`typegrade` is validated against a real corpus of npm packages spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins.
+`typegrade` is validated against a corpus of 24 npm packages (as of 2026-03-09) spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins. All 18 train gates pass at 100% must-pass, 100% domain accuracy, and 0% fallback glob rate.
 
 Run benchmarks yourself:
 
@@ -179,6 +213,7 @@ Returns an `AnalysisResult` with:
 
 ```jsonc
 {
+  "analysisSchemaVersion": "0.8.0",
   "mode": "package",
   "scoreProfile": "published-declarations",
   "projectName": "zod",
@@ -221,12 +256,66 @@ Returns an `AnalysisResult` with:
 ## Programmatic API
 
 ```typescript
-import { analyzeProject, scorePackage, comparePackages } from 'typegrade';
+import {
+  analyzeProject,
+  scorePackage,
+  comparePackages,
+  buildFixPlan,
+  computeDiff,
+  buildTaintFlowChains,
+  analyzeMonorepo,
+  loadConfig,
+} from 'typegrade';
 
+// Core analysis
 const sourceResult = analyzeProject('./src');
 const packageResult = scorePackage('zod');
 const comparison = comparePackages('zod', 'valibot');
+
+// Fix planning
+const plan = buildFixPlan(sourceResult);
+
+// Diff analysis
+const diff = computeDiff({ baseline: packageResult, target: scorePackage('zod@next') });
+
+// Monorepo analysis
+const mono = analyzeMonorepo({ rootPath: '.' });
 ```
+
+## Configuration
+
+Create a `typegrade.config.ts` in your project root:
+
+```typescript
+import type { TypegradeConfig } from 'typegrade';
+
+export default {
+  domain: 'auto',
+  profile: 'library',
+  minScore: 70,
+  boundaries: {
+    trustZones: [
+      { name: 'api', paths: ['src/api/**'], trustLevel: 'untrusted-external' },
+      { name: 'internal', paths: ['src/core/**'], trustLevel: 'internal-only' },
+    ],
+    policies: [
+      { name: 'validate-http', source: 'network', requiresValidation: true, severity: 'error' },
+    ],
+  },
+} satisfies TypegradeConfig;
+```
+
+## Agent skills
+
+typegrade ships versioned skills for AI coding agents via [TanStack Intent](https://tanstack.com/intent/latest). If you use an AI coding agent (Claude Code, Cursor, Copilot, Codex), run:
+
+```bash
+npx @tanstack/intent@latest install
+```
+
+This discovers typegrade's 7 skills from `node_modules` and writes skill-to-task mappings into your agent config. Skills cover local analysis, package scoring, CI gating, JSON consumption, comparisons, self-improvement, and maintainer workflows.
+
+For details, see [Agent Skills](docs/skills.md).
 
 ## Read more
 
@@ -235,6 +324,7 @@ const comparison = comparePackages('zod', 'valibot');
 - [Confidence Model](docs/confidence-model.md) — how confidence is computed and what it means.
 - [Benchmark Policy](docs/benchmark-policy.md) — governance rules for the benchmark suite.
 - [Benchmarks](docs/benchmarks.md) — how to run and interpret benchmarks.
+- [Agent Skills](docs/skills.md) — shipped Intent skills for AI coding agents.
 
 ## License
 

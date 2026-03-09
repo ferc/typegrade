@@ -1,24 +1,25 @@
-import type {
-  AnalysisMode,
-  AnalysisProfile,
-  AnalysisResult,
-  CompositeScore,
-  ConfidenceSummary,
-  CoverageDiagnostics,
-  CoverageFailureMode,
-  DimensionResult,
-  DomainKey,
-  DomainScore,
-  EvidenceSummary,
-  ExplainabilityReport,
-  FixabilityScore,
-  GlobalScores,
-  Grade,
-  Issue,
-  PackageAnalysisContext,
-  ScenarioScore,
-  ScoreComparability,
-  SuppressionEntry,
+import {
+  ANALYSIS_SCHEMA_VERSION,
+  type AnalysisMode,
+  type AnalysisProfile,
+  type AnalysisResult,
+  type CompositeScore,
+  type ConfidenceSummary,
+  type CoverageDiagnostics,
+  type CoverageFailureMode,
+  type DimensionResult,
+  type DomainKey,
+  type DomainScore,
+  type EvidenceSummary,
+  type ExplainabilityReport,
+  type FixabilityScore,
+  type GlobalScores,
+  type Grade,
+  type Issue,
+  type PackageAnalysisContext,
+  type ScenarioScore,
+  type ScoreComparability,
+  type SuppressionEntry,
 } from "./types.js";
 import { type DomainType, detectDomain } from "./domain.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
@@ -178,13 +179,22 @@ function computeCoverageDiagnostics(opts: {
     surfaceDeclarations >= MIN_MEASURED_DECLARATIONS &&
     !graphStats.usedFallbackGlob;
 
-  let samplingClass: "complete" | "compact" | "undersampled" = "complete";
+  let samplingClass:
+    | "complete"
+    | "compact"
+    | "compact-complete"
+    | "compact-partial"
+    | "undersampled" = "complete";
   let compactReason: string | undefined = undefined;
 
   if (reasons.length === 0) {
     samplingClass = "complete";
   } else if (fewFilesOnly && hasSufficientSurface) {
-    samplingClass = "compact";
+    // Distinguish compact-complete (enough surface for accurate scoring) from compact-partial
+    const isFullySufficient =
+      surfacePositions >= MIN_MEASURED_POSITIONS * 2 &&
+      surfaceDeclarations >= MIN_MEASURED_DECLARATIONS * 2;
+    samplingClass = isFullySufficient ? "compact-complete" : "compact-partial";
     compactReason = `${graphStats.totalReachable} file(s) but ${surfacePositions} positions and ${surfaceDeclarations} declarations — small-by-design library`;
   } else {
     samplingClass = "undersampled";
@@ -613,6 +623,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const fixabilityScore = computeFixabilityScore(dimensions);
 
   const result: AnalysisResult = {
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     caveats,
     composites,
     confidenceSummary,

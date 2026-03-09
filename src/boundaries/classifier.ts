@@ -70,6 +70,47 @@ const UI_INPUT_PATTERNS = [
   /\buseInput\b/,
 ];
 
+const QUEUE_PATTERNS = [
+  /\bqueue\.consume\b/,
+  /\bqueue\.subscribe\b/,
+  /\bchannel\.consume\b/,
+  /\bchannel\.assertQueue\b/,
+  /\bsqs\.receiveMessage\b/,
+  /\bpubsub\.subscription\b/,
+  /\bkafka\.consumer\b/,
+  /\b\.on\(\s*['"]message['"]\b/,
+  /\bbullmq\b/i,
+  /\bbull\b/,
+];
+
+const DATABASE_PATTERNS = [
+  /\b\.query\(/,
+  /\b\.execute\(/,
+  /\b\.findOne\(/,
+  /\b\.findMany\(/,
+  /\b\.findFirst\(/,
+  /\b\.findUnique\(/,
+  /\bprisma\.\w+/,
+  /\b\.select\(/,
+  /\b\.raw\(/,
+  /\bpool\.query\b/,
+  /\bclient\.query\b/,
+  /\bknex\b/,
+  /\bsequelize\b/,
+];
+
+const SDK_PATTERNS = [
+  /\baws\.\w+/,
+  /\bs3\.getObject\b/,
+  /\bdynamodb\.\w+/,
+  /\bstripe\.\w+/,
+  /\btwilio\.\w+/,
+  /\bsendgrid\.\w+/,
+  /\bgraphql\(/,
+  /\burql\b/,
+  /\bapollo\b/i,
+];
+
 /**
  * Classify a boundary type from expression text.
  */
@@ -91,6 +132,15 @@ export function classifyBoundaryType(expression: string): BoundaryType {
   }
   if (UI_INPUT_PATTERNS.some((pat) => pat.test(expression))) {
     return "UI-input";
+  }
+  if (QUEUE_PATTERNS.some((pat) => pat.test(expression))) {
+    return "queue";
+  }
+  if (DATABASE_PATTERNS.some((pat) => pat.test(expression))) {
+    return "database";
+  }
+  if (SDK_PATTERNS.some((pat) => pat.test(expression))) {
+    return "sdk";
   }
   if (CONFIG_PATTERNS.some((pat) => pat.test(expression))) {
     return "config";
@@ -132,6 +182,15 @@ export function classifyTrustLevel(
       return "semi-trusted-external";
     }
     case "IPC": {
+      return "semi-trusted-external";
+    }
+    case "queue": {
+      return "untrusted-external";
+    }
+    case "database": {
+      return "semi-trusted-external";
+    }
+    case "sdk": {
       return "semi-trusted-external";
     }
     case "config": {

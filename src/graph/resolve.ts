@@ -1,5 +1,5 @@
 import { basename, dirname, join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { ResolvedEntrypoint } from "./types.js";
 
 /** Declaration file extensions we recognize, in preference order */
@@ -58,16 +58,17 @@ export function resolveEntrypoints(pkgDir: string): ResolvedEntrypoint[] {
     collectTypesVersionsEntrypoints(typesVersions, pkgDir, entrypoints);
   }
 
-  // 4. Fallback: main field with companion .d.ts
+  // 4. Fallback: main or module field with companion .d.ts
   // Also triggers when exports field existed but resolved nothing valid
   const exportsResolvedNothing = exports && typeof exports === "object" && entrypoints.length === 0;
   if (entrypoints.length === 0 || exportsResolvedNothing) {
-    const mainField = pkg["main"] as string | undefined;
+    const mainField = (pkg["main"] ?? pkg["module"]) as string | undefined;
+    const fieldName = pkg["main"] ? "main" : "module";
     if (mainField) {
       const dtsCompanion = findDtsCompanion(pkgDir, mainField);
       if (dtsCompanion) {
         entrypoints.push({
-          condition: "main",
+          condition: fieldName,
           filePath: dtsCompanion,
           subpath: ".",
         });
@@ -122,7 +123,13 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
           break;
         }
       }
-    } else if (key.startsWith(".") && value && typeof value === "object" && !Array.isArray(value)) {
+    } else if (
+      key.startsWith(".") &&
+      !key.includes("*") &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
       // Subpath export like "./utils" or "."
       collectExportsEntrypoints({
         currentSubpath: key,
@@ -140,6 +147,20 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
           subpath: key,
         });
       }
+    } else if (
+      key.startsWith(".") &&
+      key.includes("*") &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      // Wildcard subpath pattern like "./*" — resolve the types condition within
+      resolveWildcardSubpathExport({
+        conditions: value as Record<string, unknown>,
+        entrypoints,
+        pattern: key,
+        pkgDir,
+      });
     } else if (key.startsWith(".") && Array.isArray(value)) {
       // Array subpath export — delegate to helper to avoid excessive nesting
       collectArraySubpathExport({ entrypoints, items: value, pkgDir, subpath: key });
@@ -206,6 +227,69 @@ function collectArraySubpathExport(opts: {
         pkgDir,
       });
     }
+  }
+}
+
+// --- Wildcard subpath resolution ---
+
+/**
+ * Resolve wildcard subpath exports like "./*": { "types": "./dist/*.d.ts" }.
+ * Expands the wildcard by scanning the target directory for matching declaration files.
+ */
+function resolveWildcardSubpathExport(opts: {
+  pattern: string;
+  conditions: Record<string, unknown>;
+  pkgDir: string;
+  entrypoints: ResolvedEntrypoint[];
+}): void {
+  const { pattern, conditions, pkgDir, entrypoints } = opts;
+
+  // Extract the types condition from the nested object
+  const typesTarget = conditions["types"];
+  if (typeof typesTarget !== "string" || !typesTarget.includes("*")) {
+    // Fall back to regular nested resolution if no wildcard types
+    collectExportsEntrypoints({
+      currentSubpath: pattern,
+      entrypoints,
+      exports: conditions,
+      pkgDir,
+    });
+    return;
+  }
+
+  // Split the types target around * to get prefix and suffix
+  const [targetPrefix, targetSuffix] = typesTarget.split("*");
+  if (targetPrefix === undefined || targetSuffix === undefined) {
+    return;
+  }
+
+  // Resolve the directory from the prefix
+  const targetDir = join(pkgDir, targetPrefix);
+  if (!existsSync(targetDir)) {
+    return;
+  }
+
+  // Scan for matching declaration files
+  try {
+    const entries = readdirSync(targetDir);
+    for (const entry of entries) {
+      const entryName = String(entry);
+      if (!entryName.endsWith(targetSuffix)) {
+        continue;
+      }
+      const stem = entryName.slice(0, entryName.length - targetSuffix.length);
+      const filePath = join(targetDir, entryName);
+      if (existsSync(filePath)) {
+        const subpath = pattern.replace("*", stem);
+        entrypoints.push({
+          condition: conditionLabel(subpath, "types"),
+          filePath,
+          subpath,
+        });
+      }
+    }
+  } catch {
+    // Directory scan failed — skip wildcard expansion
   }
 }
 

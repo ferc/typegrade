@@ -151,3 +151,185 @@ In package mode, `typegrade` reports:
 - **Types source**: whether types are bundled, from `@types/*`, or mixed.
 
 Undersampled packages get confidence caps based on severity (0.40 / 0.55 / 0.65 depending on how many undersampling reasons apply).
+
+## Configuration file
+
+`typegrade` supports project-level configuration via a `typegrade.config.ts` (or `.js` / `.mjs`) file in the project root. The config file is searched in priority order: `typegrade.config.ts`, `typegrade.config.js`, `typegrade.config.mjs`.
+
+The default export should be a `TypegradeConfig` object:
+
+```ts
+import type { TypegradeConfig } from "typegrade";
+
+export default {
+  domain: "validation",
+  profile: "library",
+  minScore: 70,
+  boundaries: {
+    trustZones: [
+      { name: "api-layer", paths: ["src/api/**"], trustLevel: "untrusted-external" },
+      { name: "internal", paths: ["src/core/**"], trustLevel: "trusted-local" },
+    ],
+    policies: [
+      { name: "require-fetch-validation", source: "network", requiresValidation: true, severity: "error" },
+    ],
+  },
+  monorepo: {
+    layers: { "@my/api": "app", "@my/core": "domain", "@my/db": "infra" },
+    allowedDependencies: { app: ["domain", "shared"], domain: ["infra", "shared"], infra: ["shared"] },
+  },
+  suppressions: {
+    budgets: { "trusted-local-tooling": 10 },
+    protectedCategories: ["unsafe-cast"],
+  },
+} satisfies TypegradeConfig;
+```
+
+**Supported fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain` | `"auto" \| "off" \| DomainKey` | Override domain detection |
+| `profile` | `AnalysisProfile` | Analysis profile (`library`, `package`, `application`, `autofix-agent`) |
+| `boundaries` | `BoundaryPolicyConfig` | Trust zones and boundary validation policies |
+| `monorepo` | `MonorepoConfig` | Package layer assignments and allowed dependencies |
+| `suppressions` | `SuppressionOverrides` | Suppression budgets and protected categories |
+| `minScore` | `number` | Minimum composite score for CI gate pass |
+
+CLI options always take precedence over config file values. Undefined CLI options fall back to config values.
+
+## Boundary flow analysis
+
+In source mode, `typegrade` performs boundary flow analysis to detect where unvalidated external data enters the codebase and whether it is properly validated before use.
+
+### Boundary detection
+
+The analyzer scans source files for data ingress points — call expressions and property accesses that introduce external data:
+
+| Boundary type | Examples |
+|---------------|----------|
+| `network` | `fetch()`, `axios.get()`, HTTP client calls |
+| `filesystem` | `readFile()`, `readFileSync()` |
+| `env` | `process.env.*` access |
+| `config` | Config file reads |
+| `serialization` | `JSON.parse()` |
+| `IPC` | Inter-process communication |
+| `UI-input` | User input from forms or DOM |
+| `queue` | Message queue payloads |
+| `database` | Database query results |
+| `sdk` | Third-party SDK responses |
+
+### Trust level classification
+
+Each boundary is assigned a trust level based on the boundary type and file context:
+
+- **`untrusted-external`** — Data from outside the system (network, user input). Always requires validation.
+- **`semi-trusted-external`** — Data from partially controlled sources (config files, environment). Should be validated.
+- **`trusted-local`** — Internal data (local function calls, generated files). Validation optional.
+- **`generated-local`** — Machine-generated data. Validation optional.
+- **`internal-only`** — Data that never crosses a process boundary.
+
+### Taint tracking
+
+For each detected boundary, the analyzer checks whether downstream validation exists within the same scope (up to 5 statements ahead). Validation is identified by the presence of known validation library calls (e.g., `parse`, `safeParse`, `validate`, `decode`, `z.object`, `t.type`).
+
+Unvalidated boundaries at `untrusted-external` trust level produce **taint edges** — indicating data that flows from an untrusted source without passing through a validation sink.
+
+### Trust zones and policies
+
+When configured via `typegrade.config.ts`, the boundary analyzer enforces **trust zones** — named regions of the codebase mapped to trust levels — and **policies** — rules requiring validation at specific boundary types.
+
+Trust zone crossings (data flowing from a high-trust zone to a low-trust zone, or vice versa) are reported separately. Policy violations produce issues at the configured severity level.
+
+### Boundary quality score
+
+The boundary analysis produces a `BoundaryQualityScore` with:
+
+- **Validation coverage**: proportion of boundaries with downstream validation (0-40 points).
+- **Untrusted penalty**: -5 per unvalidated untrusted boundary (max -30).
+- **Trusted-local bonus**: +2 per trusted-local suppression (max +10), indicating awareness.
+- **Trust model accuracy**: 1 minus the ratio of missing validation hotspots.
+
+The boundary report includes taint chains, hotspots, trust zone crossings, and policy violations.
+
+## Fix planning pipeline
+
+The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption.
+
+### Issue enrichment
+
+Each issue is enriched with metadata for fix planning:
+
+| Field | Description |
+|-------|-------------|
+| `rootCauseCategory` | Why the issue exists (e.g., `weak-type`, `unsafe-cast`, `boundary-leak`) |
+| `suggestedFixKind` | Recommended fix approach (e.g., `add-type-annotation`, `replace-any`, `wrap-json-parse`) |
+| `fixability` | How directly fixable: `direct`, `indirect`, `external`, `not_actionable` |
+| `ownership` | Who owns the code: `source-owned`, `dependency-owned`, `generated`, etc. |
+| `agentPriority` | Priority for agent consumption (0-100, higher = more important) |
+
+### Fix batching
+
+Issues are grouped into **fix batches** for sequential agent execution:
+
+1. Group by file and dimension (issues in the same file for the same dimension are likely related).
+2. Assign risk based on whether public API changes are needed (`high` if public API changes, `medium` for high-severity, `low` otherwise).
+3. Order by expected impact (high confidence + high severity first), then by risk (ascending).
+4. Flag batches requiring human review (public API changes, indirect fixes, high risk).
+
+### Fix plan
+
+The full `FixPlan` extends batches with:
+
+- **Confidence** per batch (0-1) — how likely the fix is correct.
+- **Expected score uplift** — predicted composite score improvement.
+- **Verification commands** — shell commands to validate the fix (e.g., `tsc --noEmit`, `pnpm test`).
+- **Rollback notes** — instructions for reverting if the fix causes regressions.
+- **Dependency ordering** — `dependsOn` fields ensuring batches are applied in the correct sequence.
+
+Safe fix categories (`add-explicit-return-type`, `replace-any-with-unknown`, `insert-satisfies`, `wrap-json-parse`, `add-env-parsing`, `narrow-overloads`, `hoist-validation`) can be applied automatically. All other fixes require human review.
+
+## Monorepo and layering analysis
+
+When a `monorepo` configuration is provided in `typegrade.config.ts`, `typegrade` performs layering analysis across packages.
+
+### Layer assignments
+
+Packages are assigned to layers: `app`, `domain`, `infra`, `ui`, `data`, `shared`, `tooling`.
+
+### Dependency enforcement
+
+The `allowedDependencies` map defines which layers may depend on which. For example:
+
+```ts
+allowedDependencies: {
+  app: ["domain", "shared"],
+  domain: ["infra", "shared"],
+  infra: ["shared"],
+}
+```
+
+Violations are classified as:
+
+| Violation type | Description |
+|---------------|-------------|
+| `forbidden-cross-layer` | Import from a layer not in the allowed list |
+| `infra-bypass` | App layer importing infra directly, bypassing domain |
+| `unstable-leak` | Stable layer depending on an unstable layer |
+| `trust-zone-crossing` | Data flow crossing trust zone boundaries |
+
+The monorepo report includes the package list with layers, all violations, and the layer dependency graph.
+
+## Diff command
+
+The `compare` command (`typegrade compare <pkgA> <pkgB>`) performs a side-by-side comparison of two packages. Both packages are scored independently, and the results are presented with deltas for each composite score.
+
+Programmatically, the `comparePackages(pkgA, pkgB, options?)` function returns both `AnalysisResult` objects and an optional rendered text comparison.
+
+The type system also supports a `DiffResult` for comparing two analysis runs of the same project (e.g., before and after a change). A diff result includes:
+
+- **Composite diffs**: delta for each composite score (`consumerApi`, `agentReadiness`, `typeSafety`).
+- **Dimension diffs**: delta for each individual dimension score.
+- **New issues**: issues present in the target but not the baseline.
+- **Resolved issues**: issues present in the baseline but not the target.
+- **Summary**: human-readable summary of the changes.

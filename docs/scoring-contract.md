@@ -161,6 +161,8 @@ Detects type assertion abuse (`as any`, double casts `as unknown as X`), non-nul
 
 Checks for runtime validation at I/O boundaries: `JSON.parse()`, `fetch()`, file reads. Rewards use of validation libraries (zod, valibot, etc.) at these boundaries.
 
+When boundary flow analysis is enabled, this dimension also incorporates the **boundary quality score** — a composite of validation coverage, untrusted-boundary penalties, and trust-model accuracy. See [How It Works: Boundary flow analysis](how-it-works.md#boundary-flow-analysis) for the full scoring formula.
+
 ### configDiscipline (source only)
 
 Checks TypeScript compiler strictness flags. Each flag has a point value (defined in `src/constants.ts` as `STRICT_FLAGS`):
@@ -249,6 +251,93 @@ Domain-specific consumer benchmark tests:
 - **Result/Effect**: error channel propagation, map/flatMap/match precision, async composition guidance.
 - **Schema/Utility**: key-preserving transforms, deep recursive transforms, alias readability.
 - **Stream**: pipe/operator inference, value/error channel propagation, composition patterns.
+
+## Root cause categories
+
+Every issue may carry a `rootCauseCategory` identifying why the problem exists. Root cause categories are used by the fix planning pipeline to group related issues and suggest appropriate fixes.
+
+| Category | Description |
+|----------|-------------|
+| `missing-validation` | External data enters without runtime validation |
+| `weak-type` | Type is too broad for its usage context (e.g., `string` where a literal union is appropriate) |
+| `unsafe-cast` | Type assertion (`as any`, `as unknown as X`) bypasses the type system |
+| `missing-narrowing` | Union type is used without discriminant check or type guard |
+| `opaque-dependency` | Dependency types are opaque or poorly typed, infecting downstream code |
+| `config-gap` | TypeScript strict-mode flag is missing or disabled |
+| `boundary-leak` | Unvalidated data crosses a trust boundary |
+| `export-vagueness` | Exported declaration is less specific than it could be |
+| `unsafe-external-input` | External input is consumed without sanitization |
+| `architecture-bypass` | Code bypasses intended architectural layers or boundaries |
+| `declaration-drift` | Emitted `.d.ts` declarations diverge from source types |
+| `missing-strict-config` | Strict configuration flags are absent |
+| `unresolved-package-surface` | Package surface could not be fully resolved |
+| `other` | Does not fit a specific category |
+
+## Suggested fix kinds
+
+Each issue may carry a `suggestedFixKind` recommending a concrete fix approach.
+
+| Fix kind | Description |
+|----------|-------------|
+| `add-type-annotation` | Add an explicit type annotation to a declaration |
+| `add-validation` | Add runtime validation at a data boundary |
+| `replace-any` | Replace `any` with a specific type or `unknown` |
+| `add-narrowing` | Add a type guard or discriminant check |
+| `add-type-guard` | Add an `is` type predicate function |
+| `strengthen-generic` | Add or tighten a generic constraint |
+| `add-overload` | Add a more specific overload signature |
+| `insert-satisfies` | Insert a `satisfies` expression for type checking without widening |
+| `wrap-json-parse` | Wrap `JSON.parse` with schema validation |
+| `add-env-parsing` | Add typed environment variable parsing |
+| `narrow-overloads` | Replace broad overloads with narrower signatures |
+| `hoist-validation` | Move validation closer to the data boundary |
+| `other` | Fix does not fit a specific category |
+
+Safe fix categories (`add-explicit-return-type`, `replace-any-with-unknown`, `insert-satisfies`, `wrap-json-parse`, `add-env-parsing`, `narrow-overloads`, `hoist-validation`) can be applied automatically by agents. All other fix kinds require human review.
+
+## Coverage classification
+
+The `samplingClass` field on coverage diagnostics classifies how thoroughly the package surface was sampled.
+
+| Class | Description |
+|-------|-------------|
+| `complete` | All declarations and positions were analyzed with no sampling limitations |
+| `compact` | Few declarations exist but analysis is representative (legacy classification) |
+| `compact-complete` | Compact surface that was fully analyzed — all reachable declarations were covered despite the small surface |
+| `compact-partial` | Compact surface where analysis is incomplete — some reachable declarations could not be analyzed |
+| `undersampled` | Too few declarations for a reliable score; confidence caps apply |
+
+The `compact-complete` / `compact-partial` distinction refines the older `compact` class. A package with a small but fully-resolved surface (e.g., a focused utility with 3 exported functions) receives `compact-complete` and no confidence penalty. A package with resolution failures on a small surface receives `compact-partial` with moderate confidence caps.
+
+When `undersampled`, confidence caps are applied based on severity: 0.40 (severe), 0.55 (moderate), 0.65 (mild), depending on how many undersampling reasons apply.
+
+## Boundary flow scoring
+
+When boundary flow analysis is active (source mode with boundary configuration), a `BoundaryQualityScore` is computed separately from the dimension scores.
+
+**Formula:**
+
+```
+base = 50
+validationPoints = round(boundaryCoverage * 40)   // 0-40 points
+score = base + (validationPoints - 20)
+      - min(untrustedUnvalidated * 5, 30)          // untrusted penalty
+      + min(trustedLocalSuppressions * 2, 10)      // awareness bonus
+score = clamp(0, 100, score)
+```
+
+**Outputs:**
+
+| Field | Description |
+|-------|-------------|
+| `score` | 0-100 boundary quality score |
+| `grade` | Letter grade (same scale as composites) |
+| `validatedRatio` | Proportion of boundaries with downstream validation |
+| `trustModelAccuracy` | 1 - (missing hotspots / total boundaries) |
+| `totalBoundaries` | Number of detected boundary points |
+| `rationale` | Human-readable explanation of the score components |
+
+When no boundaries are detected, the score is 0 with grade `N/A` — indicating the metric is not applicable rather than a failure.
 
 ## Zero-file behavior
 

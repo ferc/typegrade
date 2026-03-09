@@ -1,5 +1,12 @@
-import type { AnalysisProfile, AnalysisResult } from "./types.js";
+import type {
+  AnalysisProfile,
+  AnalysisResult,
+  FixApplicationResult,
+  FixMode,
+  FixPlan,
+} from "./types.js";
 import { buildAgentReport as buildAgentReportFromResult, renderAgentJson } from "./agent/index.js";
+import { computeDiff, renderDiffReport } from "./diff.js";
 import {
   renderDimensionTable,
   renderExplainability,
@@ -10,6 +17,8 @@ import type { AgentReport } from "./agent/types.js";
 import { Command } from "commander";
 import type { DomainType } from "./domain.js";
 import { analyzeProject } from "./analyzer.js";
+import { applyFixes } from "./fix/applier.js";
+import { buildFixPlan } from "./fix/planner.js";
 import pc from "picocolors";
 import { scorePackage } from "./package-scorer.js";
 
@@ -81,6 +90,10 @@ const VALID_DOMAINS = [
   "result",
   "schema",
   "stream",
+  "state",
+  "testing",
+  "cli",
+  "frontend",
   "utility",
   "general",
 ] as const;
@@ -188,6 +201,101 @@ export function runCli() {
         console.log(JSON.stringify({ comparison: { first: resultA, second: resultB } }, null, 2));
       } else {
         console.log(renderComparison({ nameA: pkgA, nameB: pkgB, resultA, resultB }));
+      }
+    });
+
+  program
+    .command("boundaries [path]")
+    .description("Analyze boundary trust and validation coverage")
+    .option("--json", "Output as JSON")
+    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+      const projectPath = path ?? ".";
+      const result = analyzeProject(projectPath, {
+        agent: false,
+        explain: false,
+        profile: "application",
+      });
+      if (opts.json) {
+        console.log(
+          JSON.stringify(
+            {
+              boundaryQuality: result.boundaryQuality,
+              boundarySummary: result.boundarySummary,
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(renderBoundaryReport(result));
+      }
+    });
+
+  program
+    .command("fix-plan [path]")
+    .description("Generate a fix plan for improving type quality")
+    .option("--json", "Output as JSON")
+    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+      const projectPath = path ?? ".";
+      const result = analyzeProject(projectPath, {
+        agent: true,
+        explain: true,
+        profile: "autofix-agent",
+      });
+      const plan = buildFixPlan(result);
+      if (opts.json) {
+        console.log(JSON.stringify(plan, null, 2));
+      } else {
+        console.log(renderFixPlanReport(plan));
+      }
+    });
+
+  program
+    .command("apply-fixes [path]")
+    .description("Apply safe fixes from a fix plan")
+    .option("--mode <mode>", "Fix mode: safe|review", "safe")
+    .option("--json", "Output as JSON")
+    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+      const projectPath = path ?? ".";
+      const mode = (opts.mode === "review" ? "review" : "safe") as FixMode;
+      const result = analyzeProject(projectPath, {
+        agent: true,
+        explain: true,
+        profile: "autofix-agent",
+      });
+      const plan = buildFixPlan(result);
+      const applicationResult = applyFixes({ mode, plan, projectPath });
+      if (opts.json) {
+        console.log(JSON.stringify(applicationResult, null, 2));
+      } else {
+        console.log(renderApplyFixesReport(applicationResult));
+      }
+    });
+
+  program
+    .command("diff <baseline> <target>")
+    .description("Compare two analysis snapshots or packages")
+    .option("--json", "Output as JSON")
+    .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
+    .option("--no-cache", "Disable package cache")
+    .action((baseline: string, target: string, cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+      const domain = parseDomainOption(String(opts.domain ?? "auto"));
+      const noCache = opts.cache === false;
+      const baselineResult = scorePackage(baseline, { domain, noCache });
+      const targetResult = scorePackage(target, { domain, noCache });
+      const diff = computeDiff({ baseline: baselineResult, target: targetResult });
+      if (opts.json) {
+        console.log(JSON.stringify(diff, null, 2));
+      } else {
+        console.log(renderDiffReport(diff));
       }
     });
 
@@ -339,6 +447,147 @@ function renderSelfAnalysis(
   } else {
     lines.push(pc.dim("  Run with --apply to auto-fix safe issues (not yet implemented)."));
   }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function renderBoundaryReport(result: AnalysisResult): string {
+  const lines: string[] = ["", pc.bold("  typegrade boundaries"), ""];
+
+  const summary = result.boundarySummary;
+  const quality = result.boundaryQuality;
+
+  if (!summary || !quality) {
+    lines.push("  No boundary data available. Run on a source project (not a package).");
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  // Quality overview
+  const gradeColor = scoreToColor(quality.score);
+  lines.push(pc.bold("  Boundary Quality:"));
+  lines.push(`    Score: ${gradeColor(`${quality.score}/100 (${quality.grade})`)}`);
+  lines.push(`    Total boundaries: ${summary.totalBoundaries}`);
+  lines.push(`    Validated: ${summary.validatedBoundaries}`);
+  lines.push(`    Unvalidated: ${summary.unvalidatedBoundaries}`);
+  lines.push(`    Coverage: ${Math.round(summary.boundaryCoverage * 100)}%`);
+  lines.push("");
+
+  // Hotspots
+  if (summary.missingValidationHotspots.length > 0) {
+    lines.push(pc.bold("  Missing Validation Hotspots:"));
+    for (const hotspot of summary.missingValidationHotspots.slice(0, 10)) {
+      const trustColor = hotspot.trustLevel === "untrusted-external" ? pc.red : pc.yellow;
+      lines.push(
+        `    ${trustColor(`[${hotspot.trustLevel}]`)} ${hotspot.file}:${hotspot.line} (${hotspot.boundaryType})`,
+      );
+    }
+    if (summary.missingValidationHotspots.length > 10) {
+      lines.push(pc.dim(`    ... and ${summary.missingValidationHotspots.length - 10} more`));
+    }
+    lines.push("");
+  }
+
+  // Taint breaks
+  if (summary.taintBreaks.length > 0) {
+    lines.push(pc.bold("  Taint Breaks (unvalidated data flows):"));
+    for (const tb of summary.taintBreaks.slice(0, 5)) {
+      lines.push(`    ${pc.red("✗")} ${tb.file}:${tb.line} — ${tb.source} → ${tb.sink}`);
+    }
+    lines.push("");
+  }
+
+  // Rationale
+  if (quality.rationale.length > 0) {
+    lines.push(pc.bold("  Scoring Rationale:"));
+    for (const reason of quality.rationale) {
+      lines.push(`    ${reason}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function renderFixPlanReport(plan: FixPlan): string {
+  const lines: string[] = ["", pc.bold("  typegrade fix-plan"), ""];
+
+  if (plan.batches.length === 0) {
+    lines.push("  No actionable fixes found.");
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push(pc.bold("  Summary:"));
+  lines.push(`    Total batches: ${plan.batches.length}`);
+  lines.push(`    Expected uplift: +${plan.totalExpectedUplift} points`);
+  lines.push(`    Schema version: ${plan.analysisSchemaVersion}`);
+  lines.push("");
+
+  lines.push(pc.bold("  Fix Batches (ordered by dependency + impact):"));
+  for (const batch of plan.batches.slice(0, 12)) {
+    const riskColor = riskToColorFn(batch.risk);
+    const categoryTag = batch.fixCategory ? pc.dim(` [${batch.fixCategory}]`) : "";
+    const confidenceTag = pc.dim(` (confidence: ${Math.round(batch.confidence * 100)}%)`);
+    lines.push(`    ${riskColor(`[${batch.risk}]`)} ${batch.title}${categoryTag}${confidenceTag}`);
+    lines.push(`      Uplift: +${batch.expectedScoreUplift} | Files: ${batch.targetFiles.length}`);
+    if (batch.dependsOn.length > 0) {
+      lines.push(`      Depends on: ${batch.dependsOn.join(", ")}`);
+    }
+  }
+  if (plan.batches.length > 12) {
+    lines.push(pc.dim(`    ... and ${plan.batches.length - 12} more batches`));
+  }
+  lines.push("");
+
+  // Verification
+  if (plan.verificationCommands.length > 0) {
+    lines.push(pc.bold("  Verification Commands:"));
+    for (const cmd of plan.verificationCommands) {
+      lines.push(`    $ ${cmd}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function renderApplyFixesReport(appResult: FixApplicationResult): string {
+  const lines: string[] = ["", pc.bold("  typegrade apply-fixes"), ""];
+
+  if (appResult.applied.length === 0 && appResult.skipped.length === 0) {
+    lines.push("  No fixes to apply.");
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  if (appResult.applied.length > 0) {
+    lines.push(pc.bold("  Applied:"));
+    for (const fix of appResult.applied) {
+      lines.push(
+        `    ${pc.green("✓")} ${fix.batchId} — ${fix.filesModified.length} file(s) modified`,
+      );
+    }
+    lines.push("");
+  }
+
+  if (appResult.skipped.length > 0) {
+    lines.push(pc.bold("  Skipped:"));
+    for (const skip of appResult.skipped) {
+      lines.push(`    ${pc.yellow("○")} ${skip.batchId} — ${skip.reason}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(pc.bold("  Result:"));
+  lines.push(`    Score before: ${appResult.scoreBefore}`);
+  lines.push(
+    `    Score after: ${appResult.scoreAfter === null ? "re-analysis needed" : String(appResult.scoreAfter)}`,
+  );
+  lines.push(
+    `    Verification: ${appResult.verificationPassed ? pc.green("passed") : pc.yellow("pending")}`,
+  );
   lines.push("");
 
   return lines.join("\n");

@@ -14,10 +14,14 @@
     }
   },
   "bin": {
-    "typegrade": "./dist/bin.js"
+    "typegrade": "./dist/bin.js",
+    "intent": "./bin/intent.js"
   },
   "files": [
     "dist",
+    "skills",
+    "bin",
+    "!skills/_artifacts",
     "README.md",
     "LICENSE"
   ],
@@ -57,7 +61,12 @@
     "perf:cli": "tsx perf/run.ts cli",
     "perf:score": "tsx perf/run.ts score",
     "perf:benchmark": "tsx perf/run.ts benchmark",
-    "release:dry-run": "tsx node_modules/.bin/semantic-release --dry-run"
+    "release:dry-run": "tsx node_modules/.bin/semantic-release --dry-run",
+    "intent:validate": "npx @tanstack/intent validate",
+    "intent:stale": "npx @tanstack/intent stale",
+    "intent:list": "npx @tanstack/intent list",
+    "intent:scaffold": "npx @tanstack/intent scaffold",
+    "intent:smoke": "npm pack --dry-run 2>&1 | grep skills/"
   },
   "dependencies": {
     "commander": "^14.0.3",
@@ -71,6 +80,7 @@
     "@semantic-release/github": "^12.0.6",
     "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.0",
+    "@tanstack/intent": "^0.0.14",
     "@types/node": "^25.3.5",
     "conventional-changelog-conventionalcommits": "^9.3.0",
     "oxfmt": "^0.36.0",
