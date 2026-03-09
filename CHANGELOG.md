@@ -1,3 +1,18 @@
+## [0.9.0](https://github.com/ferc/typegrade/compare/v0.8.0...v0.9.0) (2026-03-09)
+
+### Features
+
+* **accuracy:** implement 8-phase accuracy maximization plan ([2e6bcd2](https://github.com/ferc/typegrade/commit/2e6bcd20f6a06b8873213113eeb13fa6a58334e2))
+* add multi-profile scoring, agent infrastructure, and self-analyze command ([052de39](https://github.com/ferc/typegrade/commit/052de3947559a5c1804c00d9c7c8e1580e2adf8c))
+
+### Bug Fixes
+
+* **ci:** track test fixture node_modules, inject version at build time ([6d3e494](https://github.com/ferc/typegrade/commit/6d3e494f8c7f3ece42bfbe0235b50bff4c145b75))
+* **scoring:** resolve .d.ts companions for JS exports, tighten testing-library detection, fix gate snapshot lookup ([b71bbf3](https://github.com/ferc/typegrade/commit/b71bbf38588938ed2b510ba6ba36266d7607201f))
+* **soundness:** replace 'as OutputOptions' casts with typed extraction in CLI ([93b02bc](https://github.com/ferc/typegrade/commit/93b02bcb5a07d57e61b15b987fdbfbfa4e5f6aad))
+* **soundness:** replace non-null assertions with null-coalescing in scorer and package-scorer ([78e1737](https://github.com/ferc/typegrade/commit/78e17375915994f5a5a9958c5216b3cba11c4813))
+* **types:** eliminate all `as any` casts, tighten domain types, remove double assertions ([529bf41](https://github.com/ferc/typegrade/commit/529bf41cdd37304904ec9f0873c7b97cfdd7a4dd))
+
 ## [0.7.6](https://github.com/ferc/typegrade/compare/v0.7.5...v0.7.6) (2026-03-08)
 
 ### Bug Fixes
