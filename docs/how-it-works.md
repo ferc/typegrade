@@ -29,6 +29,30 @@ Package mode analyzes published `.d.ts` declarations — what consumers and AI a
 4. Run the 8 consumer-facing analyzers. The 4 implementation dimensions are disabled.
 5. Compute composites, domain scores, and scenario scores.
 
+### Boundary-only fast path (`typegrade boundaries`)
+
+The `boundaries` command uses a lightweight analysis path that skips the full scoring pipeline. Instead of loading the project with full type resolution, it uses a fast loader (`skipLoadingLibFiles`, `skipFileDependencyResolution`) and runs only the boundary graph, summary, and quality score computation. This makes it significantly faster than the general `analyze` command.
+
+### CLI architecture
+
+The CLI uses code splitting and lazy imports for fast startup:
+
+- **`--version` / `-V`** exits immediately before loading any framework (prints the build-injected version constant).
+- **`--help`** loads only `commander` and `picocolors` — no analyzer code.
+- **Command handlers** dynamically import heavy modules (`analyzer.js`, `package-scorer.js`, `agent/index.js`, `fix/planner.js`, `diff.js`, `monorepo/index.js`) only when the specific command executes.
+- **Build output** uses ESM code splitting (`tsup` with `splitting: true`) so each command's dependencies are separate chunks loaded on demand. Runtime dependencies (`commander`, `picocolors`, `ts-morph`) are externalized.
+
+### Subpath imports
+
+For library consumers who need only a subset of typegrade's functionality, subpath exports avoid loading the entire module graph:
+
+- `typegrade/analyze` — `analyzeProject`, `analyzeBoundariesOnly`, `normalizeResult`
+- `typegrade/score` — `scorePackage`, `comparePackages`
+- `typegrade/boundaries` — boundary graph, summary, quality, flow, and policy functions
+- `typegrade/fix` — `buildFixPlan`, `applyFixes`
+
+The root import (`typegrade`) re-exports everything for compatibility.
+
 ## Result schema
 
 ### Status and validity

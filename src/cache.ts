@@ -14,7 +14,8 @@ import { join } from "node:path";
  *       <key>.json      — cached AnalysisResult
  */
 
-const TOOL_VERSION = "0.5.0";
+// Build-time constant injected by tsup; falls back to "dev" when running tests from source
+const TOOL_VERSION = typeof __TYPEGRADE_VERSION__ === "undefined" ? "dev" : __TYPEGRADE_VERSION__;
 
 function getCacheRoot(): string {
   const xdg = process.env["XDG_CACHE_HOME"];

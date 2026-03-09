@@ -149,3 +149,30 @@ Each benchmark run saves per-package results to `benchmarks/results/`. Each resu
 | `pnpm benchmark:judge` | Evaluate eval results, emit redacted summary (CI/judge only) |
 | `pnpm gate:train` | Train gate check |
 | `pnpm gate:eval` | Eval gate check (CI/judge only) |
+| `pnpm perf` | Run all performance benchmarks |
+| `pnpm perf:cli` | Measure CLI cold-start (`--version`, `--help`) |
+| `pnpm perf:score` | Measure `analyze`, `boundaries`, `fix-plan` latency |
+| `pnpm perf:benchmark` | Measure full train benchmark throughput |
+| `pnpm perf:ci` | Run all perf benchmarks with regression checks |
+
+## Performance benchmarks
+
+The performance harness (`perf/run.ts`) measures built artifacts directly via `node dist/bin.js` subprocess spawning.
+
+### Performance targets (as of 2026-03-09)
+
+| Command | Target (p50) |
+|---|---|
+| `typegrade --version` | ≤ 40ms |
+| `typegrade --help` | ≤ 80ms |
+| `typegrade analyze <fixture> --json` | ≤ 450ms |
+| `typegrade boundaries <fixture> --json` | ≤ 250ms |
+| `typegrade fix-plan <fixture> --json` | ≤ 450ms |
+
+### CI mode
+
+`pnpm perf:ci` compares current measurements against the most recent baseline in `benchmarks-output/perf/` and fails if:
+- Any measurement regresses by more than 20% from the previous baseline.
+- Any measurement exceeds its target threshold.
+
+Results are written to `benchmarks-output/perf/perf-<timestamp>.json`.

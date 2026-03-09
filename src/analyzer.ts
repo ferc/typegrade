@@ -480,6 +480,10 @@ export interface AnalyzeOptions {
   profile?: AnalysisProfile;
   /** If true, generate agent-oriented output with fix batches */
   agent?: boolean;
+  /** Skip declaration emit — use source files as consumer view (suitable for fix-plan) */
+  skipDeclEmit?: boolean;
+  /** Skip boundary analysis (source mode only) */
+  skipBoundaries?: boolean;
 }
 
 /**
@@ -622,7 +626,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const caveats: string[] = [];
   let usingSourceFallback = false;
 
-  if (mode === "source") {
+  if (mode === "source" && !options?.skipDeclEmit) {
     try {
       const emitResult = project.emitToMemory({ emitOnlyDtsFiles: true });
       const emittedFiles = emitResult.getFiles();
@@ -656,6 +660,8 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       usingSourceFallback = true;
       caveats.push("Declaration emit failed; consumer analysis uses source files directly");
     }
+  } else if (mode === "source" && options?.skipDeclEmit) {
+    usingSourceFallback = true;
   }
 
   // Extract public surface once, shared by all consumer-facing analyzers
@@ -956,10 +962,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Build evidence summary
   const evidenceSummary = buildEvidenceSummary(dimensions, domainInference, scenarioScore);
 
-  // --- Boundary analysis (source mode only) ---
+  // --- Boundary analysis (source mode only, skippable) ---
   let boundarySummary = undefined;
   let boundaryQuality = undefined;
-  if (mode === "source") {
+  if (mode === "source" && !options?.skipBoundaries) {
     const boundaryGraph = buildBoundaryGraph(sourceOnlyFiles, project);
     boundarySummary = buildBoundarySummary(boundaryGraph);
     boundaryQuality = computeBoundaryQuality(boundarySummary);

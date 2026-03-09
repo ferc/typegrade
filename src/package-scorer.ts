@@ -7,13 +7,17 @@ import {
   type ScoreValidity,
 } from "./types.js";
 import { type AnalyzeOptions, analyzeProject } from "./analyzer.js";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
 import {
   computePackageCacheKey,
+  computeResultCacheKey,
+  computeScoringConfigHash,
   getPackageCachePath,
   hasPackageCache,
   markPackageCached,
+  readResultCache,
+  writeResultCache,
 } from "./cache.js";
 import {
   cpSync,
@@ -27,6 +31,7 @@ import {
 import type { DomainType } from "./domain.js";
 import type { GraphStats } from "./graph/types.js";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { loadProject } from "./utils/project-loader.js";
 import { tmpdir } from "node:os";
 
@@ -317,11 +322,13 @@ function stampResultStatus(result: AnalysisResult): void {
   result.analysisSchemaVersion = result.analysisSchemaVersion ?? ANALYSIS_SCHEMA_VERSION;
 }
 
-function scoreLocalPackage(
-  localPath: string,
-  pkgJsonPath: string,
-  domain?: "auto" | "off" | DomainType,
-): AnalysisResult {
+function scoreLocalPackage(opts: {
+  localPath: string;
+  pkgJsonPath: string;
+  domain?: "auto" | "off" | DomainType;
+  noCache?: boolean;
+}): AnalysisResult {
+  const { localPath, pkgJsonPath, domain, noCache } = opts;
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
   const packageName = pkgJson.name ?? "local-package";
 
@@ -340,6 +347,26 @@ function scoreLocalPackage(
       spec: localPath,
       version: resolvedVersion,
     });
+  }
+
+  // Compute result cache key for local packages
+  const tsVersion = getTsVersion();
+  const pkgCacheKey = computePackageCacheKey({
+    packageSpec: `${packageName}@${resolvedVersion ?? "local"}`,
+    tsVersion,
+  });
+  const resultKey = computeResultCacheKey({
+    nodeMajor: parseInt(process.versions.node, 10),
+    packageCacheKey: pkgCacheKey,
+    scoringConfigHash: getScoringConfigHash(),
+  });
+
+  // Check result cache
+  if (!noCache) {
+    const cached = readResultCache<AnalysisResult>(resultKey);
+    if (cached) {
+      return cached;
+    }
   }
 
   // Has .d.ts files but no package.json type entries — fall back to analyzing all files
@@ -366,6 +393,9 @@ function scoreLocalPackage(
       typesSource: "unknown",
     };
     stampResultStatus(result);
+    if (!noCache) {
+      writeResultCache(resultKey, result);
+    }
     return result;
   }
 
@@ -392,17 +422,17 @@ function scoreLocalPackage(
     typesSource: "bundled",
   };
 
-  const opts: AnalyzeOptions = {
+  const analyzeOpts: AnalyzeOptions = {
     ...(domain !== undefined && { domain }),
     mode: "package",
     packageContext,
     sourceFilesOptions: { includeDts: true, includeNodeModules: true },
   };
   if (graph.filesToAnalyze.length > 0) {
-    opts.fileFilter = new Set(graph.filesToAnalyze);
+    analyzeOpts.fileFilter = new Set(graph.filesToAnalyze);
   }
 
-  const result = analyzeProject(localPath, opts);
+  const result = analyzeProject(localPath, analyzeOpts);
   result.packageIdentity = {
     displayName: packageName,
     entrypointStrategy,
@@ -421,6 +451,9 @@ function scoreLocalPackage(
   }
 
   stampResultStatus(result);
+  if (!noCache) {
+    writeResultCache(resultKey, result);
+  }
   return result;
 }
 
@@ -460,6 +493,23 @@ function getTsVersion(): string {
     cachedTsVersion = "unknown";
   }
   return cachedTsVersion;
+}
+
+let cachedScoringConfigHash: string | null = null;
+
+/**
+ * Compute and cache the scoring config hash from the constants source file.
+ * Falls back to "unknown" when the source file is not available (e.g. bundled).
+ */
+function getScoringConfigHash(): string {
+  if (cachedScoringConfigHash !== null) {
+    return cachedScoringConfigHash;
+  }
+  // Resolve constants.ts relative to this module's location
+  const thisDir = dirname(fileURLToPath(import.meta.url));
+  const constantsPath = join(thisDir, "constants.ts");
+  cachedScoringConfigHash = computeScoringConfigHash(constantsPath);
+  return cachedScoringConfigHash;
 }
 
 export interface ScorePackageOptions {
@@ -619,7 +669,12 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
 
     // If local path has a package.json, use declaration graph for proper entrypoint resolution
     if (existsSync(localPkgJsonPath)) {
-      return scoreLocalPackage(localPath, localPkgJsonPath, options?.domain);
+      return scoreLocalPackage({
+        ...(options?.domain !== undefined && { domain: options.domain }),
+        localPath,
+        noCache: options?.noCache ?? false,
+        pkgJsonPath: localPkgJsonPath,
+      });
     }
 
     const result = analyzeProject(localPath, {
@@ -650,10 +705,31 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
   // Parse name@version spec
   const { name: packageName, version: packageVersion } = parsePackageSpec(nameOrPath);
 
+  // Compute result cache key before install (based on spec, not resolved files)
+  const tsVersion = getTsVersion();
+  const pkgCacheKey = computePackageCacheKey({
+    packageSpec: `${packageName}@${packageVersion}`,
+    tsVersion,
+    typesVersion: options?.typesVersion,
+  });
+  const resultCacheKeyStr = computeResultCacheKey({
+    nodeMajor: parseInt(process.versions.node, 10),
+    packageCacheKey: pkgCacheKey,
+    scoringConfigHash: getScoringConfigHash(),
+  });
+
+  // Check result cache before installing the package
+  if (!options?.noCache) {
+    const cachedResult = readResultCache<AnalysisResult>(resultCacheKeyStr);
+    if (cachedResult) {
+      return cachedResult;
+    }
+  }
+
   // Use cached install — catch install failures gracefully
-  let cached: { installRoot: string; cleanup: () => void } | undefined = undefined;
+  let installed: { installRoot: string; cleanup: () => void } | undefined = undefined;
   try {
-    cached = ensureCachedInstall(packageName, packageVersion, {
+    installed = ensureCachedInstall(packageName, packageVersion, {
       noCache: options?.noCache,
       typesVersion: options?.typesVersion,
     });
@@ -668,7 +744,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     });
   }
 
-  const { installRoot, cleanup } = cached;
+  const { installRoot, cleanup } = installed;
   try {
     const pkgDir = join(installRoot, "node_modules", packageName);
 
@@ -752,17 +828,17 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       typesSource,
     };
 
-    const opts: AnalyzeOptions = {
+    const analyzeOpts: AnalyzeOptions = {
       ...(options?.domain !== undefined && { domain: options.domain }),
       mode: "package",
       packageContext,
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     };
     if (graph.filesToAnalyze.length > 0) {
-      opts.fileFilter = new Set(graph.filesToAnalyze);
+      analyzeOpts.fileFilter = new Set(graph.filesToAnalyze);
     }
 
-    const result = analyzeProject(installRoot, opts);
+    const result = analyzeProject(installRoot, analyzeOpts);
 
     // Resolve version from the installed package's package.json
     let resolvedVersion: string | null = null;
@@ -790,6 +866,12 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     }
 
     stampResultStatus(result);
+
+    // Write result to cache
+    if (!options?.noCache) {
+      writeResultCache(resultCacheKeyStr, result);
+    }
+
     return result;
   } finally {
     cleanup();

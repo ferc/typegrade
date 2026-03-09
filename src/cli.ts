@@ -187,8 +187,11 @@ export function runCli() {
       const { buildAgentReport, renderAgentJson } = await import("./agent/index.js");
       const result = analyzeProject(projectPath, {
         agent: true,
+        domain: "off",
         explain: true,
         profile: "autofix-agent",
+        skipBoundaries: true,
+        skipDeclEmit: true,
       });
       const agentReport = buildAgentReport(result);
 
@@ -260,8 +263,10 @@ export function runCli() {
       const { buildFixPlan } = await import("./fix/planner.js");
       const result = analyzeProject(projectPath, {
         agent: true,
-        explain: true,
+        domain: "off",
         profile: "autofix-agent",
+        skipBoundaries: true,
+        skipDeclEmit: true,
       });
       const plan = buildFixPlan(result);
       if (opts.json) {
@@ -286,8 +291,10 @@ export function runCli() {
       const { applyFixes } = await import("./fix/applier.js");
       const result = analyzeProject(projectPath, {
         agent: true,
-        explain: true,
+        domain: "off",
         profile: "autofix-agent",
+        skipBoundaries: true,
+        skipDeclEmit: true,
       });
       const plan = buildFixPlan(result);
       const applicationResult = applyFixes({ mode, plan, projectPath });

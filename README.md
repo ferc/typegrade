@@ -307,6 +307,15 @@ const diff = computeDiff({ baseline: packageResult, target: scorePackage('zod@ne
 const mono = analyzeMonorepo({ rootPath: '.' });
 ```
 
+For performance-sensitive consumers, subpath imports load only what you need:
+
+```typescript
+import { analyzeProject } from 'typegrade/analyze';
+import { scorePackage } from 'typegrade/score';
+import { buildBoundaryGraph } from 'typegrade/boundaries';
+import { buildFixPlan } from 'typegrade/fix';
+```
+
 ## Configuration
 
 Create a `typegrade.config.ts` in your project root:
