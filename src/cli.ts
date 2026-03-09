@@ -25,6 +25,17 @@ interface OutputOptions {
   domain?: string;
 }
 
+function toOutputOptions(opts: Record<string, unknown>): OutputOptions {
+  return {
+    color: typeof opts.color === "boolean" ? opts.color : undefined,
+    domain: typeof opts.domain === "string" ? opts.domain : undefined,
+    explain: Boolean(opts.explain),
+    json: Boolean(opts.json),
+    minScore: typeof opts.minScore === "number" ? opts.minScore : undefined,
+    verbose: Boolean(opts.verbose),
+  };
+}
+
 function outputResult(result: AnalysisResult, opts: OutputOptions) {
   if (opts.color === false) {
     pc.isColorSupported = false;
@@ -90,7 +101,7 @@ export function runCli() {
       const projectPath = path ?? ".";
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const result = analyzeProject(projectPath, { domain, explain: Boolean(opts.explain) });
-      outputResult(result, opts as OutputOptions);
+      outputResult(result, toOutputOptions(opts));
     });
 
   program
@@ -107,7 +118,7 @@ export function runCli() {
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
       const result = scorePackage(pkg, { domain, noCache });
-      outputResult(result, opts as OutputOptions);
+      outputResult(result, toOutputOptions(opts));
     });
 
   program
