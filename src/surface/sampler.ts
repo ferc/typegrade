@@ -284,11 +284,18 @@ function makeReturnPosition(opts: MakeReturnPositionOpts): SurfacePosition {
 }
 
 function extractTypeParams(params: TypeParameterDeclaration[]): SurfaceTypeParam[] {
-  return params.map((tp) => ({
-    constraintNode: tp.getConstraint(),
-    hasConstraint: tp.getConstraint() !== undefined,
-    name: tp.getName(),
-  }));
+  return params.map((tp) => {
+    const constraint = tp.getConstraint();
+    const defaultNode = tp.getDefault();
+    return {
+      constraintNode: constraint,
+      ...(constraint ? { constraintText: constraint.getText() } : {}),
+      hasConstraint: constraint !== undefined,
+      hasDefault: defaultNode !== undefined,
+      ...(defaultNode ? { defaultText: defaultNode.getText() } : {}),
+      name: tp.getName(),
+    };
+  });
 }
 
 // --- Extractors ---

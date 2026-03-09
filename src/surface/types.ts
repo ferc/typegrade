@@ -43,6 +43,9 @@ export interface SurfaceTypeParam {
   name: string;
   hasConstraint: boolean;
   constraintNode: TypeNode | undefined;
+  constraintText?: string;
+  hasDefault: boolean;
+  defaultText?: string;
 }
 
 /** A method in an interface or class */

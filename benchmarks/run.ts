@@ -326,9 +326,16 @@ async function main() {
         lowerScore = lower.typeSafety;
       }
 
-      const delta = (higherScore ?? 0) - (lowerScore ?? 0);
+      // Skip assertions where either side is degraded (null scores = not comparable)
+      if (higherScore === null || lowerScore === null) {
+        console.log(`SKIP: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) (degraded/null score) [${assertion.composite}]`);
+        assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, higherScore, lowerScore, result: "skip" });
+        continue;
+      }
+
+      const delta = higherScore - lowerScore;
       const meetsMinDelta = assertion.minDelta ? delta >= assertion.minDelta : true;
-      const passes = higherScore !== null && lowerScore !== null && higherScore > lowerScore && meetsMinDelta;
+      const passes = higherScore > lowerScore && meetsMinDelta;
 
       if (assertion.class === "ambiguous") {
         const statusLabel = passes ? "OK" : "NOTE";

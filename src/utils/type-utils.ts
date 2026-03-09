@@ -69,7 +69,7 @@ function computePrecision(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
     const anyPath = [...ctx.path, "any"];
     const origin = resolveAnyOrigin(type);
     return {
-      anyOrigin: origin,
+      ...(origin ? { anyOrigin: origin } : {}),
       anyPaths: [anyPath],
       containsAny: true,
       containsUnknown: false,
@@ -310,7 +310,7 @@ function analyzeUnion(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   score = clamp(score);
   return {
     ...collectAnyMeta(childResults),
-    anyDensity: childResults.length > 0 ? unionAnyDensity : undefined,
+    ...(childResults.length > 0 ? { anyDensity: unionAnyDensity } : {}),
     containsAny,
     containsUnknown,
     features,
@@ -377,8 +377,8 @@ function analyzeContainer(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
   const score = clamp(Math.round(0.35 * 45 + 0.65 * child.score));
   const origin = child.anyOrigin ?? (child.containsAny ? resolveTypeOrigin(type) : undefined);
   return {
-    anyOrigin: origin,
-    anyPaths: child.anyPaths,
+    ...(origin ? { anyOrigin: origin } : {}),
+    ...(child.anyPaths ? { anyPaths: child.anyPaths } : {}),
     containsAny: child.containsAny,
     containsUnknown: child.containsUnknown,
     features: [name.toLowerCase(), ...child.features],
@@ -499,8 +499,8 @@ function analyzeObject(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
     score -= 15;
     score = clamp(score);
     return {
-      anyOrigin: valueResult.anyOrigin,
-      anyPaths: valueResult.anyPaths,
+      ...(valueResult.anyOrigin ? { anyOrigin: valueResult.anyOrigin } : {}),
+      ...(valueResult.anyPaths ? { anyPaths: valueResult.anyPaths } : {}),
       containsAny: valueResult.containsAny,
       containsUnknown: valueResult.containsUnknown,
       features: ["record-like", ...valueResult.features],
@@ -647,19 +647,18 @@ function analyzeObject(type: Type, ctx: PrecisionCtx): PrecisionFeatures {
 
   const anyMeta = collectAnyMeta(allPropResults);
   // If any was found in children but no origin detected, check the parent type itself
-  if (containsAny && !anyMeta.anyOrigin) {
-    anyMeta.anyOrigin = resolveTypeOrigin(type);
-  }
+  const finalOrigin = anyMeta.anyOrigin ?? (containsAny ? resolveTypeOrigin(type) : undefined);
 
   return {
     ...anyMeta,
-    anyDensity: totalChildren > 0 ? objAnyDensity : undefined,
+    ...(finalOrigin ? { anyOrigin: finalOrigin } : {}),
+    ...(totalChildren > 0 ? { anyDensity: objAnyDensity } : {}),
     containsAny,
     containsUnknown,
     features,
     reasons,
     score,
-    unknownDensity: totalChildren > 0 ? objUnknownDensity : undefined,
+    ...(totalChildren > 0 ? { unknownDensity: objUnknownDensity } : {}),
   };
 }
 
@@ -853,8 +852,8 @@ function collectAnyMeta(
     }
   }
   return {
-    anyOrigin: origin,
-    anyPaths: paths.length > 0 ? paths : undefined,
+    ...(origin ? { anyOrigin: origin } : {}),
+    ...(paths.length > 0 ? { anyPaths: paths } : {}),
   };
 }
 

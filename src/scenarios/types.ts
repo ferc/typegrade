@@ -77,7 +77,7 @@ export function evaluateScenarioPack(
     passedScenarios: passedCount,
     results,
     scenario: pack.name,
-    scenarioVariant: pack.variant,
+    ...(pack.variant ? { scenarioVariant: pack.variant } : {}),
     score: avgScore,
     totalScenarios: pack.scenarios.length,
   };

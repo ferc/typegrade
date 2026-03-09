@@ -118,7 +118,7 @@ function hasBrandedOutput(decl: SurfaceDeclaration): boolean {
 
 /** Check method-level type guard and assertion return types */
 function checkMethodReturnTypes(
-  method: { returnTypeNode?: { getText(): string } },
+  method: { returnTypeNode?: { getText(): string } | undefined },
   counts: { typeGuardFns: number; assertionFns: number },
 ): void {
   if (!method.returnTypeNode) {
@@ -436,7 +436,7 @@ const refinementPipeline: ScenarioTest = {
 
 /** Check if a method matches exhaustive match patterns and update counts */
 function checkExhaustiveMethod(
-  method: { name: string; typeParameters: { length: number }[] },
+  method: { name: string; typeParameters: readonly unknown[] },
   counts: { exhaustiveMatchPatterns: number; genericUnionConstructors: number },
 ): void {
   const mName = method.name.toLowerCase();
