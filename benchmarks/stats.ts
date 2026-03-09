@@ -21,7 +21,11 @@ type ConfidenceLevel = keyof typeof Z_SCORES;
  * Use for lower-bound gates: "success rate is at least X with Y% confidence"
  * Example: wilsonLowerBound(48, 50, 99) → lower bound for 96% success rate at 99% CI
  */
-export function wilsonLowerBound(successes: number, total: number, confidence: ConfidenceLevel = 99): number {
+export function wilsonLowerBound(
+  successes: number,
+  total: number,
+  confidence: ConfidenceLevel = 99,
+): number {
   if (total === 0) return 0;
   const zz = Z_SCORES[confidence];
   const pHat = successes / total;
@@ -38,7 +42,11 @@ export function wilsonLowerBound(successes: number, total: number, confidence: C
  * Use for upper-bound gates: "failure rate is at most X with Y% confidence"
  * Example: wilsonUpperBound(2, 50, 99) → upper bound for 4% failure rate at 99% CI
  */
-export function wilsonUpperBound(failures: number, total: number, confidence: ConfidenceLevel = 99): number {
+export function wilsonUpperBound(
+  failures: number,
+  total: number,
+  confidence: ConfidenceLevel = 99,
+): number {
   if (total === 0) return 1;
   const zz = Z_SCORES[confidence];
   const pHat = failures / total;

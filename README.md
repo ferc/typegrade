@@ -16,17 +16,18 @@ Even if you are not using AI agents today, precise types improve editor autocomp
 
 `typegrade` produces three global scores from up to 12 dimensions:
 
-| Score | What it answers |
-|---|---|
-| **Consumer API** | How precise and well-structured is your exported API surface? |
-| **Agent Readiness** | How well does your API guide AI agents toward correct usage? |
-| **Type Safety** | How safe is your code from `any` leaks, unsound casts, and weak boundaries? |
+| Score               | What it answers                                                             |
+| ------------------- | --------------------------------------------------------------------------- |
+| **Consumer API**    | How precise and well-structured is your exported API surface?               |
+| **Agent Readiness** | How well does your API guide AI agents toward correct usage?                |
+| **Type Safety**     | How safe is your code from `any` leaks, unsound casts, and weak boundaries? |
 
 In **source mode** (`typegrade analyze`), all 12 dimensions contribute — 8 consumer-facing plus 4 implementation dimensions (soundness, boundary discipline, config discipline, declaration fidelity).
 
 In **package mode** (`typegrade score`), only the 8 consumer-facing dimensions apply, because published `.d.ts` declarations are all a consumer sees.
 
 Beyond global scores, `typegrade` also computes:
+
 - **Domain-fit scores** — adjusted for validation, router, ORM, stream, and other library categories.
 - **Scenario scores** — consumer benchmark tests that measure real downstream DX within a domain.
 - **Confidence and coverage diagnostics** — so you know how much evidence supports each score.
@@ -173,13 +174,13 @@ For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 ### Grades
 
 | Score | Grade |
-|---|---|
-| 95+ | A+ |
-| 85-94 | A |
-| 70-84 | B |
-| 55-69 | C |
-| 40-54 | D |
-| 0-39 | F |
+| ----- | ----- |
+| 95+   | A+    |
+| 85-94 | A     |
+| 70-84 | B     |
+| 55-69 | C     |
+| 40-54 | D     |
+| 0-39  | F     |
 
 ## Improving your score
 
@@ -236,67 +237,77 @@ Returns an `AnalysisResult` with:
     "resolvedVersion": "3.24.2",
     "typesSource": "bundled",
     "moduleKind": "esm",
-    "entrypointStrategy": "exports-map"
+    "entrypointStrategy": "exports-map",
   },
   "profileInfo": {
     "profile": "package",
     "profileConfidence": 1.0,
-    "profileReasons": ["explicit-score-command"]
+    "profileReasons": ["explicit-score-command"],
   },
   "filesAnalyzed": 12,
   "timeMs": 1800,
   "globalScores": {
     "consumerApi": { "score": 67, "grade": "C", "confidence": 0.82 },
     "agentReadiness": { "score": 71, "grade": "B", "confidence": 0.82 },
-    "typeSafety": { "score": 65, "grade": "C", "confidence": 0.82 }
+    "typeSafety": { "score": 65, "grade": "C", "confidence": 0.82 },
   },
   "domainScore": {
     "domain": "validation",
     "score": 72,
     "grade": "B",
-    "confidence": 0.9
+    "confidence": 0.9,
   },
   "scenarioScore": {
     "scenario": "validation",
     "score": 78,
     "passedScenarios": 3,
-    "totalScenarios": 4
+    "totalScenarios": 4,
   },
   "confidenceSummary": {
     "graphResolution": 0.95,
     "domainInference": 0.9,
     "sampleCoverage": 0.82,
-    "scenarioApplicability": 0.9
+    "scenarioApplicability": 0.9,
   },
   "coverageDiagnostics": {
     "typesSource": "bundled",
     "reachableFiles": 12,
     "measuredPositions": 156,
-    "undersampled": false
+    "undersampled": false,
   },
   "evidenceSummary": {
     "totalDeclarations": 45,
     "totalPositions": 156,
     "totalFiles": 12,
-    "coverageClass": "complete"
+    "coverageClass": "complete",
   },
   "trustSummary": {
     "classification": "trusted",
     "canCompare": true,
     "canGate": true,
-    "reasons": ["Complete analysis with sufficient coverage"]
+    "reasons": ["Complete analysis with sufficient coverage"],
   },
   "resolutionDiagnostics": {
     "acquisitionStage": "complete",
     "chosenStrategy": "exports-map",
     "attemptedStrategies": ["types-field", "exports-map"],
-    "declarationCount": 15
+    "declarationCount": 15,
   },
-  "dimensions": [/* 8 dimension results with scores, metrics, issues */],
-  "topIssues": [/* top 10 issues by severity */],
-  "boundaryHotspots": [/* ranked unvalidated boundary points with risk scores */],
-  "boundaryRecommendedFixes": [/* concrete fixes for boundary hotspots */],
-  "recommendations": [/* actionable recommendations by category (source mode) */]
+  "dimensions": [
+    /* 8 dimension results with scores, metrics, issues */
+  ],
+  "topIssues": [
+    /* top 10 issues by severity */
+  ],
+  "boundaryHotspots": [
+    /* ranked unvalidated boundary points with risk scores */
+  ],
+  "boundaryRecommendedFixes": [
+    /* concrete fixes for boundary hotspots */
+  ],
+  "recommendations": [
+    /* actionable recommendations by category (source mode) */
+  ],
 }
 ```
 
@@ -314,34 +325,34 @@ import {
   buildTaintFlowChains,
   analyzeMonorepo,
   loadConfig,
-} from 'typegrade';
+} from "typegrade";
 
 // Core analysis
-const sourceResult = analyzeProject('./src');
-const packageResult = scorePackage('zod');
-const comparison = comparePackages('zod', 'valibot');
+const sourceResult = analyzeProject("./src");
+const packageResult = scorePackage("zod");
+const comparison = comparePackages("zod", "valibot");
 
 // Codebase-aware library fit comparison
-const fit = fitCompare('zod', 'valibot', { codebasePath: './my-app' });
+const fit = fitCompare("zod", "valibot", { codebasePath: "./my-app" });
 console.log(fit.adoptionDecision.outcome, fit.adoptionDecision.winner);
 
 // Fix planning
 const plan = buildFixPlan(sourceResult);
 
 // Diff analysis
-const diff = computeDiff({ baseline: packageResult, target: scorePackage('zod@next') });
+const diff = computeDiff({ baseline: packageResult, target: scorePackage("zod@next") });
 
 // Monorepo analysis
-const mono = analyzeMonorepo({ rootPath: '.' });
+const mono = analyzeMonorepo({ rootPath: "." });
 ```
 
 For performance-sensitive consumers, subpath imports load only what you need:
 
 ```typescript
-import { analyzeProject } from 'typegrade/analyze';
-import { scorePackage } from 'typegrade/score';
-import { buildBoundaryGraph } from 'typegrade/boundaries';
-import { buildFixPlan } from 'typegrade/fix';
+import { analyzeProject } from "typegrade/analyze";
+import { scorePackage } from "typegrade/score";
+import { buildBoundaryGraph } from "typegrade/boundaries";
+import { buildFixPlan } from "typegrade/fix";
 ```
 
 ## Configuration
@@ -349,19 +360,19 @@ import { buildFixPlan } from 'typegrade/fix';
 Create a `typegrade.config.ts` in your project root:
 
 ```typescript
-import type { TypegradeConfig } from 'typegrade';
+import type { TypegradeConfig } from "typegrade";
 
 export default {
-  domain: 'auto',
-  profile: 'library',
+  domain: "auto",
+  profile: "library",
   minScore: 70,
   boundaries: {
     trustZones: [
-      { name: 'api', paths: ['src/api/**'], trustLevel: 'untrusted-external' },
-      { name: 'internal', paths: ['src/core/**'], trustLevel: 'internal-only' },
+      { name: "api", paths: ["src/api/**"], trustLevel: "untrusted-external" },
+      { name: "internal", paths: ["src/core/**"], trustLevel: "internal-only" },
     ],
     policies: [
-      { name: 'validate-http', source: 'network', requiresValidation: true, severity: 'error' },
+      { name: "validate-http", source: "network", requiresValidation: true, severity: "error" },
     ],
   },
 } satisfies TypegradeConfig;

@@ -99,15 +99,15 @@ Low-confidence results (average composite confidence < 0.5) also have `domainSco
 
 Every issue and dimension result can carry an `OwnershipClass` indicating who owns the code where the finding originates:
 
-| Value | Meaning |
-|-------|---------|
-| `source-owned` | Code written and maintained in this project |
-| `workspace-owned` | Code in a sibling workspace package within a monorepo |
-| `dependency-owned` | Code originating from an external dependency |
-| `generated` | Machine-generated code (codegen, build output) |
-| `standard-library-owned` | TypeScript or platform standard library types |
-| `mixed` | Finding spans both owned and external code |
-| `unresolved` | Ownership could not be determined |
+| Value                    | Meaning                                               |
+| ------------------------ | ----------------------------------------------------- |
+| `source-owned`           | Code written and maintained in this project           |
+| `workspace-owned`        | Code in a sibling workspace package within a monorepo |
+| `dependency-owned`       | Code originating from an external dependency          |
+| `generated`              | Machine-generated code (codegen, build output)        |
+| `standard-library-owned` | TypeScript or platform standard library types         |
+| `mixed`                  | Finding spans both owned and external code            |
+| `unresolved`             | Ownership could not be determined                     |
 
 Ownership influences fix planning — `source-owned` and `workspace-owned` issues are directly actionable, while `dependency-owned` issues are flagged as `external` fixability.
 
@@ -115,13 +115,13 @@ Ownership influences fix planning — `source-owned` and `workspace-owned` issue
 
 Before building the declaration graph, `typegrade` classifies the package layout to determine the best analysis strategy and avoid unnecessary fallback/degraded results:
 
-| Layout class | Conditions | Behavior |
-|---|---|---|
-| `standard` | Has type entries + 3 or more `.d.ts` files | Normal graph-based analysis |
-| `declaration-sparse` | Has type entries but fewer than 3 `.d.ts` files | Normal analysis with compact-surface handling |
-| `no-declarations` | Zero `.d.ts` files | Degraded result (`missing-declarations`) |
-| `no-types-entry` | Has `.d.ts` files but no `types`/`typings`/`exports` entries | Falls back to analyzing all `.d.ts` files directly |
-| `unsupported-bundler` | Package uses an unsupported bundler output format | Degraded result (`unsupported-package-layout`) |
+| Layout class          | Conditions                                                   | Behavior                                           |
+| --------------------- | ------------------------------------------------------------ | -------------------------------------------------- |
+| `standard`            | Has type entries + 3 or more `.d.ts` files                   | Normal graph-based analysis                        |
+| `declaration-sparse`  | Has type entries but fewer than 3 `.d.ts` files              | Normal analysis with compact-surface handling      |
+| `no-declarations`     | Zero `.d.ts` files                                           | Degraded result (`missing-declarations`)           |
+| `no-types-entry`      | Has `.d.ts` files but no `types`/`typings`/`exports` entries | Falls back to analyzing all `.d.ts` files directly |
+| `unsupported-bundler` | Package uses an unsupported bundler output format            | Degraded result (`unsupported-package-layout`)     |
 
 This classification reduces false degraded results for packages that have usable type information but lack standard `package.json` type entries (e.g., older packages or unconventional layouts).
 
@@ -155,27 +155,27 @@ A **derived index** is also computed once, providing precomputed aggregates (rol
 
 These analyze the public API surface — what downstream consumers and AI agents see.
 
-| Dimension | Key | What it measures |
-|---|---|---|
-| **API Specificity** | `apiSpecificity` | How narrow and specific are exported types? Per-position feature-model scoring with 16 feature bonuses and relation-aware signals. |
-| **API Safety** | `apiSafety` | How much `any` and `unknown` leaks into the public API? Domain-aware: suppresses false positives for validation libraries. |
-| **Semantic Lift** | `semanticLift` | How much do advanced type features lift your API above a widened baseline? Dual-baseline model: lift must exceed both an erased baseline and an instantiation baseline. |
-| **Specialization Power** | `specializationPower` | How well does the API specialize — key-preserving transforms, path-param inference, decode/parse output narrowing, channel propagation? |
-| **Publish Quality** | `publishQuality` | Do exported functions have explicit return types, typed parameters, JSDoc, and proper entrypoint clarity? |
-| **Surface Consistency** | `surfaceConsistency` | Is the API consistent? Checks overload ordering, return type explicitness, naming conventions, nullability patterns, generic naming, result shape consistency. |
-| **Surface Complexity** | `surfaceComplexity` | Is the API approachable? Penalizes deep nesting, wide unions, overload explosion, declaration sprawl, non-conventional generics. |
-| **Agent Usability** | `agentUsability` | Is the API AI-agent-friendly? Checks named exports, discriminated errors, correlated generics, overload clarity, parameter-to-result predictability, inference stability. |
+| Dimension                | Key                   | What it measures                                                                                                                                                          |
+| ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **API Specificity**      | `apiSpecificity`      | How narrow and specific are exported types? Per-position feature-model scoring with 16 feature bonuses and relation-aware signals.                                        |
+| **API Safety**           | `apiSafety`           | How much `any` and `unknown` leaks into the public API? Domain-aware: suppresses false positives for validation libraries.                                                |
+| **Semantic Lift**        | `semanticLift`        | How much do advanced type features lift your API above a widened baseline? Dual-baseline model: lift must exceed both an erased baseline and an instantiation baseline.   |
+| **Specialization Power** | `specializationPower` | How well does the API specialize — key-preserving transforms, path-param inference, decode/parse output narrowing, channel propagation?                                   |
+| **Publish Quality**      | `publishQuality`      | Do exported functions have explicit return types, typed parameters, JSDoc, and proper entrypoint clarity?                                                                 |
+| **Surface Consistency**  | `surfaceConsistency`  | Is the API consistent? Checks overload ordering, return type explicitness, naming conventions, nullability patterns, generic naming, result shape consistency.            |
+| **Surface Complexity**   | `surfaceComplexity`   | Is the API approachable? Penalizes deep nesting, wide unions, overload explosion, declaration sprawl, non-conventional generics.                                          |
+| **Agent Usability**      | `agentUsability`      | Is the API AI-agent-friendly? Checks named exports, discriminated errors, correlated generics, overload clarity, parameter-to-result predictability, inference stability. |
 
 ### Implementation dimensions (4, source mode only)
 
 These analyze your source code directly and are disabled in package mode.
 
-| Dimension | Key | What it measures |
-|---|---|---|
-| **Declaration Fidelity** | `declarationFidelity` | Do emitted `.d.ts` declarations preserve the source types, generic parameters, and constraints? |
-| **Soundness** | `implementationSoundness` | Type assertions (`as any`, `as unknown as X`), non-null assertions, `@ts-ignore` usage. |
-| **Boundary Discipline** | `boundaryDiscipline` | Runtime validation at I/O boundaries (JSON.parse, fetch, file reads). |
-| **Config Discipline** | `configDiscipline` | TypeScript strict mode flags (`strictNullChecks`, `noUncheckedIndexedAccess`, etc.). |
+| Dimension                | Key                       | What it measures                                                                                |
+| ------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Declaration Fidelity** | `declarationFidelity`     | Do emitted `.d.ts` declarations preserve the source types, generic parameters, and constraints? |
+| **Soundness**            | `implementationSoundness` | Type assertions (`as any`, `as unknown as X`), non-null assertions, `@ts-ignore` usage.         |
+| **Boundary Discipline**  | `boundaryDiscipline`      | Runtime validation at I/O boundaries (JSON.parse, fetch, file reads).                           |
+| **Config Discipline**    | `configDiscipline`        | TypeScript strict mode flags (`strictNullChecks`, `noUncheckedIndexedAccess`, etc.).            |
 
 ## Three-layer scoring model
 
@@ -243,6 +243,7 @@ See [Confidence Model](confidence-model.md) for details.
 ### Coverage diagnostics
 
 In package mode, `typegrade` reports:
+
 - **Reachable files**: how many declaration files were found via graph traversal.
 - **Measured positions**: how many type positions were analyzed.
 - **Undersampling**: whether the package has too few declarations for a reliable score.
@@ -254,11 +255,11 @@ Undersampled packages get confidence caps based on severity (0.40 / 0.55 / 0.65 
 
 After all scoring, confidence capping, and validity checks are applied, `normalizeResult` computes a `TrustSummary` that distills the result into one of three trust classifications:
 
-| Classification | Trigger conditions | Consumer guidance |
-|---|---|---|
-| `trusted` | Complete analysis, adequate coverage, `fully-comparable` validity | Safe for ranking, gating, and display |
-| `directional` | Fallback glob, undersampled, `partially-comparable` or `not-comparable` validity | Scores are indicative but should not be used for gating |
-| `abstained` | `degraded`, `invalid-input`, or `unsupported-package` status | No usable scores — do not compare or display |
+| Classification | Trigger conditions                                                               | Consumer guidance                                       |
+| -------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `trusted`      | Complete analysis, adequate coverage, `fully-comparable` validity                | Safe for ranking, gating, and display                   |
+| `directional`  | Fallback glob, undersampled, `partially-comparable` or `not-comparable` validity | Scores are indicative but should not be used for gating |
+| `abstained`    | `degraded`, `invalid-input`, or `unsupported-package` status                     | No usable scores — do not compare or display            |
 
 The trust summary is computed late in the pipeline — after confidence caps, score validity assignment, domain/scenario suppression, and fix batch gating. This ensures it reflects the final state of the result.
 
@@ -297,12 +298,21 @@ export default {
       { name: "internal", paths: ["src/core/**"], trustLevel: "trusted-local" },
     ],
     policies: [
-      { name: "require-fetch-validation", source: "network", requiresValidation: true, severity: "error" },
+      {
+        name: "require-fetch-validation",
+        source: "network",
+        requiresValidation: true,
+        severity: "error",
+      },
     ],
   },
   monorepo: {
     layers: { "@my/api": "app", "@my/core": "domain", "@my/db": "infra" },
-    allowedDependencies: { app: ["domain", "shared"], domain: ["infra", "shared"], infra: ["shared"] },
+    allowedDependencies: {
+      app: ["domain", "shared"],
+      domain: ["infra", "shared"],
+      infra: ["shared"],
+    },
   },
   suppressions: {
     budgets: { "trusted-local-tooling": 10 },
@@ -313,14 +323,14 @@ export default {
 
 **Supported fields:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `domain` | `"auto" \| "off" \| DomainKey` | Override domain detection |
-| `profile` | `AnalysisProfile` | Analysis profile (`library`, `package`, `application`, `autofix-agent`) |
-| `boundaries` | `BoundaryPolicyConfig` | Trust zones and boundary validation policies |
-| `monorepo` | `MonorepoConfig` | Package layer assignments and allowed dependencies |
-| `suppressions` | `SuppressionOverrides` | Suppression budgets and protected categories |
-| `minScore` | `number` | Minimum composite score for CI gate pass |
+| Field          | Type                           | Description                                                             |
+| -------------- | ------------------------------ | ----------------------------------------------------------------------- |
+| `domain`       | `"auto" \| "off" \| DomainKey` | Override domain detection                                               |
+| `profile`      | `AnalysisProfile`              | Analysis profile (`library`, `package`, `application`, `autofix-agent`) |
+| `boundaries`   | `BoundaryPolicyConfig`         | Trust zones and boundary validation policies                            |
+| `monorepo`     | `MonorepoConfig`               | Package layer assignments and allowed dependencies                      |
+| `suppressions` | `SuppressionOverrides`         | Suppression budgets and protected categories                            |
+| `minScore`     | `number`                       | Minimum composite score for CI gate pass                                |
 
 CLI options always take precedence over config file values. Undefined CLI options fall back to config values.
 
@@ -332,18 +342,18 @@ In source mode, `typegrade` performs boundary flow analysis to detect where unva
 
 The analyzer scans source files for data ingress points — call expressions and property accesses that introduce external data:
 
-| Boundary type | Examples |
-|---------------|----------|
-| `network` | `fetch()`, `axios.get()`, HTTP client calls |
-| `filesystem` | `readFile()`, `readFileSync()` |
-| `env` | `process.env.*` access |
-| `config` | Config file reads |
-| `serialization` | `JSON.parse()` |
-| `IPC` | Inter-process communication |
-| `UI-input` | User input from forms or DOM |
-| `queue` | Message queue payloads |
-| `database` | Database query results |
-| `sdk` | Third-party SDK responses |
+| Boundary type   | Examples                                    |
+| --------------- | ------------------------------------------- |
+| `network`       | `fetch()`, `axios.get()`, HTTP client calls |
+| `filesystem`    | `readFile()`, `readFileSync()`              |
+| `env`           | `process.env.*` access                      |
+| `config`        | Config file reads                           |
+| `serialization` | `JSON.parse()`                              |
+| `IPC`           | Inter-process communication                 |
+| `UI-input`      | User input from forms or DOM                |
+| `queue`         | Message queue payloads                      |
+| `database`      | Database query results                      |
+| `sdk`           | Third-party SDK responses                   |
 
 ### Trust level classification
 
@@ -365,12 +375,12 @@ Unvalidated boundaries at `untrusted-external` trust level produce **taint edges
 
 Each taint flow chain carries a `provenance` field classifying the origin of the tainted data:
 
-| Provenance | Description |
-|---|---|
+| Provenance       | Description                                                            |
+| ---------------- | ---------------------------------------------------------------------- |
 | `external-input` | Data originates from outside the system (network requests, user input) |
-| `parsed-data` | Data produced by a deserialization step (`JSON.parse`, config parsing) |
-| `cross-boundary` | Data flowing across a package or trust zone boundary |
-| `internal` | Data from internal sources that crossed an unexpected boundary |
+| `parsed-data`    | Data produced by a deserialization step (`JSON.parse`, config parsing) |
+| `cross-boundary` | Data flowing across a package or trust zone boundary                   |
+| `internal`       | Data from internal sources that crossed an unexpected boundary         |
 
 Provenance helps agents prioritize which taint flows are most critical. `external-input` and `cross-boundary` flows typically require immediate validation, while `internal` flows may be acceptable depending on context.
 
@@ -432,13 +442,13 @@ The `AgentReport` includes:
 
 Each issue is enriched with metadata for fix planning:
 
-| Field | Description |
-|-------|-------------|
-| `rootCauseCategory` | Why the issue exists (e.g., `weak-type`, `unsafe-cast`, `boundary-leak`) |
-| `suggestedFixKind` | Recommended fix approach (e.g., `add-type-annotation`, `replace-any`, `wrap-json-parse`) |
-| `fixability` | How directly fixable: `direct`, `indirect`, `external`, `not_actionable` |
-| `ownership` | Who owns the code: `source-owned`, `dependency-owned`, `generated`, etc. |
-| `agentPriority` | Priority for agent consumption (0-100, higher = more important) |
+| Field               | Description                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| `rootCauseCategory` | Why the issue exists (e.g., `weak-type`, `unsafe-cast`, `boundary-leak`)                 |
+| `suggestedFixKind`  | Recommended fix approach (e.g., `add-type-annotation`, `replace-any`, `wrap-json-parse`) |
+| `fixability`        | How directly fixable: `direct`, `indirect`, `external`, `not_actionable`                 |
+| `ownership`         | Who owns the code: `source-owned`, `dependency-owned`, `generated`, etc.                 |
+| `agentPriority`     | Priority for agent consumption (0-100, higher = more important)                          |
 
 ### Fix batching
 
@@ -487,9 +497,9 @@ interface VerificationPlan {
 }
 
 interface VerificationCommand {
-  command: string;       // e.g. "tsc --noEmit"
-  description: string;   // e.g. "Type-check without emitting"
-  mustPass: boolean;      // Whether this command must succeed for the fix to be accepted
+  command: string; // e.g. "tsc --noEmit"
+  description: string; // e.g. "Type-check without emitting"
+  mustPass: boolean; // Whether this command must succeed for the fix to be accepted
 }
 ```
 
@@ -499,12 +509,12 @@ Commands with `mustPass: true` are mandatory gates — if they fail after applyi
 
 In source and self analysis modes, issues receive priority boosts to surface the most actionable findings first:
 
-| Signal | Priority boost |
-|---|---|
-| `source-owned` ownership | +20 |
-| Exported-surface dimension (`apiSpecificity`, `semanticLift`) | +15 |
-| Declaration-affecting fix kind (`add-type-annotation`, `replace-any`, `strengthen-generic`) | +10 |
-| Directly fixable (`fixability: "direct"`) | +10 |
+| Signal                                                                                      | Priority boost |
+| ------------------------------------------------------------------------------------------- | -------------- |
+| `source-owned` ownership                                                                    | +20            |
+| Exported-surface dimension (`apiSpecificity`, `semanticLift`)                               | +15            |
+| Declaration-affecting fix kind (`add-type-annotation`, `replace-any`, `strengthen-generic`) | +10            |
+| Directly fixable (`fixability: "direct"`)                                                   | +10            |
 
 These boosts are additive. A source-owned issue on an exported-surface dimension with a direct fix receives up to +55 priority, ensuring it surfaces at the top of the agent's work queue.
 
@@ -534,12 +544,12 @@ allowedDependencies: {
 
 Violations are classified as:
 
-| Violation type | Description |
-|---------------|-------------|
-| `forbidden-cross-layer` | Import from a layer not in the allowed list |
-| `infra-bypass` | App layer importing infra directly, bypassing domain |
-| `unstable-leak` | Stable layer depending on an unstable layer |
-| `trust-zone-crossing` | Data flow crossing trust zone boundaries |
+| Violation type          | Description                                          |
+| ----------------------- | ---------------------------------------------------- |
+| `forbidden-cross-layer` | Import from a layer not in the allowed list          |
+| `infra-bypass`          | App layer importing infra directly, bypassing domain |
+| `unstable-leak`         | Stable layer depending on an unstable layer          |
+| `trust-zone-crossing`   | Data flow crossing trust zone boundaries             |
 
 The monorepo report includes `analysisSchemaVersion`, the package list with layers, all violations, the layer dependency graph, and an optional `MonorepoHealthSummary` with:
 
@@ -575,8 +585,8 @@ Each candidate receives a `MigrationRiskReport` with risk levels (`low`, `medium
 ### Programmatic API
 
 ```typescript
-import { fitCompare } from 'typegrade';
-const result = fitCompare('zod', 'valibot', { codebasePath: './my-app' });
+import { fitCompare } from "typegrade";
+const result = fitCompare("zod", "valibot", { codebasePath: "./my-app" });
 console.log(result.adoptionDecision.outcome, result.adoptionDecision.winner);
 ```
 

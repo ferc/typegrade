@@ -2,7 +2,39 @@
   "name": "typegrade",
   "version": "0.13.0",
   "description": "TypeScript type-safety and precision analyzer for the AI agent era",
+  "keywords": [
+    "ai-agents",
+    "analyzer",
+    "linter",
+    "quality",
+    "type-safety",
+    "types",
+    "typescript"
+  ],
+  "homepage": "https://github.com/ferc/typegrade#readme",
+  "bugs": {
+    "url": "https://github.com/ferc/typegrade/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferc/typegrade.git"
+  },
+  "bin": {
+    "intent": "./bin/intent.js",
+    "typegrade": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "bin",
+    "!skills/_artifacts",
+    "!dist/*.map",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -37,20 +69,9 @@
       }
     }
   },
-  "bin": {
-    "typegrade": "./dist/bin.js",
-    "intent": "./bin/intent.js"
+  "publishConfig": {
+    "access": "public"
   },
-  "files": [
-    "dist",
-    "skills",
-    "bin",
-    "!skills/_artifacts",
-    "!dist/*.map",
-    "README.md",
-    "LICENSE"
-  ],
-  "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -122,27 +143,6 @@
   "engines": {
     "node": ">=18"
   },
-  "publishConfig": {
-    "access": "public"
-  },
-  "keywords": [
-    "typescript",
-    "type-safety",
-    "analyzer",
-    "linter",
-    "types",
-    "quality",
-    "ai-agents"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ferc/typegrade.git"
-  },
-  "homepage": "https://github.com/ferc/typegrade#readme",
-  "bugs": {
-    "url": "https://github.com/ferc/typegrade/issues"
-  },
-  "license": "MIT",
   "packageManager": "pnpm@10.13.1",
   "pnpm": {
     "onlyBuiltDependencies": [

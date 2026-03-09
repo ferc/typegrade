@@ -1,7 +1,13 @@
 {
   "packages": {
     "elite": ["zod@3.24.2", "valibot@1.0.0", "ts-pattern@5.6.2", "arktype@2.1.0", "effect@3.14.8"],
-    "solid": ["date-fns@4.1.0", "remeda@2.21.2", "neverthrow@8.2.0", "type-fest@4.35.0", "drizzle-orm@0.39.3"],
+    "solid": [
+      "date-fns@4.1.0",
+      "remeda@2.21.2",
+      "neverthrow@8.2.0",
+      "type-fest@4.35.0",
+      "drizzle-orm@0.39.3"
+    ],
     "loose": [
       { "spec": "express@5.1.0", "typesVersion": "5.0.6" },
       { "spec": "lodash@4.17.21", "typesVersion": "4.17.24" },
@@ -9,12 +15,13 @@
       "uuid@11.1.0",
       { "spec": "moment@2.30.1", "typesVersion": "2.30.5" }
     ],
-    "stretch": ["fp-ts@2.16.9", "io-ts@2.2.22", "rxjs@7.8.2", "hono@4.7.5", "@tanstack/react-router@1.114.3"],
-    "stretch-2": [
-      "kysely@0.27.6",
-      "xstate@5.19.4",
-      "superstruct@2.0.2",
-      "runtypes@6.7.0"
-    ]
+    "stretch": [
+      "fp-ts@2.16.9",
+      "io-ts@2.2.22",
+      "rxjs@7.8.2",
+      "hono@4.7.5",
+      "@tanstack/react-router@1.114.3"
+    ],
+    "stretch-2": ["kysely@0.27.6", "xstate@5.19.4", "superstruct@2.0.2", "runtypes@6.7.0"]
   }
 }

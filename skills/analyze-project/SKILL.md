@@ -226,22 +226,22 @@ cannot see. The scores are structurally different and not comparable.
 Wrong:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade analyze . --json').toString());
+const result = JSON.parse(execSync("npx typegrade analyze . --json").toString());
 if (result.composites[0].score < 60) {
-  throw new Error('Type quality too low');
+  throw new Error("Type quality too low");
 }
 ```
 
 Correct:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade analyze . --json').toString());
-if (result.status !== 'complete') {
+const result = JSON.parse(execSync("npx typegrade analyze . --json").toString());
+if (result.status !== "complete") {
   console.warn(`Analysis degraded: ${result.degradedReason}`);
 }
 const composite = result.globalScores.consumerApi;
 if (composite.score < 60 && (result.confidenceSummary?.sampleCoverage ?? 0) >= 0.5) {
-  throw new Error('Type quality too low');
+  throw new Error("Type quality too low");
 }
 // If sampleCoverage < 0.5, the score is indicative only
 ```

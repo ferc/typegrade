@@ -4,12 +4,21 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS } from "./assertions.js";
 import { flattenManifest, loadManifest } from "./split-loader.js";
-import { formatCIDetail, formatCILowerDetail, wilsonLowerBound, wilsonUpperBound } from "./stats.js";
+import {
+  formatCIDetail,
+  formatCILowerDetail,
+  wilsonLowerBound,
+  wilsonUpperBound,
+} from "./stats.js";
 
 const args = process.argv.slice(2);
 const evalMode = args.includes("--eval");
 const holdoutMode = args.includes("--holdout");
-const gateMode: "train" | "holdout" | "eval" = evalMode ? "eval" : holdoutMode ? "holdout" : "train";
+const gateMode: "train" | "holdout" | "eval" = evalMode
+  ? "eval"
+  : holdoutMode
+    ? "holdout"
+    : "train";
 
 interface GateResult {
   gate: string;
@@ -33,7 +42,11 @@ function runGate(name: string, fn: () => { passed: boolean; detail: string }): G
   }
 }
 
-function execCheck(cmd: string, cwd: string, timeoutMs = 120_000): { success: boolean; output: string } {
+function execCheck(
+  cmd: string,
+  cwd: string,
+  timeoutMs = 120_000,
+): { success: boolean; output: string } {
   try {
     const output = execSync(cmd, { cwd, encoding: "utf8", stdio: "pipe", timeout: timeoutMs });
     return { output, success: true };
@@ -79,7 +92,10 @@ function runTrainGates(): GateResult[] {
   gates.push(
     runGate("build", () => {
       const { success, output } = execCheck("pnpm build", projectRoot);
-      return { detail: success ? "Build succeeded" : `Build failed: ${output.slice(0, 200)}`, passed: success };
+      return {
+        detail: success ? "Build succeeded" : `Build failed: ${output.slice(0, 200)}`,
+        passed: success,
+      };
     }),
   );
 
@@ -106,13 +122,15 @@ function runTrainGates(): GateResult[] {
     return gates;
   }
 
-  const summary = snapshot["summary"] as {
-    mustPass?: { passed: number; failed: number; total: number };
-    hardDiagnostic?: { passed: number; failed: number; total: number };
-    diagnostic?: { passed: number; failed: number; total: number };
-    fallbackGlobCount?: number;
-    undersampledAnchorCount?: number;
-  } | undefined;
+  const summary = snapshot["summary"] as
+    | {
+        mustPass?: { passed: number; failed: number; total: number };
+        hardDiagnostic?: { passed: number; failed: number; total: number };
+        diagnostic?: { passed: number; failed: number; total: number };
+        fallbackGlobCount?: number;
+        undersampledAnchorCount?: number;
+      }
+    | undefined;
 
   // Gate 3: Must-pass
   gates.push(
@@ -129,7 +147,10 @@ function runTrainGates(): GateResult[] {
       const hd = summary?.hardDiagnostic;
       if (!hd) return { detail: "No hard-diagnostic data", passed: true };
       const rate = hd.total > 0 ? hd.passed / hd.total : 1;
-      return { detail: `${hd.passed}/${hd.total} (${(rate * 100).toFixed(1)}%)`, passed: rate >= 0.95 };
+      return {
+        detail: `${hd.passed}/${hd.total} (${(rate * 100).toFixed(1)}%)`,
+        passed: rate >= 0.95,
+      };
     }),
   );
 
@@ -139,7 +160,10 @@ function runTrainGates(): GateResult[] {
       const diag = summary?.diagnostic;
       if (!diag) return { detail: "No diagnostic data", passed: true };
       const rate = diag.total > 0 ? diag.passed / diag.total : 1;
-      return { detail: `${diag.passed}/${diag.total} (${(rate * 100).toFixed(1)}%)`, passed: rate >= 0.9 };
+      return {
+        detail: `${diag.passed}/${diag.total} (${(rate * 100).toFixed(1)}%)`,
+        passed: rate >= 0.9,
+      };
     }),
   );
 
@@ -151,16 +175,27 @@ function runTrainGates(): GateResult[] {
       const evaluated = assertions.filter((a) => a.result !== "skip");
       const failed = evaluated.filter((a) => a.result === "fail");
       const loss = evaluated.length > 0 ? failed.length / evaluated.length : 0;
-      return { detail: `${(loss * 100).toFixed(1)}% (${failed.length}/${evaluated.length})`, passed: loss < 0.06 };
+      return {
+        detail: `${(loss * 100).toFixed(1)}% (${failed.length}/${evaluated.length})`,
+        passed: loss < 0.06,
+      };
     }),
   );
 
   // Gate 7: False equivalence
   gates.push(
     runGate("false-equivalence-=0", () => {
-      const entries = snapshot["entries"] as { name: string; tier: string; consumerApi: number | null }[] | undefined;
+      const entries = snapshot["entries"] as
+        | { name: string; tier: string; consumerApi: number | null }[]
+        | undefined;
       if (!entries) return { detail: "No entry data", passed: false };
-      const tierOrder: Record<string, number> = { elite: 4, loose: 1, solid: 3, stretch: 2, "stretch-2": 2 };
+      const tierOrder: Record<string, number> = {
+        elite: 4,
+        loose: 1,
+        solid: 3,
+        stretch: 2,
+        "stretch-2": 2,
+      };
       let feCount = 0;
       for (let i = 0; i < entries.length; i++) {
         for (let j = i + 1; j < entries.length; j++) {
@@ -195,9 +230,13 @@ function runTrainGates(): GateResult[] {
   // Gate 10: Domain accuracy — wrong-specific rate
   gates.push(
     runGate("wrong-specific-domain-<10%", () => {
-      const domainAcc = snapshot["domainAccuracy"] as { wrongSpecificRate?: number; correct?: number; total?: number } | undefined;
+      const domainAcc = snapshot["domainAccuracy"] as
+        | { wrongSpecificRate?: number; correct?: number; total?: number }
+        | undefined;
       if (!domainAcc || !domainAcc.total) {
-        const entries = snapshot["entries"] as { name: string; domainInference?: { domain: string } }[] | undefined;
+        const entries = snapshot["entries"] as
+          | { name: string; domainInference?: { domain: string } }[]
+          | undefined;
         if (!entries) return { detail: "No data", passed: true };
         let wrong = 0;
         let total = 0;
@@ -221,11 +260,13 @@ function runTrainGates(): GateResult[] {
   // Gate 11: Domain accuracy — correct rate (including "general" matches)
   gates.push(
     runGate("domain-accuracy->=90%", () => {
-      const domainAcc = snapshot["domainAccuracy"] as { accuracy?: number; correct?: number; total?: number } | undefined;
+      const domainAcc = snapshot["domainAccuracy"] as
+        | { accuracy?: number; correct?: number; total?: number }
+        | undefined;
       if (!domainAcc || !domainAcc.total) {
         return { detail: "No domain data", passed: true };
       }
-      const rate = domainAcc.accuracy ?? (domainAcc.correct! / domainAcc.total!);
+      const rate = domainAcc.accuracy ?? domainAcc.correct! / domainAcc.total!;
       return { detail: `${(rate * 100).toFixed(1)}%`, passed: rate >= 0.9 };
     }),
   );
@@ -233,7 +274,9 @@ function runTrainGates(): GateResult[] {
   // Gate 12: Scenario assertions — all must pass
   gates.push(
     runGate("scenario-assertions-100%", () => {
-      const scenAssertions = snapshot["scenarioAssertions"] as { passed?: number; failed?: number; total?: number } | undefined;
+      const scenAssertions = snapshot["scenarioAssertions"] as
+        | { passed?: number; failed?: number; total?: number }
+        | undefined;
       if (!scenAssertions || !scenAssertions.total) {
         return { detail: "No scenario assertions", passed: true };
       }
@@ -248,12 +291,14 @@ function runTrainGates(): GateResult[] {
   // Packages scoring >=75 should have confidence >= 0.65
   gates.push(
     runGate("score-confidence-coherence", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        consumerApi: number | null;
-        confidenceSummary?: { sampleCoverage: number } | null;
-        coverageDiagnostics?: { samplingClass?: string; undersampled?: boolean } | null;
-      }[] | undefined;
+      const entries = snapshot["entries"] as
+        | {
+            name: string;
+            consumerApi: number | null;
+            confidenceSummary?: { sampleCoverage: number } | null;
+            coverageDiagnostics?: { samplingClass?: string; undersampled?: boolean } | null;
+          }[]
+        | undefined;
       if (!entries) return { detail: "No entry data", passed: true };
 
       let violations = 0;
@@ -283,10 +328,12 @@ function runTrainGates(): GateResult[] {
   // TODO: Once the snapshot persists `applicability`, make this gate strict.
   gates.push(
     runGate("applicability-coherence", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        dimensions?: { key: string; score: number | null; confidence: number | null }[];
-      }[] | undefined;
+      const entries = snapshot["entries"] as
+        | {
+            name: string;
+            dimensions?: { key: string; score: number | null; confidence: number | null }[];
+          }[]
+        | undefined;
       if (!entries) return { detail: "No entry data", passed: true };
 
       let violations = 0;
@@ -311,12 +358,14 @@ function runTrainGates(): GateResult[] {
   // domain "general" or a mismatched domain indicates the scorer is over-applying scenarios.
   gates.push(
     runGate("scenario-misapplication-=0", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        domain?: string | null;
-        domainInference?: { domain: string } | null;
-        scenarioScore?: { domain?: string; score: number } | null;
-      }[] | undefined;
+      const entries = snapshot["entries"] as
+        | {
+            name: string;
+            domain?: string | null;
+            domainInference?: { domain: string } | null;
+            scenarioScore?: { domain?: string; score: number } | null;
+          }[]
+        | undefined;
       if (!entries) return { detail: "No entry data", passed: true };
 
       let misapplied = 0;
@@ -343,12 +392,14 @@ function runTrainGates(): GateResult[] {
   // Checks both graphStats.installError (legacy) AND absorbed install-failure degradations.
   gates.push(
     runGate("installability-=0", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        graphStats?: { installError?: string | null } | null;
-        status?: string;
-        degradedCategory?: string | null;
-      }[] | undefined;
+      const entries = snapshot["entries"] as
+        | {
+            name: string;
+            graphStats?: { installError?: string | null } | null;
+            status?: string;
+            degradedCategory?: string | null;
+          }[]
+        | undefined;
       if (!entries) return { detail: "No entry data", passed: true };
 
       let legacyFailures = 0;
@@ -366,9 +417,10 @@ function runTrainGates(): GateResult[] {
       const thrownCount = explicitFailures?.length ?? 0;
       const totalFailures = legacyFailures + absorbedFailures + thrownCount;
 
-      const detail = absorbedFailures > 0 || thrownCount > 0
-        ? `${totalFailures} install failure(s) (${legacyFailures} legacy, ${absorbedFailures} degraded, ${thrownCount} thrown)`
-        : `${totalFailures} install failure(s)`;
+      const detail =
+        absorbedFailures > 0 || thrownCount > 0
+          ? `${totalFailures} install failure(s) (${legacyFailures} legacy, ${absorbedFailures} degraded, ${thrownCount} thrown)`
+          : `${totalFailures} install failure(s)`;
       return {
         detail,
         passed: totalFailures === 0,
@@ -412,12 +464,14 @@ function runTrainGates(): GateResult[] {
   // indicates the scorer is applying scenarios too aggressively.
   gates.push(
     runGate("scenario-overreach-<5%", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        domain?: string | null;
-        domainInference?: { domain: string; confidence?: number } | null;
-        scenarioScore?: { domain?: string; score: number } | null;
-      }[] | undefined;
+      const entries = snapshot["entries"] as
+        | {
+            name: string;
+            domain?: string | null;
+            domainInference?: { domain: string; confidence?: number } | null;
+            scenarioScore?: { domain?: string; score: number } | null;
+          }[]
+        | undefined;
       if (!entries) return { detail: "No entry data", passed: true };
 
       let overreach = 0;
@@ -429,7 +483,10 @@ function runTrainGates(): GateResult[] {
         const scenDomain = en.scenarioScore.domain;
         const domainConfidence = en.domainInference?.confidence ?? 0;
         // Overreach: scenario applied to wrong domain or low-confidence domain detection
-        if ((scenDomain && scenDomain !== pkgDomain) || (pkgDomain === "general" && domainConfidence < 0.5)) {
+        if (
+          (scenDomain && scenDomain !== pkgDomain) ||
+          (pkgDomain === "general" && domainConfidence < 0.5)
+        ) {
           overreach++;
         }
       }
@@ -509,7 +566,9 @@ function runTrainGates(): GateResult[] {
         }
 
         // Check stop conditions are well-formed
-        const stops = report.stopConditions as { kind: string; met: boolean; reason: string }[] | undefined;
+        const stops = report.stopConditions as
+          | { kind: string; met: boolean; reason: string }[]
+          | undefined;
         if (stops && stops.length > 0) {
           for (const sc of stops) {
             if (!sc.kind || typeof sc.met !== "boolean" || !sc.reason) {
@@ -555,12 +614,23 @@ function runEvalGates(): GateResult[] {
   const summary = findLatestEvalSummary();
   if (!summary) {
     console.log("WARNING: No eval summary found. Run 'pnpm benchmark:judge' first.\n");
-    return [{ detail: "No eval summary", durationMs: 0, gate: "eval-summary-exists", passed: false }];
+    return [
+      { detail: "No eval summary", durationMs: 0, gate: "eval-summary-exists", passed: false },
+    ];
   }
 
-  const evalGates = (summary as any).gates as { gate: string; passed: boolean; detail: string }[] | undefined;
+  const evalGates = (summary as any).gates as
+    | { gate: string; passed: boolean; detail: string }[]
+    | undefined;
   if (!evalGates) {
-    return [{ detail: "No gates in eval summary", durationMs: 0, gate: "eval-gates-present", passed: false }];
+    return [
+      {
+        detail: "No gates in eval summary",
+        durationMs: 0,
+        gate: "eval-gates-present",
+        passed: false,
+      },
+    ];
   }
 
   for (const eg of evalGates) {
@@ -582,7 +652,14 @@ function runHoldoutGates(): GateResult[] {
   const snapshot = findLatestSnapshot("holdout");
   if (!snapshot) {
     console.log("WARNING: No holdout snapshot found. Run 'pnpm benchmark:holdout' first.\n");
-    return [{ detail: "No holdout snapshot", durationMs: 0, gate: "holdout-snapshot-exists", passed: false }];
+    return [
+      {
+        detail: "No holdout snapshot",
+        durationMs: 0,
+        gate: "holdout-snapshot-exists",
+        passed: false,
+      },
+    ];
   }
 
   const gates: GateResult[] = [];
@@ -615,7 +692,8 @@ function runHoldoutGates(): GateResult[] {
       let violations = 0;
       for (const en of entries) {
         const isDegraded = en.status === "degraded";
-        const hasNumericScores = en.consumerApi !== null || en.agentReadiness !== null || en.typeSafety !== null;
+        const hasNumericScores =
+          en.consumerApi !== null || en.agentReadiness !== null || en.typeSafety !== null;
         if (isDegraded && hasNumericScores) {
           violations++;
         }
@@ -649,9 +727,10 @@ function runHoldoutGates(): GateResult[] {
         (en) => en.status === "degraded" && en.degradedCategory === "install-failure",
       ).length;
       const totalCount = explicitCount + absorbedCount;
-      const detail = absorbedCount > 0
-        ? `${totalCount} install failure(s) (${explicitCount} thrown, ${absorbedCount} degraded)`
-        : `${totalCount} install failure(s)`;
+      const detail =
+        absorbedCount > 0
+          ? `${totalCount} install failure(s) (${explicitCount} thrown, ${absorbedCount} degraded)`
+          : `${totalCount} install failure(s)`;
       return { detail, passed: totalCount === 0 };
     }),
   );
@@ -673,9 +752,14 @@ function runHoldoutGates(): GateResult[] {
   // Gate H5: Schema consistency
   gates.push(
     runGate("holdout-schema-consistency", () => {
-      const qg = snapshot["qualityGates"] as { schemaConsistent?: boolean; schemaVersions?: string[] } | undefined;
+      const qg = snapshot["qualityGates"] as
+        | { schemaConsistent?: boolean; schemaVersions?: string[] }
+        | undefined;
       const consistent = qg?.schemaConsistent ?? true;
-      return { detail: consistent ? "consistent" : `multiple: ${qg?.schemaVersions?.join(", ")}`, passed: consistent };
+      return {
+        detail: consistent ? "consistent" : `multiple: ${qg?.schemaVersions?.join(", ")}`,
+        passed: consistent,
+      };
     }),
   );
 
@@ -696,8 +780,12 @@ function runHoldoutGates(): GateResult[] {
   gates.push(
     runGate("holdout-manifest-preflight", () => {
       const preflight = snapshot["manifestPreflightPassed"] as boolean | undefined;
-      if (preflight === undefined) return { detail: "No pre-flight data (legacy snapshot)", passed: true };
-      return { detail: preflight ? "all specs resolved" : "some specs failed resolution", passed: preflight };
+      if (preflight === undefined)
+        return { detail: "No pre-flight data (legacy snapshot)", passed: true };
+      return {
+        detail: preflight ? "all specs resolved" : "some specs failed resolution",
+        passed: preflight,
+      };
     }),
   );
 
@@ -707,7 +795,12 @@ function runHoldoutGates(): GateResult[] {
 function main() {
   console.log(`=== typegrade Gate Check (${gateMode}) ===\n`);
 
-  const gates = gateMode === "eval" ? runEvalGates() : gateMode === "holdout" ? runHoldoutGates() : runTrainGates();
+  const gates =
+    gateMode === "eval"
+      ? runEvalGates()
+      : gateMode === "holdout"
+        ? runHoldoutGates()
+        : runTrainGates();
 
   // Print results
   console.log("=== Gate Results ===\n");
@@ -726,11 +819,27 @@ function main() {
   const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
-  const reportFilename = gateMode === "eval" ? "gate-eval-report.json" : gateMode === "holdout" ? "gate-holdout-report.json" : "gate-report.json";
+  const reportFilename =
+    gateMode === "eval"
+      ? "gate-eval-report.json"
+      : gateMode === "holdout"
+        ? "gate-holdout-report.json"
+        : "gate-report.json";
   const reportPath = join(outputDir, reportFilename);
   writeFileSync(
     reportPath,
-    JSON.stringify({ allPassed, gateMode, gates, passedCount, timestamp: new Date().toISOString(), totalGates: gates.length }, null, 2),
+    JSON.stringify(
+      {
+        allPassed,
+        gateMode,
+        gates,
+        passedCount,
+        timestamp: new Date().toISOString(),
+        totalGates: gates.length,
+      },
+      null,
+      2,
+    ),
   );
   console.log(`\nGate report saved to benchmarks-output/${reportFilename}`);
 

@@ -205,22 +205,22 @@ project improves. Scores above 85 require elite type discipline.
 Wrong:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade score pkg --json').toString());
+const result = JSON.parse(execSync("npx typegrade score pkg --json").toString());
 if (result.domainScore?.score < 50) {
-  throw new Error('Domain quality too low');
+  throw new Error("Domain quality too low");
 }
 ```
 
 Correct:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade score pkg --json').toString());
+const result = JSON.parse(execSync("npx typegrade score pkg --json").toString());
 // Degraded results have domainScore stripped (undefined)
 // Low-confidence results (< 0.5) also strip domainScore
 if (result.domainScore) {
   // Only present on complete, sufficiently-confident results
   if (result.domainScore.score < 50) {
-    throw new Error('Domain quality too low');
+    throw new Error("Domain quality too low");
   }
 }
 ```

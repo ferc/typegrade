@@ -176,10 +176,7 @@ function loadBaseline(): PerfBaseline | null {
   return null;
 }
 
-function compareWithBaseline(
-  results: PerfResult[],
-  baseline: PerfBaseline,
-): PerfComparison[] {
+function compareWithBaseline(results: PerfResult[], baseline: PerfBaseline): PerfComparison[] {
   const comparisons: PerfComparison[] = [];
   for (const result of results) {
     const baseResult = baseline.results.find((br) => br.name === result.name);

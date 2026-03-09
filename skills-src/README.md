@@ -11,6 +11,7 @@ Maintainer authoring layer for typegrade Intent skills.
 ## How shipped skills are derived
 
 Shipped skills in `skills/` are authored from these sources:
+
 - `README.md` — CLI examples, score interpretation, quickstart
 - `docs/` — scoring contract, confidence model, how-it-works
 - `src/cli.ts` — CLI command definitions and flags

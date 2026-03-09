@@ -10,7 +10,13 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BenchmarkManifestV2, BenchmarkSplit, ManifestEntry, ManifestEntryV2, RandomSampleSpec } from "./types.js";
+import type {
+  BenchmarkManifestV2,
+  BenchmarkSplit,
+  ManifestEntry,
+  ManifestEntryV2,
+  RandomSampleSpec,
+} from "./types.js";
 
 const BENCHMARKS_DIR = import.meta.dirname;
 
@@ -23,12 +29,7 @@ const MANIFEST_FILES: Record<BenchmarkSplit, string> = {
 };
 
 /** Forbidden manifest patterns for optimizer/calibrator code */
-const OPTIMIZER_FORBIDDEN_PATTERNS = [
-  "eval.fixed",
-  "eval.pool",
-  "eval-raw",
-  "eval-summary",
-];
+const OPTIMIZER_FORBIDDEN_PATTERNS = ["eval.fixed", "eval.pool", "eval-raw", "eval-summary"];
 
 // ─── Manifest Loading ──────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ export function flattenManifest(manifest: BenchmarkManifestV2): FlatEntry[] {
 /** Seeded PRNG (mulberry32) for reproducible sampling */
 function mulberry32(a: number) {
   return () => {
-    let t = (a += 0x6D2B79F5);
+    let t = (a += 0x6d2b79f5);
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -151,7 +152,10 @@ function stratKey(entry: NormalizedEntry): string {
  * Sampling is stratified by proxyFamily, sizeBand, and typesSourceHint
  * to ensure diversity across domain, surface size, and type source.
  */
-export function samplePool(manifest: BenchmarkManifestV2, spec: RandomSampleSpec): {
+export function samplePool(
+  manifest: BenchmarkManifestV2,
+  spec: RandomSampleSpec,
+): {
   sampled: FlatEntry[];
   manifestHash: string;
   sampledHashes: string[];
@@ -251,7 +255,9 @@ export interface ManifestValidationError {
  * Checks that every spec has an explicit version (no "latest" or bare names).
  * Returns an array of validation errors (empty = valid).
  */
-export function validateManifestStructure(manifest: BenchmarkManifestV2): ManifestValidationError[] {
+export function validateManifestStructure(
+  manifest: BenchmarkManifestV2,
+): ManifestValidationError[] {
   const errors: ManifestValidationError[] = [];
   const seen = new Set<string>();
 
@@ -270,7 +276,11 @@ export function validateManifestStructure(manifest: BenchmarkManifestV2): Manife
       }
 
       if (!isValidPackageSpec(spec)) {
-        errors.push({ reason: "Spec must be name@version (no bare names or 'latest')", spec, tier });
+        errors.push({
+          reason: "Spec must be name@version (no bare names or 'latest')",
+          spec,
+          tier,
+        });
         continue;
       }
 
@@ -296,7 +306,7 @@ export function assertTrainOnly(callerFile: string): void {
     if (callerContent.includes(pattern)) {
       throw new Error(
         `Quarantine violation: ${callerFile} references eval pattern '${pattern}'. ` +
-        `Optimizer/calibrator code must only access train data.`,
+          `Optimizer/calibrator code must only access train data.`,
       );
     }
   }
@@ -306,7 +316,10 @@ export function assertTrainOnly(callerFile: string): void {
  * Validate that a manifest file belongs to the expected split.
  * Prevents accidental cross-split loading.
  */
-export function validateManifestSplit(manifest: BenchmarkManifestV2, expectedSplit: BenchmarkSplit): void {
+export function validateManifestSplit(
+  manifest: BenchmarkManifestV2,
+  expectedSplit: BenchmarkSplit,
+): void {
   if (manifest.split && manifest.split !== expectedSplit) {
     throw new Error(
       `Split mismatch: expected '${expectedSplit}' but manifest declares '${manifest.split}'`,

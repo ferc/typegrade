@@ -43,47 +43,47 @@ The JSON output is an `AnalysisResult` object. Here are the stable fields:
 ```typescript
 interface AnalysisResult {
   // --- Mandatory envelope fields (always present) ---
-  analysisSchemaVersion: string;   // e.g. "0.13.0"
-  status: AnalysisStatus;         // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
-  scoreValidity: ScoreValidity;   // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
-  degradedReason?: string;        // Present when status is 'degraded'
+  analysisSchemaVersion: string; // e.g. "0.13.0"
+  status: AnalysisStatus; // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
+  scoreValidity: ScoreValidity; // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
+  degradedReason?: string; // Present when status is 'degraded'
   degradedCategory?: DegradedCategory; // Classifies why analysis degraded
 
-  mode: 'source' | 'package';
-  scoreProfile: 'source-project' | 'published-declarations';
+  mode: "source" | "package";
+  scoreProfile: "source-project" | "published-declarations";
   projectName: string;
   filesAnalyzed: number;
   timeMs: number;
 
   // --- Always-present structured fields ---
-  composites: CompositeScore[];      // Three global composites
-  globalScores: GlobalScores;        // Structured access to the same three composites
-  profileInfo: ProfileInfo;          // Detected/overridden profile with confidence
-  packageIdentity: PackageIdentity;  // Always present (both modes)
-  dimensions: DimensionResult[];     // Per-dimension scores
-  topIssues: Issue[];                // Top issues sorted by fixability then severity
+  composites: CompositeScore[]; // Three global composites
+  globalScores: GlobalScores; // Structured access to the same three composites
+  profileInfo: ProfileInfo; // Detected/overridden profile with confidence
+  packageIdentity: PackageIdentity; // Always present (both modes)
+  dimensions: DimensionResult[]; // Per-dimension scores
+  topIssues: Issue[]; // Top issues sorted by fixability then severity
 
   // --- Optional layer scores ---
-  domainScore?: DomainScore;       // Present when domain detected or overridden
-  scenarioScore?: ScenarioScore;   // Present when a scenario pack applies
+  domainScore?: DomainScore; // Present when domain detected or overridden
+  scenarioScore?: ScenarioScore; // Present when a scenario pack applies
 
   // --- Always-present diagnostics ---
-  confidenceSummary: ConfidenceSummary;    // Confidence signals (always present)
+  confidenceSummary: ConfidenceSummary; // Confidence signals (always present)
   coverageDiagnostics: CoverageDiagnostics; // Coverage and sampling info (always present)
-  evidenceSummary: EvidenceSummary;         // Evidence quality (always present)
+  evidenceSummary: EvidenceSummary; // Evidence quality (always present)
 
   // --- Trust contract ---
-  trustSummary?: TrustSummary;               // Trust classification for the result
+  trustSummary?: TrustSummary; // Trust classification for the result
   resolutionDiagnostics?: ResolutionDiagnostics; // Acquisition pipeline trace
 
   // --- Optional analysis extras ---
-  boundaryQuality?: BoundaryQualityScore;  // Source mode
-  boundarySummary?: BoundarySummary;        // Source mode
-  boundaryHotspots?: BoundaryHotspot[];     // Ranked unvalidated boundaries (source mode)
+  boundaryQuality?: BoundaryQualityScore; // Source mode
+  boundarySummary?: BoundarySummary; // Source mode
+  boundaryHotspots?: BoundaryHotspot[]; // Ranked unvalidated boundaries (source mode)
   boundaryRecommendedFixes?: BoundaryRecommendedFix[]; // Concrete fixes for hotspots (source mode)
-  recommendations?: Recommendation[];       // Actionable recommendations (source mode)
-  noiseSummary?: NoiseSummary;              // Signal hygiene breakdown (always present)
-  autofixSummary?: AutofixSummary;          // Agent mode
+  recommendations?: Recommendation[]; // Actionable recommendations (source mode)
+  noiseSummary?: NoiseSummary; // Signal hygiene breakdown (always present)
+  autofixSummary?: AutofixSummary; // Agent mode
 }
 ```
 
@@ -105,10 +105,10 @@ interface AnalysisResult {
 
 ```typescript
 interface CompositeScore {
-  key: 'consumerApi' | 'agentReadiness' | 'typeSafety';
+  key: "consumerApi" | "agentReadiness" | "typeSafety";
   score: number | null; // 0-100, null when degraded
-  grade: Grade;         // 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' | 'N/A'
-  confidence: number;   // 0-1
+  grade: Grade; // 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' | 'N/A'
+  confidence: number; // 0-1
 }
 ```
 
@@ -129,9 +129,9 @@ the `composites` array. Equivalent to finding each key in `composites[]`.
 
 ```typescript
 interface ProfileInfo {
-  profile: 'library' | 'application' | 'autofix-agent';
-  profileConfidence: number;   // 0-1
-  profileReasons: string[];    // Signals that led to detection
+  profile: "library" | "application" | "autofix-agent";
+  profileConfidence: number; // 0-1
+  profileReasons: string[]; // Signals that led to detection
 }
 ```
 
@@ -139,9 +139,9 @@ interface ProfileInfo {
 
 ```typescript
 interface ConfidenceSummary {
-  graphResolution: number;       // How well the declaration graph resolved
-  domainInference: number;       // How confident the domain classification is
-  sampleCoverage: number;        // How much of the surface was measured
+  graphResolution: number; // How well the declaration graph resolved
+  domainInference: number; // How confident the domain classification is
+  sampleCoverage: number; // How much of the surface was measured
   scenarioApplicability: number; // How applicable the scenario pack is
 }
 ```
@@ -150,10 +150,10 @@ interface ConfidenceSummary {
 
 ```typescript
 interface CoverageDiagnostics {
-  typesSource: 'bundled' | '@types' | 'mixed' | 'unknown';
+  typesSource: "bundled" | "@types" | "mixed" | "unknown";
   reachableFiles: number;
   measuredPositions: number;
-  undersampled: boolean;  // true = very few declarations, scores unreliable
+  undersampled: boolean; // true = very few declarations, scores unreliable
 }
 ```
 
@@ -161,10 +161,10 @@ interface CoverageDiagnostics {
 
 ```typescript
 interface TrustSummary {
-  classification: 'trusted' | 'directional' | 'abstained';
-  canCompare: boolean;  // Safe to compare with other results
-  canGate: boolean;     // Safe to use in --min-score gates
-  reasons: string[];    // Why this classification was assigned
+  classification: "trusted" | "directional" | "abstained";
+  canCompare: boolean; // Safe to compare with other results
+  canGate: boolean; // Safe to use in --min-score gates
+  reasons: string[]; // Why this classification was assigned
 }
 ```
 
@@ -177,12 +177,12 @@ interface TrustSummary {
 
 ```typescript
 interface ResolutionDiagnostics {
-  acquisitionStage: AcquisitionStage;   // Stage reached in pipeline
-  chosenStrategy: string;               // Strategy that produced the result
-  attemptedStrategies: string[];        // All strategies tried
-  declarationCount: number;             // Number of .d.ts files found
-  failureStage?: AcquisitionStage;      // Where failure occurred, if any
-  failureReason?: string;               // Error message from failure stage
+  acquisitionStage: AcquisitionStage; // Stage reached in pipeline
+  chosenStrategy: string; // Strategy that produced the result
+  attemptedStrategies: string[]; // All strategies tried
+  declarationCount: number; // Number of .d.ts files found
+  failureStage?: AcquisitionStage; // Where failure occurred, if any
+  failureReason?: string; // Error message from failure stage
 }
 ```
 
@@ -232,12 +232,12 @@ npx typegrade analyze . --json | jq '[.dimensions[] | {name: .key, score: .score
 ### Programmatic API in TypeScript
 
 ```typescript
-import { analyzeProject, scorePackage, buildFixPlan, computeDiff } from 'typegrade';
+import { analyzeProject, scorePackage, buildFixPlan, computeDiff } from "typegrade";
 
-const result = analyzeProject('./src');
+const result = analyzeProject("./src");
 
 // Check status before using scores
-if (result.status === 'degraded') {
+if (result.status === "degraded") {
   console.warn(`Degraded result: ${result.degradedReason}`);
 }
 
@@ -246,7 +246,7 @@ const { agentReadiness } = result.globalScores;
 console.log(`Agent Readiness: ${agentReadiness.score} (${agentReadiness.grade})`);
 
 if (result.coverageDiagnostics.undersampled) {
-  console.warn('Result is undersampled — treat as indicative');
+  console.warn("Result is undersampled — treat as indicative");
 }
 
 // Fix planning
@@ -254,8 +254,8 @@ const plan = buildFixPlan(result);
 console.log(`Fix batches: ${plan.batches.length}, expected uplift: +${plan.totalExpectedUplift}`);
 
 // Diff analysis
-const before = scorePackage('my-lib@1.0');
-const after = scorePackage('my-lib@2.0');
+const before = scorePackage("my-lib@1.0");
+const after = scorePackage("my-lib@2.0");
 const diff = computeDiff({ baseline: before, target: after });
 ```
 
@@ -264,20 +264,20 @@ const diff = computeDiff({ baseline: before, target: after });
 Always check `status` and `scoreValidity` before making decisions:
 
 ```typescript
-import { scorePackage } from 'typegrade';
+import { scorePackage } from "typegrade";
 
-const result = scorePackage('some-lib');
+const result = scorePackage("some-lib");
 
 // Step 1: Check trust classification
-if (result.trustSummary?.classification === 'abstained') {
+if (result.trustSummary?.classification === "abstained") {
   console.warn(`Abstained: ${result.trustSummary.reasons[0]}`);
   return; // Cannot score, cannot gate
 }
 
 // Step 2: Check status — degraded results no longer emit fake zeros
-if (result.status !== 'complete') {
+if (result.status !== "complete") {
   console.warn(`Analysis ${result.status}: ${result.degradedReason}`);
-  if (result.scoreValidity === 'not-comparable') {
+  if (result.scoreValidity === "not-comparable") {
     return; // Scores are not usable for ranking
   }
 }
@@ -315,26 +315,26 @@ analyses if evidence quality is too low.
 Wrong:
 
 ```typescript
-const result = scorePackage('micro-util');
+const result = scorePackage("micro-util");
 if (result.globalScores.consumerApi.score < 60) {
-  throw new Error('Unacceptable type quality');
+  throw new Error("Unacceptable type quality");
 }
 ```
 
 Correct:
 
 ```typescript
-const result = scorePackage('micro-util');
-if (result.status !== 'complete' || result.scoreValidity === 'not-comparable') {
+const result = scorePackage("micro-util");
+if (result.status !== "complete" || result.scoreValidity === "not-comparable") {
   console.warn(`Analysis ${result.status}, scores not reliable`);
   return;
 }
 if (result.coverageDiagnostics.undersampled) {
-  console.warn('Undersampled package — skipping gate');
+  console.warn("Undersampled package — skipping gate");
   return;
 }
 if (result.globalScores.consumerApi.score < 60) {
-  throw new Error('Unacceptable type quality');
+  throw new Error("Unacceptable type quality");
 }
 ```
 
@@ -346,9 +346,9 @@ are precise measurements leads to false positives and false negatives.
 Wrong:
 
 ```typescript
-const zod = scorePackage('zod');
-const express = scorePackage('express');
-const zodDomain = zod.domainScore?.score ?? 0;      // validation domain
+const zod = scorePackage("zod");
+const express = scorePackage("express");
+const zodDomain = zod.domainScore?.score ?? 0; // validation domain
 const expressDomain = express.domainScore?.score ?? 0; // router domain
 // Comparing these numbers is meaningless
 ```
@@ -356,8 +356,8 @@ const expressDomain = express.domainScore?.score ?? 0; // router domain
 Correct:
 
 ```typescript
-const zod = scorePackage('zod');
-const express = scorePackage('express');
+const zod = scorePackage("zod");
+const express = scorePackage("express");
 // Compare global scores — these use fixed weights
 const zodAR = zod.globalScores.agentReadiness.score ?? 0;
 const expressAR = express.globalScores.agentReadiness.score ?? 0;
@@ -372,17 +372,17 @@ comparable — the weight schemes differ.
 Wrong:
 
 ```typescript
-const result = scorePackage('my-router');
+const result = scorePackage("my-router");
 // scenarioScore is from the router scenario pack
 if (result.scenarioScore && result.scenarioScore.score < 50) {
-  console.log('Poor validation capabilities');  // Wrong domain!
+  console.log("Poor validation capabilities"); // Wrong domain!
 }
 ```
 
 Correct:
 
 ```typescript
-const result = scorePackage('my-router');
+const result = scorePackage("my-router");
 if (result.scenarioScore) {
   console.log(`${result.scenarioScore.scenario} scenario: ${result.scenarioScore.score}`);
   // Only interpret within the detected scenario domain

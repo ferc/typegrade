@@ -32,10 +32,7 @@ export interface PoolOptions {
  * Run scoring tasks in parallel using a process pool.
  * Returns results in the same order as the input tasks.
  */
-export async function runPool(
-  tasks: PoolTask[],
-  options?: PoolOptions,
-): Promise<PoolResult[]> {
+export async function runPool(tasks: PoolTask[], options?: PoolOptions): Promise<PoolResult[]> {
   const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
   const results: PoolResult[] = new Array(tasks.length);
   let nextIdx = 0;

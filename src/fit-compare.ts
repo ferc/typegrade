@@ -57,7 +57,7 @@ export function fitCompare(
   }
   const codebase = analyzeProject(options.codebasePath, analyzeOpts);
 
-  // Compute fit assessments
+  // Compute fit assessments with codebase relevance
   const candidateA = computeFitAssessment(pkgA, resultA, codebase);
   const candidateB = computeFitAssessment(pkgB, resultB, codebase);
 
@@ -105,15 +105,89 @@ function computeFitAssessment(
     (decisionScore ?? 50) * 0.4 + domainCompatibility * 0.3 + signalAvg * 0.3,
   );
 
+  // Compute codebase relevance
+  const { relevance, evidence } = computeCodebaseRelevance(result, codebase, domainCompatibility);
+
   return {
+    codebaseRelevance: relevance,
     decisionScore,
     domainCompatibility,
     fitScore,
     fitSignals,
     migrationRisk,
     packageName,
+    relevanceEvidence: evidence,
     result,
   };
+}
+
+/**
+ * Compute codebase relevance for a candidate library against a codebase.
+ * Combines domain compatibility, boundary pattern overlap, and type alignment.
+ */
+function computeCodebaseRelevance(
+  candidate: AnalysisResult,
+  codebase: AnalysisResult,
+  domainCompatibility: number,
+): { relevance: number; evidence: string[] } {
+  const evidence: string[] = [];
+  let relevanceScore = 0;
+  let signalCount = 0;
+
+  // Domain compatibility (40% weight)
+  relevanceScore += domainCompatibility * 0.4;
+  signalCount++;
+  if (domainCompatibility >= 70) {
+    evidence.push(`Domain match: compatible (${domainCompatibility})`);
+  } else if (domainCompatibility >= 50) {
+    evidence.push(`Domain match: partial (${domainCompatibility})`);
+  } else {
+    evidence.push(`Domain match: poor (${domainCompatibility})`);
+  }
+
+  // Type safety alignment (30% weight)
+  const candidateTs = candidate.composites.find((cc) => cc.key === "typeSafety")?.score;
+  const codebaseTs = codebase.composites.find((cc) => cc.key === "typeSafety")?.score;
+  if (
+    candidateTs !== null &&
+    candidateTs !== undefined &&
+    codebaseTs !== null &&
+    codebaseTs !== undefined
+  ) {
+    const gap = Math.abs(candidateTs - codebaseTs);
+    const alignScore = Math.max(0, 100 - gap * 2);
+    relevanceScore += alignScore * 0.3;
+    signalCount++;
+    if (gap < 10) {
+      evidence.push(`Type safety aligned (gap: ${gap})`);
+    } else {
+      evidence.push(`Type safety gap: ${gap} points`);
+    }
+  }
+
+  // Boundary pattern overlap (30% weight)
+  const candidateBd = candidate.dimensions.find((dd) => dd.key === "boundaryDiscipline")?.score;
+  const codebaseBd = codebase.dimensions.find((dd) => dd.key === "boundaryDiscipline")?.score;
+  if (
+    candidateBd !== null &&
+    candidateBd !== undefined &&
+    codebaseBd !== null &&
+    codebaseBd !== undefined
+  ) {
+    const bdGap = Math.abs(candidateBd - codebaseBd);
+    const bdAlign = Math.max(0, 100 - bdGap * 1.5);
+    relevanceScore += bdAlign * 0.3;
+    signalCount++;
+    if (bdGap < 15) {
+      evidence.push(`Boundary discipline aligned (gap: ${bdGap})`);
+    } else {
+      evidence.push(`Boundary discipline mismatch: ${bdGap} points`);
+    }
+  }
+
+  const relevance =
+    signalCount > 0 ? Math.round((relevanceScore / (signalCount * 0.01)) * 0.01) : 50;
+  return { evidence, relevance: Math.min(100, Math.max(0, relevance)) };
 }
 
 /**

@@ -382,11 +382,11 @@ export function renderAgentJson(report: AgentReport): string {
         ? {}
         : { abstentionReason: report.abstentionReason }),
       actionableIssueCount: report.actionableIssues.length,
+      actionableIssues: report.actionableIssues,
       enrichedBatches: report.enrichedBatches,
       executionOrder: report.executionOrder,
       expectedScoreImprovement: report.expectedScoreImprovement,
       fixBatches: report.fixBatches,
-      issues: report.actionableIssues,
       nextBestBatch: report.nextBestBatch ?? null,
       reportTrust: report.reportTrust ?? null,
       stopConditions: report.stopConditions,

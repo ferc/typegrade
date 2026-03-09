@@ -1,11 +1,13 @@
 import {
   ANALYSIS_SCHEMA_VERSION,
+  type AdoptionRiskCluster,
   type AnalysisMode,
   type AnalysisProfile,
   type AnalysisResult,
   type AnalysisStatus,
   type BoundaryHotspot,
   type BoundaryRecommendedFix,
+  type ClusterCategory,
   type CompositeScore,
   type ConfidenceSummary,
   type CoverageDiagnostics,
@@ -20,6 +22,8 @@ import {
   type Grade,
   type ImpactClass,
   type Issue,
+  type IssueCluster,
+  type LibraryInspectionReport,
   type PackageAnalysisContext,
   type PackageIdentity,
   type Recommendation,
@@ -31,6 +35,7 @@ import {
   type SuppressionEntry,
   type TrustSummary,
 } from "./types.js";
+import { DIMENSION_CONFIGS, DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
 import { type DomainType, detectDomain } from "./domain.js";
 import {
   type GetSourceFilesOptions,
@@ -50,7 +55,6 @@ import { classifyPublicSurface, computeRoleBreakdown } from "./roles/index.js";
 import { computeComposites, computeGrade } from "./scorer.js";
 import { detectProfile, gatherProfileSignals, resolveProfile } from "./profiles/index.js";
 import { evaluateScenarioPack, isScenarioApplicable } from "./scenarios/types.js";
-import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
 import type { GraphStats } from "./graph/types.js";
 import { Project } from "ts-morph";
 import { analyzeAgentUsability } from "./analyzers/agent-usability.js";
@@ -1210,9 +1214,23 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     result.suppressions = suppressions;
   }
 
+  // Enrich issues with canonical dimension keys
+  enrichDimensionKeys(dimensions);
+
+  // Build issue clusters
+  const issueClusters = buildIssueClusters(dimensions);
+  if (issueClusters.length > 0) {
+    result.issueClusters = issueClusters;
+  }
+
   // Generate recommendations for source/workspace/self analyses
   if (mode === "source" || analysisScope === "self") {
     result.recommendations = generateRecommendations(dimensions, boundarySummary, topIssues);
+  }
+
+  // Build inspection report for package mode
+  if (isPackageMode && analysisStatus === "complete") {
+    result.inspectionReport = buildInspectionReport(result, issueClusters);
   }
 
   // Build explainability report if requested
@@ -1885,9 +1903,220 @@ function classifyImpact(
   return "low";
 }
 
+/** Build a label-to-key map from dimension configs */
+const LABEL_TO_KEY = new Map(DIMENSION_CONFIGS.map((cfg) => [cfg.label, cfg.key]));
+
+/**
+ * Enrich issues with dimensionKey based on their dimension label.
+ */
+function enrichDimensionKeys(dimensions: DimensionResult[]): void {
+  for (const dim of dimensions) {
+    for (const issue of dim.issues) {
+      if (!issue.dimensionKey) {
+        issue.dimensionKey = LABEL_TO_KEY.get(issue.dimension) ?? dim.key;
+      }
+    }
+  }
+}
+
+/** Cluster definition: which dimension keys belong to each cluster category */
+const CLUSTER_KEYS: Record<ClusterCategory, string[]> = {
+  "agent-ergonomics": ["agentUsability"],
+  "boundary-validation": ["boundaryDiscipline"],
+  "public-surface": ["apiSpecificity", "surfaceConsistency", "surfaceComplexity"],
+  "publish-declaration": ["publishQuality", "declarationFidelity"],
+  "scenario-evidence": ["specializationPower", "semanticLift"],
+  soundness: ["apiSafety", "implementationSoundness", "configDiscipline"],
+};
+
+const CLUSTER_META: Record<ClusterCategory, { strategy: string; title: string; why: string }> = {
+  "agent-ergonomics": {
+    strategy: "Improve JSDoc, parameter naming, and overload clarity for agent tooling",
+    title: "Agent usability gaps",
+    why: "Poor agent readiness makes the library harder for AI tools to use correctly",
+  },
+  "boundary-validation": {
+    strategy: "Add runtime validation at trust boundaries (network, filesystem, env)",
+    title: "Unvalidated trust boundaries",
+    why: "External data entering without validation creates runtime safety risks",
+  },
+  "public-surface": {
+    strategy: "Replace any/unknown returns with specific types, add generic constraints",
+    title: "Public API type precision",
+    why: "Vague public types force consumers to add their own type assertions",
+  },
+  "publish-declaration": {
+    strategy: "Fix declaration emit, package.json exports, and types field",
+    title: "Declaration and publish issues",
+    why: "Missing or misconfigured declarations prevent consumers from importing types",
+  },
+  "scenario-evidence": {
+    strategy: "Add domain-specific type patterns (branded types, discriminated unions, etc.)",
+    title: "Specialization and semantic gaps",
+    why: "Missing semantic type patterns reduce domain-specific usability",
+  },
+  soundness: {
+    strategy: "Replace unsafe casts, add narrowing guards, fix type assertions",
+    title: "Type safety and soundness",
+    why: "Unsafe type operations create false type guarantees for consumers",
+  },
+};
+
+/**
+ * Build issue clusters from dimensions for human-facing summary.
+ */
+function buildIssueClusters(dimensions: DimensionResult[]): IssueCluster[] {
+  const clusters: IssueCluster[] = [];
+
+  for (const [category, keys] of Object.entries(CLUSTER_KEYS) as [ClusterCategory, string[]][]) {
+    const clusterDims = dimensions.filter((dd) => keys.includes(dd.key));
+    const clusterIssues = clusterDims.flatMap((dd) =>
+      dd.issues.filter(
+        (ii) =>
+          !ii.suppressionReason &&
+          ii.ownership !== "dependency-owned" &&
+          ii.ownership !== "standard-library-owned",
+      ),
+    );
+
+    if (clusterIssues.length === 0) {
+      continue;
+    }
+
+    const meta = CLUSTER_META[category];
+    const affectedFiles = [...new Set(clusterIssues.map((ii) => ii.file))];
+    const errorCount = clusterIssues.filter((ii) => ii.severity === "error").length;
+    const impact = classifyImpact(errorCount, 3, 1);
+
+    clusters.push({
+      affectedFiles: affectedFiles.slice(0, 10),
+      agentFixStrategy: meta.strategy,
+      category,
+      clusterId: `cluster-${category}`,
+      expectedMetricImpact: `${impact} impact — ${errorCount} error(s), ${clusterIssues.length} total issue(s)`,
+      issueCount: clusterIssues.length,
+      sampleIssues: clusterIssues.slice(0, 3),
+      title: meta.title,
+      whyItMatters: meta.why,
+    });
+  }
+
+  // Sort by issue count descending
+  return clusters.toSorted((lhs, rhs) => rhs.issueCount - lhs.issueCount);
+}
+
+/**
+ * Build adoption-grade library inspection report from analysis results.
+ */
+function buildInspectionReport(
+  result: AnalysisResult,
+  clusters: IssueCluster[],
+): LibraryInspectionReport {
+  const trust = result.trustSummary;
+  let trustScore = 0;
+  if (trust?.classification === "trusted") {
+    trustScore = 100;
+  } else if (trust?.classification === "directional") {
+    trustScore = 60;
+  }
+
+  // Compute evidence quality
+  const cs = result.confidenceSummary;
+  const coverageQuality = cs ? ((cs.sampleCoverage + cs.graphResolution) / 2) * 100 : 50;
+  const evidenceQuality = Math.round(trustScore * 0.5 + coverageQuality * 0.5);
+
+  // Compute suitability from composites
+  const compositeAvg =
+    result.composites.reduce((sum, cc) => sum + (cc.score ?? 0), 0) /
+    Math.max(1, result.composites.filter((cc) => cc.score !== null).length);
+  const candidateSuitability = Math.round(compositeAvg);
+
+  // Build adoption risks
+  const risks: AdoptionRiskCluster[] = [];
+  const anyDim = result.dimensions.find((dd) => dd.key === "apiSafety");
+  if (anyDim?.score !== null && anyDim?.score !== undefined && anyDim.score < 60) {
+    risks.push({
+      description: `API safety score is ${anyDim.score}/100 — any/unknown leakage in public surface`,
+      mitigable: true,
+      mitigation: "Wrap unsafe APIs with validated adapters",
+      risk: "any/unknown leakage",
+      severity: anyDim.score < 40 ? "high" : "medium",
+    });
+  }
+
+  const specDim = result.dimensions.find((dd) => dd.key === "apiSpecificity");
+  if (specDim?.score !== null && specDim?.score !== undefined && specDim.score < 60) {
+    risks.push({
+      description: `API specificity score is ${specDim.score}/100 — vague return types`,
+      mitigable: true,
+      mitigation: "Add type assertions at call sites or use generic wrappers",
+      risk: "return-type vagueness",
+      severity: specDim.score < 40 ? "high" : "medium",
+    });
+  }
+
+  const pubDim = result.dimensions.find((dd) => dd.key === "publishQuality");
+  if (pubDim?.score !== null && pubDim?.score !== undefined && pubDim.score < 50) {
+    risks.push({
+      description: `Publish quality score is ${pubDim.score}/100 — declaration layout issues`,
+      mitigable: false,
+      risk: "publish layout risk",
+      severity: pubDim.score < 30 ? "high" : "medium",
+    });
+  }
+
+  if (result.coverageDiagnostics?.undersampled) {
+    risks.push({
+      description: "Insufficient type coverage to assess quality reliably",
+      mitigable: false,
+      risk: "insufficient evidence",
+      severity: "high",
+    });
+  }
+
+  // Build summary
+  const highRisks = risks.filter((rr) => rr.severity === "high").length;
+  let adoptionSummary = `Library has weak type quality — adoption requires wrappers or alternatives`;
+  if (candidateSuitability >= 75 && highRisks === 0) {
+    adoptionSummary = "Library has strong type quality — safe to adopt with standard review";
+  } else if (candidateSuitability >= 50) {
+    adoptionSummary = `Library has moderate type quality — ${highRisks} high-risk area(s) need attention`;
+  }
+
+  // Safe/banned subsets based on dimension analysis
+  const safeSubset: string[] = [];
+  const bannedApis: string[] = [];
+  const requiredWrappers: string[] = [];
+
+  for (const dim of result.dimensions) {
+    if (dim.score !== null && dim.score >= 80) {
+      safeSubset.push(`${dim.label} patterns are well-typed`);
+    }
+  }
+  if (anyDim?.score !== null && anyDim?.score !== undefined && anyDim.score < 40) {
+    bannedApis.push("APIs returning unvalidated any/unknown — wrap all call sites");
+  }
+  if (risks.some((rr) => rr.mitigable)) {
+    requiredWrappers.push(
+      ...risks.filter((rr) => rr.mitigable && rr.mitigation).map((rr) => rr.mitigation!),
+    );
+  }
+
+  return {
+    adoptionRisks: risks,
+    adoptionSummary,
+    bannedApis,
+    candidateSuitability,
+    evidenceQuality,
+    issueClusters: clusters,
+    requiredWrappers,
+    safeSubset,
+  };
+}
+
 /**
  * Generate up to 3 concrete next-action recommendations from analysis results.
- * Prefers one soundness fix, one boundary fix, and one public-surface fix when available.
+ * Uses canonical dimension keys for stable matching.
  */
 function generateRecommendations(
   dimensions: DimensionResult[],
@@ -1897,10 +2126,11 @@ function generateRecommendations(
   const recommendations: Recommendation[] = [];
   const allIssues = dimensions.flatMap((dim) => dim.issues);
 
-  // Soundness cluster: apiSafety, implementationSoundness, typeSafety-related
+  // Soundness cluster: apiSafety, implementationSoundness
+  const soundnessKeys = new Set(["apiSafety", "implementationSoundness"]);
   const soundnessIssues = allIssues.filter(
     (iss) =>
-      (iss.dimension === "apiSafety" || iss.dimension === "implementationSoundness") &&
+      soundnessKeys.has(iss.dimensionKey ?? "") &&
       iss.ownership !== "dependency-owned" &&
       iss.ownership !== "standard-library-owned",
   );
@@ -1930,9 +2160,10 @@ function generateRecommendations(
   }
 
   // Public surface cluster: apiSpecificity, surfaceConsistency
+  const surfaceKeys = new Set(["apiSpecificity", "surfaceConsistency"]);
   const surfaceIssues = allIssues.filter(
     (iss) =>
-      (iss.dimension === "apiSpecificity" || iss.dimension === "surfaceConsistency") &&
+      surfaceKeys.has(iss.dimensionKey ?? "") &&
       iss.ownership !== "dependency-owned" &&
       iss.ownership !== "standard-library-owned",
   );

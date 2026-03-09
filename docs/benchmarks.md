@@ -31,6 +31,7 @@ pnpm benchmark:calibrate
 ```
 
 This produces:
+
 - Sorted scores by `consumerApi`, `agentReadiness`, and `typeSafety`.
 - Per-assertion pass/fail with deltas and `minDelta` enforcement.
 - Ranking loss calculation: `failed / evaluated`.
@@ -100,11 +101,13 @@ Target: < 5%. Above this, calibration will suggest weight adjustments.
 ### What benchmarks prove and don't prove
 
 **Benchmarks can show:**
+
 - Relative ranking correctness (does a type-safe library outscore a loosely-typed one?).
 - Weight stability (do small weight changes flip important assertions?).
 - Cross-version consistency (does a library's score track expected improvements?).
 
 **Benchmarks cannot show:**
+
 - Absolute quality (a score of 70 does not mean "70% good").
 - Future performance (scores depend on the current analyzer implementations).
 - Universal ordering (different composites may rank the same libraries differently, and that's correct).
@@ -123,6 +126,7 @@ Two additional gates validate typegrade's own output quality:
 ### self-analysis-quality
 
 Runs typegrade on its own codebase and checks that minimum scores are met:
+
 - `consumerApi` >= 40
 - `typeSafety` >= 40
 
@@ -131,6 +135,7 @@ This ensures the tool's own type quality does not regress below acceptable thres
 ### agent-loop-coherence
 
 Validates that the `self-analyze` agent report has a consistent structure. Checks that the report contains:
+
 - `issues` — detected type quality issues
 - `fixBatches` — grouped fix recommendations
 - `stopConditions` — criteria for halting the agent loop
@@ -146,17 +151,17 @@ The shadow validation track (`pnpm benchmark:shadow` / `pnpm gate:shadow`) measu
 
 Shadow validation scores a random sample of npm packages and measures aggregate trust contract behavior:
 
-| Metric | Description |
-|---|---|
-| `comparableRate` | Proportion of packages producing comparable (trusted or directional) results |
+| Metric                      | Description                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `comparableRate`            | Proportion of packages producing comparable (trusted or directional) results      |
 | `abstentionCorrectnessRate` | Proportion of packages where abstention (degraded/not-comparable) was appropriate |
-| `falseAuthoritativeRate` | Proportion of packages that received trusted classification despite poor data |
-| `installFailureRate` | Proportion of packages that failed to install |
-| `fallbackGlobRate` | Proportion of packages that fell back to glob resolution |
-| `domainOverreachRate` | Proportion of domain inferences on packages without clear domain signals |
-| `scenarioOverreachRate` | Proportion of scenario scores on packages without matching domain |
-| `scoreCompressionRate` | Proportion of scores clustering in a narrow band |
-| `crossRunStability` | Stability coefficient across repeated runs (1.0 = perfectly stable) |
+| `falseAuthoritativeRate`    | Proportion of packages that received trusted classification despite poor data     |
+| `installFailureRate`        | Proportion of packages that failed to install                                     |
+| `fallbackGlobRate`          | Proportion of packages that fell back to glob resolution                          |
+| `domainOverreachRate`       | Proportion of domain inferences on packages without clear domain signals          |
+| `scenarioOverreachRate`     | Proportion of scenario scores on packages without matching domain                 |
+| `scoreCompressionRate`      | Proportion of scores clustering in a narrow band                                  |
+| `crossRunStability`         | Stability coefficient across repeated runs (1.0 = perfectly stable)               |
 
 The `RedactedShadowSummary` also includes 99% confidence bounds for key metrics and stratification breakdowns by types source, size band, and module kind. No package names or per-package scores are included.
 
@@ -167,6 +172,7 @@ The `pnpm gate:shadow` command checks the latest shadow summary against gate thr
 ## Benchmark artifacts
 
 Each benchmark run saves per-package results to split-specific subdirectories under `benchmarks/results/`. Each result includes:
+
 - Dimension scores, confidence, and metrics.
 - Graph stats and dedup stats.
 - Domain inference with signals and matched rules.
@@ -175,25 +181,25 @@ Each benchmark run saves per-package results to split-specific subdirectories un
 
 ## Commands reference
 
-| Command | What it does |
-|---|---|
-| `pnpm benchmark:train` | Score train corpus, run assertions |
-| `pnpm benchmark:holdout` | Score holdout corpus |
-| `pnpm benchmark:eval` | Score eval corpus (CI/judge only) |
-| `pnpm benchmark:pool` | Score eval pool with stratified sampling (CI/judge only) |
-| `pnpm benchmark:calibrate` | Detailed calibration diagnostics |
-| `pnpm benchmark:optimize` | Weight search on train data |
-| `pnpm benchmark:judge` | Evaluate eval results, emit redacted summary (CI/judge only) |
-| `pnpm benchmark:shadow` | Shadow validation on random npm packages (CI/judge only) |
-| `pnpm gate:train` | Train gate check |
-| `pnpm gate:holdout` | Holdout gate check |
-| `pnpm gate:eval` | Eval gate check (CI/judge only) |
-| `pnpm gate:shadow` | Shadow gate check (CI/judge only) |
-| `pnpm perf` | Run all performance benchmarks |
-| `pnpm perf:cli` | Measure CLI cold-start (`--version`, `--help`) |
-| `pnpm perf:score` | Measure `analyze`, `boundaries`, `fix-plan` latency |
-| `pnpm perf:benchmark` | Measure full train benchmark throughput |
-| `pnpm perf:ci` | Run all perf benchmarks with regression checks |
+| Command                    | What it does                                                 |
+| -------------------------- | ------------------------------------------------------------ |
+| `pnpm benchmark:train`     | Score train corpus, run assertions                           |
+| `pnpm benchmark:holdout`   | Score holdout corpus                                         |
+| `pnpm benchmark:eval`      | Score eval corpus (CI/judge only)                            |
+| `pnpm benchmark:pool`      | Score eval pool with stratified sampling (CI/judge only)     |
+| `pnpm benchmark:calibrate` | Detailed calibration diagnostics                             |
+| `pnpm benchmark:optimize`  | Weight search on train data                                  |
+| `pnpm benchmark:judge`     | Evaluate eval results, emit redacted summary (CI/judge only) |
+| `pnpm benchmark:shadow`    | Shadow validation on random npm packages (CI/judge only)     |
+| `pnpm gate:train`          | Train gate check                                             |
+| `pnpm gate:holdout`        | Holdout gate check                                           |
+| `pnpm gate:eval`           | Eval gate check (CI/judge only)                              |
+| `pnpm gate:shadow`         | Shadow gate check (CI/judge only)                            |
+| `pnpm perf`                | Run all performance benchmarks                               |
+| `pnpm perf:cli`            | Measure CLI cold-start (`--version`, `--help`)               |
+| `pnpm perf:score`          | Measure `analyze`, `boundaries`, `fix-plan` latency          |
+| `pnpm perf:benchmark`      | Measure full train benchmark throughput                      |
+| `pnpm perf:ci`             | Run all perf benchmarks with regression checks               |
 
 ## Performance benchmarks
 
@@ -201,17 +207,18 @@ The performance harness (`perf/run.ts`) measures built artifacts directly via `n
 
 ### Performance targets (as of 2026-03-09)
 
-| Command | Target (p50) |
-|---|---|
-| `typegrade --version` | ≤ 40ms |
-| `typegrade --help` | ≤ 80ms |
-| `typegrade analyze <fixture> --json` | ≤ 450ms |
-| `typegrade boundaries <fixture> --json` | ≤ 250ms |
-| `typegrade fix-plan <fixture> --json` | ≤ 450ms |
+| Command                                 | Target (p50) |
+| --------------------------------------- | ------------ |
+| `typegrade --version`                   | ≤ 40ms       |
+| `typegrade --help`                      | ≤ 80ms       |
+| `typegrade analyze <fixture> --json`    | ≤ 450ms      |
+| `typegrade boundaries <fixture> --json` | ≤ 250ms      |
+| `typegrade fix-plan <fixture> --json`   | ≤ 450ms      |
 
 ### CI mode
 
 `pnpm perf:ci` compares current measurements against the most recent baseline in `benchmarks-output/perf/` and fails if:
+
 - Any measurement regresses by more than 20% from the previous baseline.
 - Any measurement exceeds its target threshold.
 

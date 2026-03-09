@@ -84,22 +84,22 @@ well-known packages, but override when needed. Valid domains: `validation`,
 
 ### Global scores
 
-| Score | What it answers |
-|---|---|
-| Consumer API | How precise and well-structured is the exported API surface? |
-| Agent Readiness | How well does the API guide AI agents toward correct usage? |
-| Type Safety | How safe from `any` leaks, unsound casts, and weak boundaries? |
+| Score           | What it answers                                                |
+| --------------- | -------------------------------------------------------------- |
+| Consumer API    | How precise and well-structured is the exported API surface?   |
+| Agent Readiness | How well does the API guide AI agents toward correct usage?    |
+| Type Safety     | How safe from `any` leaks, unsound casts, and weak boundaries? |
 
 ### Grades
 
 | Score | Grade |
-|---|---|
-| 95+ | A+ |
-| 85-94 | A |
-| 70-84 | B |
-| 55-69 | C |
-| 40-54 | D |
-| 0-39 | F |
+| ----- | ----- |
+| 95+   | A+    |
+| 85-94 | A     |
+| 70-84 | B     |
+| 55-69 | C     |
+| 40-54 | D     |
+| 0-39  | F     |
 
 ### Trust classification
 
@@ -135,20 +135,20 @@ Check `status` and `coverageDiagnostics` in JSON output:
 Wrong:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade score tiny-lib --json').toString());
+const result = JSON.parse(execSync("npx typegrade score tiny-lib --json").toString());
 // Score is 64, looks decent — adopt it
 ```
 
 Correct:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade score tiny-lib --json').toString());
-if (result.status === 'degraded') {
+const result = JSON.parse(execSync("npx typegrade score tiny-lib --json").toString());
+if (result.status === "degraded") {
   console.warn(`Degraded: ${result.degradedReason}`);
 }
 if (result.coverageDiagnostics?.undersampled) {
   // Score is capped at 65, confidence is low — treat as indicative only
-  console.warn('Undersampled package, score is unreliable');
+  console.warn("Undersampled package, score is unreliable");
 }
 ```
 
@@ -183,7 +183,7 @@ adjustments and are only meaningful within the same domain.
 Wrong:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade score old-lib --json').toString());
+const result = JSON.parse(execSync("npx typegrade score old-lib --json").toString());
 const score = result.globalScores.agentReadiness.score;
 // Use score directly in automated decisions
 ```
@@ -191,7 +191,7 @@ const score = result.globalScores.agentReadiness.score;
 Correct:
 
 ```typescript
-const result = JSON.parse(execSync('npx typegrade score old-lib --json').toString());
+const result = JSON.parse(execSync("npx typegrade score old-lib --json").toString());
 const ar = result.globalScores.agentReadiness;
 if (ar.confidence < 0.5) {
   console.warn(`Agent readiness score ${ar.score} has low confidence (${ar.confidence})`);

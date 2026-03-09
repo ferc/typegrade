@@ -6,12 +6,12 @@ This document describes the governance rules for the `typegrade` benchmark suite
 
 The benchmark corpus is split into isolated sets to prevent overfitting:
 
-| Set | Purpose | Builder agent access |
-|---|---|---|
-| **Train** (`manifest.train.json`) | Tune scoring weights and calibrate | May read and modify |
-| **Eval-fixed** (`manifest.eval.fixed.json`) | Stable generalization test | Must NOT read |
-| **Eval-pool** (`manifest.eval.pool.json`) | Large stratified pool for statistical validation | Must NOT read |
-| **Holdout** (`manifest.holdout.json`) | Reserved for final validation | Read-only, no tuning |
+| Set                                         | Purpose                                          | Builder agent access |
+| ------------------------------------------- | ------------------------------------------------ | -------------------- |
+| **Train** (`manifest.train.json`)           | Tune scoring weights and calibrate               | May read and modify  |
+| **Eval-fixed** (`manifest.eval.fixed.json`) | Stable generalization test                       | Must NOT read        |
+| **Eval-pool** (`manifest.eval.pool.json`)   | Large stratified pool for statistical validation | Must NOT read        |
+| **Holdout** (`manifest.holdout.json`)       | Reserved for final validation                    | Read-only, no tuning |
 
 The `BenchmarkSplit` type covers all four splits: `"train" | "holdout" | "eval-fixed" | "eval-pool"`.
 
@@ -26,11 +26,13 @@ Each pairwise assertion has a class:
 Tier-boundary assertions that encode fundamental ranking correctness. If a must-pass assertion fails, the gate exits with code 1.
 
 Properties:
+
 - `minDelta`: minimum score difference required (typically 3-5 for tier boundaries).
 - `reason`: ground-truth rationale for the assertion.
 - `introducedAt`: version when the assertion was added.
 
 A must-pass assertion fails if:
+
 - The higher package scores lower than the lower package, OR
 - The delta is less than `minDelta` (reported as a "MARGIN" failure).
 
@@ -57,6 +59,7 @@ Four gates run at different stages:
 ### Train gate (`pnpm gate:train`)
 
 Runs against the train corpus. Checks:
+
 - All must-pass assertions pass, including `minDelta` requirements.
 - Ranking loss is below threshold.
 
@@ -65,6 +68,7 @@ Runs against the train corpus. Checks:
 ### Eval gate (`pnpm gate:eval`)
 
 Runs against the eval corpus. Checks:
+
 - Pareto violations (new regressions not offset by improvements).
 - Seed robustness (scores stable across different random seeds).
 - Train-eval drift (train performance vs eval performance gap).
@@ -75,6 +79,7 @@ Runs against the eval corpus. Checks:
 ### Self-analysis-quality gate
 
 Runs typegrade on its own codebase and asserts minimum composite scores:
+
 - `consumerApi` >= 40
 - `typeSafety` >= 40
 
@@ -117,6 +122,7 @@ Raw eval details are only available with the `--audit` flag (explicit audit mode
 ## Assertion metadata
 
 Each assertion carries:
+
 - `reason`: ground-truth basis for the expected ranking.
 - `introducedAt`: version when added.
 - `owner`: optional — who added this assertion.
@@ -155,10 +161,10 @@ These boundaries are enforced by CI:
 
 ### Command access matrix
 
-| Role | Allowed commands |
-|---|---|
-| Builder | `benchmark:train`, `benchmark:holdout`, `gate:train`, `gate:holdout`, `benchmark:optimize`, `benchmark:calibrate` |
-| Judge/CI | `benchmark:eval`, `benchmark:pool`, `benchmark:judge`, `benchmark:shadow`, `gate:eval`, `gate:shadow` |
+| Role     | Allowed commands                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------- |
+| Builder  | `benchmark:train`, `benchmark:holdout`, `gate:train`, `gate:holdout`, `benchmark:optimize`, `benchmark:calibrate` |
+| Judge/CI | `benchmark:eval`, `benchmark:pool`, `benchmark:judge`, `benchmark:shadow`, `gate:eval`, `gate:shadow`             |
 
 ## Adding new assertions
 

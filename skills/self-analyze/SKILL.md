@@ -72,43 +72,47 @@ mode), sorted by `agentPriority` with source-owned issues first:
 
 ```typescript
 interface AgentReport {
-  actionableIssues: Issue[];  // Capped at 50 (25 in strict mode)
+  actionableIssues: Issue[]; // Capped at 50 (25 in strict mode)
   fixBatches: FixBatch[];
-  enrichedBatches: EnrichedFixBatch[];  // Batches with score deltas and verification
-  nextBestBatch?: EnrichedFixBatch;     // Highest-impact low/medium-risk batch
-  abortSignals: AbortCondition[];       // Global session abort conditions
-  reportTrust?: TrustSummary;           // Trust classification from the analysis
-  abstentionReason?: string;            // Why no batches were emitted (if empty)
+  enrichedBatches: EnrichedFixBatch[]; // Batches with score deltas and verification
+  nextBestBatch?: EnrichedFixBatch; // Highest-impact low/medium-risk batch
+  abortSignals: AbortCondition[]; // Global session abort conditions
+  reportTrust?: TrustSummary; // Trust classification from the analysis
+  abstentionReason?: string; // Why no batches were emitted (if empty)
   suppressedCount: number;
   suppressionReasons: { category: string; count: number }[];
-  executionOrder: string[];             // Suggested batch execution order (batch IDs)
+  executionOrder: string[]; // Suggested batch execution order (batch IDs)
   expectedScoreImprovement: number;
-  stopConditions: StopCondition[];      // When the agent should stop iterating
-  verificationSteps: string[];          // Commands to verify the entire report
+  stopConditions: StopCondition[]; // When the agent should stop iterating
+  verificationSteps: string[]; // Commands to verify the entire report
 }
 
 interface FixBatch {
   title: string;
-  risk: 'low' | 'medium' | 'high';
+  risk: "low" | "medium" | "high";
   expectedImpact: number;
   requiresHumanReview: boolean;
   issues: Issue[];
 }
 
 interface EnrichedFixBatch extends FixBatch {
-  expectedScoreDelta: number;           // Estimated score delta from this batch
-  verificationCommands: string[];       // Commands to run after applying this batch
-  goal: string;                         // Human-readable batch objective
-  whyNow: string;                       // Urgency rationale
-  patchHints: string[];                 // Concrete code change hints
-  acceptanceChecks: AcceptanceCheck[];   // Typed acceptance criteria
-  abortIf: AbortCondition[];            // Batch-level abort conditions
-  rollbackPlan: string;                 // Shell command to revert changes
+  expectedScoreDelta: number; // Estimated score delta from this batch
+  verificationCommands: string[]; // Commands to run after applying this batch
+  goal: string; // Human-readable batch objective
+  whyNow: string; // Urgency rationale
+  patchHints: string[]; // Concrete code change hints
+  acceptanceChecks: AcceptanceCheck[]; // Typed acceptance criteria
+  abortIf: AbortCondition[]; // Batch-level abort conditions
+  rollbackPlan: string; // Shell command to revert changes
 }
 
 interface StopCondition {
-  kind: 'no-actionable-issues' | 'all-batches-applied' | 'score-target-met'
-      | 'diminishing-returns' | 'max-iterations';
+  kind:
+    | "no-actionable-issues"
+    | "all-batches-applied"
+    | "score-target-met"
+    | "diminishing-returns"
+    | "max-iterations";
   met: boolean;
   reason: string;
 }

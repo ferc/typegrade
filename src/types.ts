@@ -504,7 +504,10 @@ export interface Issue {
   column: number;
   message: string;
   severity: "error" | "warning" | "info";
+  /** Human-readable dimension label (e.g., "API Safety") */
   dimension: string;
+  /** Canonical dimension key (e.g., "apiSafety") — stable across versions */
+  dimensionKey?: string;
   /** Stable identifier for this issue (deterministic across runs) */
   issueId?: string;
   /** Confidence in this finding (0-1) */
@@ -525,6 +528,8 @@ export interface Issue {
   agentPriority?: number;
   /** Suggested fix approach */
   suggestedFixKind?: SuggestedFixKind;
+  /** Impact on decision-making if this issue is fixed */
+  decisionImpact?: "high" | "medium" | "low";
 }
 
 /** Domain-adjusted score — only comparable within the same domain */
@@ -680,6 +685,10 @@ export interface AnalysisResult {
   recommendations?: Recommendation[];
   /** Recommended fixes for boundary hotspots */
   boundaryRecommendedFixes?: BoundaryRecommendedFix[];
+  /** Issue clusters for human-facing summary */
+  issueClusters?: IssueCluster[];
+  /** Adoption-grade library inspection report (package mode) */
+  inspectionReport?: LibraryInspectionReport;
 }
 
 export interface PrecisionFeatures {
@@ -1237,6 +1246,75 @@ export interface ShadowLatestResult {
 
 // --- Recommendations ---
 
+// --- Issue Clusters ---
+
+/** Cluster category for grouping related issues */
+export type ClusterCategory =
+  | "soundness"
+  | "public-surface"
+  | "boundary-validation"
+  | "publish-declaration"
+  | "scenario-evidence"
+  | "agent-ergonomics";
+
+/** Clustered issue summary for human and agent consumption */
+export interface IssueCluster {
+  /** Cluster identifier */
+  clusterId: string;
+  /** Cluster category */
+  category: ClusterCategory;
+  /** Human-readable title */
+  title: string;
+  /** Why this cluster matters */
+  whyItMatters: string;
+  /** Files affected by this cluster */
+  affectedFiles: string[];
+  /** Total issue count in this cluster */
+  issueCount: number;
+  /** Up to 3 sample issues from the cluster */
+  sampleIssues: Issue[];
+  /** Expected metric impact if cluster is fully resolved */
+  expectedMetricImpact: string;
+  /** Suggested fix strategy for agent consumption */
+  agentFixStrategy: string;
+}
+
+// --- Library Inspection Report (Adoption-Grade) ---
+
+/** Risk cluster for adoption decisions */
+export interface AdoptionRiskCluster {
+  /** Risk type */
+  risk: string;
+  /** Risk severity */
+  severity: "high" | "medium" | "low";
+  /** Human-readable description */
+  description: string;
+  /** Can the consuming team mitigate this? */
+  mitigable: boolean;
+  /** Mitigation strategy if applicable */
+  mitigation?: string;
+}
+
+/** Library inspection report for adoption decisions */
+export interface LibraryInspectionReport {
+  /** Overall adoption readiness score (0-100) */
+  candidateSuitability: number;
+  /** Human-readable adoption summary */
+  adoptionSummary: string;
+  /** Adoption risks with mitigations */
+  adoptionRisks: AdoptionRiskCluster[];
+  /** APIs that are safe to use without wrappers */
+  safeSubset: string[];
+  /** Required wrappers for unsafe APIs */
+  requiredWrappers: string[];
+  /** APIs that should be banned (too unsafe) */
+  bannedApis: string[];
+  /** Evidence quality for this assessment */
+  evidenceQuality: number;
+  /** Issue clusters summarizing the library's type health */
+  issueClusters: IssueCluster[];
+}
+
 /** Impact class for a recommendation */
 export type ImpactClass = "high" | "medium" | "low";
 
@@ -1334,6 +1412,10 @@ export interface CandidateFitAssessment {
   migrationRisk: MigrationRiskReport;
   /** Overall fit score (0-100) */
   fitScore: number;
+  /** Codebase relevance score (0-100) */
+  codebaseRelevance?: number;
+  /** Evidence supporting the relevance score */
+  relevanceEvidence?: string[];
 }
 
 /** Decision from a fit-compare analysis */

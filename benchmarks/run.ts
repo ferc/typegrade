@@ -2,10 +2,22 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import type { AnalysisResult, ScenarioScore } from "../src/types.js";
-import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS, SCENARIO_ASSERTIONS, UNDERSAMPLED_ANCHOR_WAIVERS } from "./assertions.js";
+import {
+  EXPECTED_DOMAINS,
+  PAIRWISE_ASSERTIONS,
+  SCENARIO_ASSERTIONS,
+  UNDERSAMPLED_ANCHOR_WAIVERS,
+} from "./assertions.js";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
-import { flattenManifest, loadManifest, loadManifestByFilename, normalizeEntry, samplePool, validateManifestStructure } from "./split-loader.js";
+import {
+  flattenManifest,
+  loadManifest,
+  loadManifestByFilename,
+  normalizeEntry,
+  samplePool,
+  validateManifestStructure,
+} from "./split-loader.js";
 import type { BenchmarkSplit, ManifestEntry } from "./types.js";
 import { runPool } from "./pool.js";
 
@@ -15,7 +27,8 @@ const holdoutMode = args.includes("--holdout");
 const evalMode = args.includes("--eval");
 const validateManifestMode = args.includes("--validate-manifest");
 const poolSampleIdx = args.indexOf("--pool-sample");
-const poolSampleCount = poolSampleIdx >= 0 ? Number.parseInt(args[poolSampleIdx + 1] ?? "5", 10) : 0;
+const poolSampleCount =
+  poolSampleIdx >= 0 ? Number.parseInt(args[poolSampleIdx + 1] ?? "5", 10) : 0;
 const poolCountIdx = args.indexOf("--count");
 const poolCount = poolCountIdx >= 0 ? Number.parseInt(args[poolCountIdx + 1] ?? "20", 10) : 0;
 const seedIdx = args.indexOf("--seed");
@@ -23,7 +36,8 @@ const seed = seedIdx >= 0 ? Number.parseInt(args[seedIdx + 1] ?? "42", 10) : Dat
 const manifestFlag = args.find((a) => a.startsWith("--manifest="));
 const parallelMode = args.includes("--parallel");
 const concurrencyIdx = args.indexOf("--concurrency");
-const concurrency = concurrencyIdx >= 0 ? Number.parseInt(args[concurrencyIdx + 1] ?? "4", 10) : undefined;
+const concurrency =
+  concurrencyIdx >= 0 ? Number.parseInt(args[concurrencyIdx + 1] ?? "4", 10) : undefined;
 
 // Determine corpus split
 let corpusSplit: BenchmarkSplit | "holdout" = "train";
@@ -114,9 +128,10 @@ async function main() {
   let poolSampledHashes: string[] | undefined;
 
   // Structural validation before any scoring
-  const preValidationManifest = poolCount > 0 || poolSampleCount > 0
-    ? loadManifest(poolCount > 0 || poolSampleCount > 0 ? "eval-pool" : "train")
-    : loadManifestByFilename(manifestFilename);
+  const preValidationManifest =
+    poolCount > 0 || poolSampleCount > 0
+      ? loadManifest(poolCount > 0 || poolSampleCount > 0 ? "eval-pool" : "train")
+      : loadManifestByFilename(manifestFilename);
   const validationErrors = validateManifestStructure(preValidationManifest);
   if (validationErrors.length > 0) {
     console.error(`Manifest structural validation failed (${validationErrors.length} error(s)):\n`);
@@ -136,7 +151,9 @@ async function main() {
     console.log("Running manifest pre-flight validation (non-train split)...\n");
     manifestPreflightPassed = validateManifest();
     if (!manifestPreflightPassed) {
-      console.warn("\nWARNING: Some specs failed pre-flight resolution. These will appear as install failures.");
+      console.warn(
+        "\nWARNING: Some specs failed pre-flight resolution. These will appear as install failures.",
+      );
       console.warn("Fix the manifest before attributing failures to analyzer quality.\n");
     }
   }
@@ -144,22 +161,35 @@ async function main() {
   if (poolCount > 0) {
     // Pool sampling mode — stratified sample from eval-pool
     const manifest = loadManifest("eval-pool");
-    const { sampled, manifestHash, sampledHashes } = samplePool(manifest, { count: poolCount, seed });
+    const { sampled, manifestHash, sampledHashes } = samplePool(manifest, {
+      count: poolCount,
+      seed,
+    });
     packages = sampled.map((s) => ({ entry: s.entry as ManifestEntry, tier: s.tier }));
     poolManifestHash = manifestHash;
     poolSampledHashes = sampledHashes;
-    console.log(`Pool sample: ${sampled.length} packages (seed=${seed}, manifestHash=${manifestHash})\n`);
+    console.log(
+      `Pool sample: ${sampled.length} packages (seed=${seed}, manifestHash=${manifestHash})\n`,
+    );
   } else if (poolSampleCount > 0) {
     // Random eval-pool sample — stratified sampling from eval pool
     const manifest = loadManifest("eval-pool");
-    const { sampled, manifestHash, sampledHashes } = samplePool(manifest, { count: poolSampleCount, seed });
+    const { sampled, manifestHash, sampledHashes } = samplePool(manifest, {
+      count: poolSampleCount,
+      seed,
+    });
     packages = sampled.map((s) => ({ entry: s.entry as ManifestEntry, tier: s.tier }));
     poolManifestHash = manifestHash;
     poolSampledHashes = sampledHashes;
-    console.log(`Pool sample: ${sampled.length} packages (seed=${seed}, manifestHash=${manifestHash})\n`);
+    console.log(
+      `Pool sample: ${sampled.length} packages (seed=${seed}, manifestHash=${manifestHash})\n`,
+    );
   } else {
     const manifest = loadManifestByFilename(manifestFilename);
-    packages = flattenManifest(manifest).map((f) => ({ entry: f.entry as ManifestEntry, tier: f.tier }));
+    packages = flattenManifest(manifest).map((f) => ({
+      entry: f.entry as ManifestEntry,
+      tier: f.tier,
+    }));
   }
 
   console.log(`Corpus: ${corpusSplit} (manifest: ${manifestFilename})\n`);
@@ -174,7 +204,9 @@ async function main() {
       return { spec: normalized.spec, typesVersion: normalized.typesVersion };
     });
 
-    console.log(`Scoring ${tasks.length} packages in parallel (concurrency: ${concurrency ?? "auto"})...\n`);
+    console.log(
+      `Scoring ${tasks.length} packages in parallel (concurrency: ${concurrency ?? "auto"})...\n`,
+    );
 
     const poolResults = await runPool(tasks, {
       concurrency,
@@ -192,7 +224,11 @@ async function main() {
         const errorMsg = poolResult.error ?? "unknown error";
         console.error(`  FAILED: ${name}: ${errorMsg}`);
         // Track install failures separately
-        if (errorMsg.includes("ETARGET") || errorMsg.includes("404") || errorMsg.includes("install")) {
+        if (
+          errorMsg.includes("ETARGET") ||
+          errorMsg.includes("404") ||
+          errorMsg.includes("install")
+        ) {
           installFailures.push({ error: errorMsg, spec: poolResult.spec, tier });
         }
         continue;
@@ -202,7 +238,11 @@ async function main() {
 
       // Track absorbed install-failure degradations
       if (result.status === "degraded" && result.degradedCategory === "install-failure") {
-        installFailures.push({ error: result.degradedReason ?? "install failure (degraded)", spec: poolResult.spec, tier });
+        installFailures.push({
+          error: result.degradedReason ?? "install failure (degraded)",
+          spec: poolResult.spec,
+          tier,
+        });
       }
 
       const domainFitScore = result.domainScore?.score ?? null;
@@ -231,7 +271,11 @@ async function main() {
 
         // Track absorbed install-failure degradations
         if (result.status === "degraded" && result.degradedCategory === "install-failure") {
-          installFailures.push({ error: result.degradedReason ?? "install failure (degraded)", spec, tier });
+          installFailures.push({
+            error: result.degradedReason ?? "install failure (degraded)",
+            spec,
+            tier,
+          });
           console.log(`  DEGRADED (install-failure): ${result.degradedReason ?? "unknown"}`);
         }
 
@@ -249,14 +293,22 @@ async function main() {
           typeSafety: getCompositeScore(result, "typeSafety"),
         });
         const domainStr = domainFitScore !== null ? ` | domainFit: ${domainFitScore}` : "";
-        const scenStr = scenarioScore ? ` | scenario: ${scenarioScore.score}(${scenarioScore.passedScenarios}/${scenarioScore.totalScenarios})` : "";
+        const scenStr = scenarioScore
+          ? ` | scenario: ${scenarioScore.score}(${scenarioScore.passedScenarios}/${scenarioScore.totalScenarios})`
+          : "";
         const fallbackStr = result.graphStats.usedFallbackGlob ? " [FALLBACK]" : "";
-        console.log(`  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}${scenStr}${fallbackStr}`);
+        console.log(
+          `  consumerApi: ${getCompositeScore(result, "consumerApi")} | agentReadiness: ${getCompositeScore(result, "agentReadiness")} | typeSafety: ${getCompositeScore(result, "typeSafety")}${domainStr}${scenStr}${fallbackStr}`,
+        );
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error(`  FAILED: ${errorMsg}`);
         // Track install failures separately
-        if (errorMsg.includes("ETARGET") || errorMsg.includes("404") || errorMsg.includes("install")) {
+        if (
+          errorMsg.includes("ETARGET") ||
+          errorMsg.includes("404") ||
+          errorMsg.includes("install")
+        ) {
           installFailures.push({ error: errorMsg, spec, tier });
         }
       }
@@ -265,7 +317,9 @@ async function main() {
 
   // Print ranking table
   console.log("\n=== Benchmark Results ===\n");
-  console.log(`${"Package".padEnd(25)}${"Tier".padEnd(12)}${"ConsumerAPI".padEnd(14)}${"AgentReady".padEnd(14)}${"TypeSafety".padEnd(14)}${"DomainFit".padEnd(14)}${"Scenario".padEnd(14)}Fallback`);
+  console.log(
+    `${"Package".padEnd(25)}${"Tier".padEnd(12)}${"ConsumerAPI".padEnd(14)}${"AgentReady".padEnd(14)}${"TypeSafety".padEnd(14)}${"DomainFit".padEnd(14)}${"Scenario".padEnd(14)}Fallback`,
+  );
   console.log("-".repeat(121));
 
   const sorted = entries.toSorted((lhs, rhs) => (rhs.consumerApi ?? 0) - (lhs.consumerApi ?? 0));
@@ -308,7 +362,11 @@ async function main() {
 
       if (!higher || !lower) {
         console.log(`SKIP: ${assertion.higher} > ${assertion.lower} (missing data)`);
-        assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, result: "skip" });
+        assertionResults.push({
+          assertion: `${assertion.higher} > ${assertion.lower}`,
+          class: assertion.class,
+          result: "skip",
+        });
         continue;
       }
 
@@ -328,8 +386,16 @@ async function main() {
 
       // Skip assertions where either side is degraded (null scores = not comparable)
       if (higherScore === null || lowerScore === null) {
-        console.log(`SKIP: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) (degraded/null score) [${assertion.composite}]`);
-        assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, higherScore, lowerScore, result: "skip" });
+        console.log(
+          `SKIP: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) (degraded/null score) [${assertion.composite}]`,
+        );
+        assertionResults.push({
+          assertion: `${assertion.higher} > ${assertion.lower}`,
+          class: assertion.class,
+          higherScore,
+          lowerScore,
+          result: "skip",
+        });
         continue;
       }
 
@@ -339,8 +405,18 @@ async function main() {
 
       if (assertion.class === "ambiguous") {
         const statusLabel = passes ? "OK" : "NOTE";
-        console.log(`${statusLabel} (ambiguous): ${assertion.higher} (${higherScore}) vs ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
-        assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: passes ? "pass" : "skip" });
+        console.log(
+          `${statusLabel} (ambiguous): ${assertion.higher} (${higherScore}) vs ${assertion.lower} (${lowerScore}) [${assertion.composite}]`,
+        );
+        assertionResults.push({
+          assertion: `${assertion.higher} > ${assertion.lower}`,
+          class: assertion.class,
+          delta,
+          higherScore,
+          lowerScore,
+          minDelta: assertion.minDelta,
+          result: passes ? "pass" : "skip",
+        });
         continue;
       }
 
@@ -348,26 +424,53 @@ async function main() {
         let label = `PASS (${assertion.class})`;
         if (assertion.class === "must-pass") label = "PASS";
         else if (assertion.class === "hard-diagnostic") label = "PASS (hard)";
-        console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
+        console.log(
+          `${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`,
+        );
         if (assertion.class === "must-pass") mustPassPassed++;
         else if (assertion.class === "hard-diagnostic") hardDiagPassed++;
         else diagnosticPassed++;
-        assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "pass" });
+        assertionResults.push({
+          assertion: `${assertion.higher} > ${assertion.lower}`,
+          class: assertion.class,
+          delta,
+          higherScore,
+          lowerScore,
+          minDelta: assertion.minDelta,
+          result: "pass",
+        });
       } else {
-        if (meetsMinDelta || higherScore === null || lowerScore === null || higherScore <= lowerScore) {
+        if (
+          meetsMinDelta ||
+          higherScore === null ||
+          lowerScore === null ||
+          higherScore <= lowerScore
+        ) {
           let label = `WARN (${assertion.class})`;
           if (assertion.class === "must-pass") label = "FAIL";
           else if (assertion.class === "hard-diagnostic") label = "FAIL (hard)";
-          console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`);
+          console.log(
+            `${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.composite}]`,
+          );
         } else {
           let label = `MARGIN (${assertion.class})`;
           if (assertion.class === "must-pass") label = "MARGIN";
-          console.log(`${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta} [${assertion.composite}]`);
+          console.log(
+            `${label}: ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) but delta ${delta} < minDelta ${assertion.minDelta} [${assertion.composite}]`,
+          );
         }
         if (assertion.class === "must-pass") mustPassFailed++;
         else if (assertion.class === "hard-diagnostic") hardDiagFailed++;
         else diagnosticFailed++;
-        assertionResults.push({ assertion: `${assertion.higher} > ${assertion.lower}`, class: assertion.class, delta, higherScore, lowerScore, minDelta: assertion.minDelta, result: "fail" });
+        assertionResults.push({
+          assertion: `${assertion.higher} > ${assertion.lower}`,
+          class: assertion.class,
+          delta,
+          higherScore,
+          lowerScore,
+          minDelta: assertion.minDelta,
+          result: "fail",
+        });
       }
     }
 
@@ -378,7 +481,9 @@ async function main() {
       const lower = entries.find((en) => en.name === assertion.lower);
 
       if (!higher || !lower) {
-        console.log(`SKIP: ${assertion.higher} > ${assertion.lower} on ${assertion.domain} ${assertion.scoreType} (missing data)`);
+        console.log(
+          `SKIP: ${assertion.higher} > ${assertion.lower} on ${assertion.domain} ${assertion.scoreType} (missing data)`,
+        );
         continue;
       }
 
@@ -397,18 +502,25 @@ async function main() {
       }
 
       if (higherScore === null || lowerScore === null) {
-        console.log(`SKIP: ${assertion.higher} > ${assertion.lower} on ${assertion.domain} ${assertion.scoreType} (no score)`);
+        console.log(
+          `SKIP: ${assertion.higher} > ${assertion.lower} on ${assertion.domain} ${assertion.scoreType} (no score)`,
+        );
         continue;
       }
 
       const delta = higherScore - lowerScore;
-      const meetsMinDelta = assertion.minDelta !== undefined ? delta >= assertion.minDelta : delta > 0;
+      const meetsMinDelta =
+        assertion.minDelta !== undefined ? delta >= assertion.minDelta : delta > 0;
 
       if (meetsMinDelta) {
-        console.log(`PASS (${assertion.class}): ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.domain} ${assertion.scoreType}]`);
+        console.log(
+          `PASS (${assertion.class}): ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.domain} ${assertion.scoreType}]`,
+        );
         scenarioAssertionPassed++;
       } else {
-        console.log(`FAIL (${assertion.class}): ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.domain} ${assertion.scoreType}]`);
+        console.log(
+          `FAIL (${assertion.class}): ${assertion.higher} (${higherScore}) > ${assertion.lower} (${lowerScore}) [${assertion.domain} ${assertion.scoreType}]`,
+        );
         scenarioAssertionFailed++;
       }
     }
@@ -424,7 +536,9 @@ async function main() {
     console.log(`Must-pass: ${mustPassPassed}/${totalMustPass} passed`);
     console.log(`Hard-diagnostic: ${hardDiagPassed}/${totalHardDiag} passed`);
     console.log(`Diagnostic: ${diagnosticPassed}/${totalDiagnostic} passed (warnings only)`);
-    console.log(`Scenario assertions: ${scenarioAssertionPassed}/${totalScenarioAssertions} passed`);
+    console.log(
+      `Scenario assertions: ${scenarioAssertionPassed}/${totalScenarioAssertions} passed`,
+    );
   }
 
   // Check fallback glob usage
@@ -449,23 +563,33 @@ async function main() {
     const actual = entry.result.domainInference?.domain ?? "general";
     if (actual === expected) {
       domainCorrect++;
-      console.log(`  OK: ${entry.name.padEnd(25)} expected=${expected.padEnd(12)} actual=${actual}`);
+      console.log(
+        `  OK: ${entry.name.padEnd(25)} expected=${expected.padEnd(12)} actual=${actual}`,
+      );
     } else if (actual === "general" && expected !== "general") {
       domainAbstained++;
-      console.log(`  ABSTAIN: ${entry.name.padEnd(21)} expected=${expected.padEnd(12)} actual=${actual}`);
+      console.log(
+        `  ABSTAIN: ${entry.name.padEnd(21)} expected=${expected.padEnd(12)} actual=${actual}`,
+      );
     } else {
       domainIncorrect++;
       domainConfusion.push({ actual, expected, name: entry.name });
-      console.log(`  WRONG: ${entry.name.padEnd(22)} expected=${expected.padEnd(12)} actual=${actual}`);
+      console.log(
+        `  WRONG: ${entry.name.padEnd(22)} expected=${expected.padEnd(12)} actual=${actual}`,
+      );
     }
   }
 
   const domainTotal = domainCorrect + domainIncorrect + domainAbstained;
   const domainAccuracy = domainTotal > 0 ? domainCorrect / domainTotal : 0;
   const wrongSpecificRate = domainTotal > 0 ? domainIncorrect / domainTotal : 0;
-  console.log(`\n  Correct: ${domainCorrect}/${domainTotal} (${(domainAccuracy * 100).toFixed(1)}%)`);
+  console.log(
+    `\n  Correct: ${domainCorrect}/${domainTotal} (${(domainAccuracy * 100).toFixed(1)}%)`,
+  );
   console.log(`  Abstained: ${domainAbstained}/${domainTotal}`);
-  console.log(`  Wrong-specific: ${domainIncorrect}/${domainTotal} (${(wrongSpecificRate * 100).toFixed(1)}%)`);
+  console.log(
+    `  Wrong-specific: ${domainIncorrect}/${domainTotal} (${(wrongSpecificRate * 100).toFixed(1)}%)`,
+  );
 
   // Check for undersampled packages used as HIGHER-side must-pass anchors.
   // Only the higher side matters: an undersampled package with an unreliable
@@ -481,7 +605,11 @@ async function main() {
   const undersampledAnchors: { name: string; reasons: string[] }[] = [];
   for (const entry of entries) {
     const coverage = entry.result.coverageDiagnostics;
-    if (coverage?.undersampled && mustPassHigherPackages.has(entry.name) && !UNDERSAMPLED_ANCHOR_WAIVERS.has(entry.name)) {
+    if (
+      coverage?.undersampled &&
+      mustPassHigherPackages.has(entry.name) &&
+      !UNDERSAMPLED_ANCHOR_WAIVERS.has(entry.name)
+    ) {
       undersampledAnchors.push({ name: entry.name, reasons: coverage.undersampledReasons });
     }
   }
@@ -491,7 +619,9 @@ async function main() {
     for (const anchor of undersampledAnchors) {
       console.log(`  ${anchor.name}: ${anchor.reasons.join("; ")}`);
     }
-    console.log("\n  NOTE: Undersampled packages should not act as must-pass anchors without an explicit waiver.");
+    console.log(
+      "\n  NOTE: Undersampled packages should not act as must-pass anchors without an explicit waiver.",
+    );
   }
 
   // Print coverage diagnostics
@@ -504,12 +634,16 @@ async function main() {
     const cov = entry.result.coverageDiagnostics;
     const xrefs = entry.result.graphStats.crossPackageTypeRefs ?? 0;
     if (cov) {
-      const undersampledStr = cov.undersampled ? `YES (${cov.undersampledReasons.length} reason(s))` : "no";
+      const undersampledStr = cov.undersampled
+        ? `YES (${cov.undersampledReasons.length} reason(s))`
+        : "no";
       console.log(
         `${entry.name.padEnd(25)}${cov.typesSource.padEnd(10)}${String(cov.reachableFiles).padEnd(12)}${String(cov.measuredPositions).padEnd(12)}${String(cov.measuredDeclarations).padEnd(8)}${String(xrefs).padEnd(10)}${undersampledStr}`,
       );
     } else {
-      console.log(`${entry.name.padEnd(25)}${"n/a".padEnd(10)}${"n/a".padEnd(12)}${"n/a".padEnd(12)}${"n/a".padEnd(8)}${"n/a".padEnd(10)}n/a`);
+      console.log(
+        `${entry.name.padEnd(25)}${"n/a".padEnd(10)}${"n/a".padEnd(12)}${"n/a".padEnd(12)}${"n/a".padEnd(8)}${"n/a".padEnd(10)}n/a`,
+      );
     }
   }
 
@@ -570,7 +704,8 @@ async function main() {
     console.log(`\n=== Non-Comparable Results (${nonComparableCount}/${entries.length}) ===\n`);
     for (const en of nonComparableEntries) {
       const reasons: string[] = [];
-      if (en.result.status === "degraded") reasons.push(`degraded: ${en.result.degradedCategory ?? "unknown"}`);
+      if (en.result.status === "degraded")
+        reasons.push(`degraded: ${en.result.degradedCategory ?? "unknown"}`);
       if (en.result.graphStats.usedFallbackGlob) reasons.push("fallback-glob");
       if (en.result.coverageDiagnostics?.undersampled) reasons.push("undersampled");
       console.log(`  ${en.name}: ${reasons.join(", ")}`);
@@ -659,7 +794,7 @@ async function main() {
     manifestSource: manifestFilename,
     sampleCount: poolSampleCount > 0 ? poolSampleCount : poolCount > 0 ? poolCount : undefined,
     sampledHashes: poolSampledHashes,
-    seed: (poolSampleCount > 0 || poolCount > 0) ? seed : undefined,
+    seed: poolSampleCount > 0 || poolCount > 0 ? seed : undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -673,7 +808,11 @@ async function main() {
 
   const filename = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
   writeFileSync(join(resultsBaseDir, filename), JSON.stringify(snapshot, null, 2));
-  const displayDir = isEvalSplit ? "benchmarks-output/eval-raw" : isHoldoutSplit ? "benchmarks/results/holdout" : "benchmarks/results/train";
+  const displayDir = isEvalSplit
+    ? "benchmarks-output/eval-raw"
+    : isHoldoutSplit
+      ? "benchmarks/results/holdout"
+      : "benchmarks/results/train";
   console.log(`\nResults saved to ${displayDir}/${filename}`);
 
   // Exit code 1 only on must-pass failures in train mode

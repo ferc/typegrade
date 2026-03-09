@@ -94,9 +94,9 @@ Domain Fit (validation) 72           75
 ## Programmatic API
 
 ```typescript
-import { comparePackages } from 'typegrade';
+import { comparePackages } from "typegrade";
 
-const comparison = comparePackages('zod', 'valibot');
+const comparison = comparePackages("zod", "valibot");
 // comparison.first: AnalysisResult
 // comparison.second: AnalysisResult
 // comparison.deltas: per-composite score differences
@@ -215,7 +215,7 @@ Returns a `FitCompareResult` with `candidateA`, `candidateB`, `codebase`,
 ### Programmatic API
 
 ```typescript
-import { fitCompare } from 'typegrade';
-const result = fitCompare('zod', 'valibot', { codebasePath: './my-app' });
+import { fitCompare } from "typegrade";
+const result = fitCompare("zod", "valibot", { codebasePath: "./my-app" });
 console.log(result.adoptionDecision.outcome, result.adoptionDecision.winner);
 ```

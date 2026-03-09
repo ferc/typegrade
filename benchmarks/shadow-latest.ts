@@ -91,7 +91,8 @@ export async function runShadowLatest(
   }
 
   // Sample from eval-pool if available, otherwise use a minimal set
-  let specs: { spec: string; typesSourceHint?: string; sizeBand?: string; moduleKind?: string }[] = [];
+  let specs: { spec: string; typesSourceHint?: string; sizeBand?: string; moduleKind?: string }[] =
+    [];
   try {
     const manifest = loadManifest("eval-pool");
     const { sampled } = samplePool(manifest, { count: cfg.sampleCount, seed: cfg.seed });
@@ -133,7 +134,12 @@ export async function runShadowLatest(
       installFailures++;
       rawEntries.push({
         agentReadiness: null,
-        confidenceSummary: { domainInference: 0, graphResolution: 0, sampleCoverage: 0, scenarioApplicability: 0 },
+        confidenceSummary: {
+          domainInference: 0,
+          graphResolution: 0,
+          sampleCoverage: 0,
+          scenarioApplicability: 0,
+        },
         consumerApi: null,
         entrypointStrategy: "unknown",
         hasDomainScore: false,
@@ -160,7 +166,11 @@ export async function runShadowLatest(
     if (isDegraded && !hasNumericScores) abstained++;
     if (isDegraded && hasNumericScores) falseAuthoritative++;
     if (result.graphStats.usedFallbackGlob) fallbackGlob++;
-    if (result.domainInference?.domain && result.domainInference.domain !== "general" && (result.domainInference.confidence ?? 0) < 0.5) {
+    if (
+      result.domainInference?.domain &&
+      result.domainInference.domain !== "general" &&
+      (result.domainInference.confidence ?? 0) < 0.5
+    ) {
       domainOverreach++;
     }
     if (result.scenarioScore && result.domainInference?.domain === "general") {
@@ -187,13 +197,26 @@ export async function runShadowLatest(
   }
 
   // Write raw results (judge-only, never builder-visible)
-  const rawPath = join(cfg.rawOutputDir, `shadow-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`);
-  writeFileSync(rawPath, JSON.stringify({ entries: rawEntries, seed: cfg.seed, timestamp: new Date().toISOString() }, null, 2));
+  const rawPath = join(
+    cfg.rawOutputDir,
+    `shadow-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`,
+  );
+  writeFileSync(
+    rawPath,
+    JSON.stringify(
+      { entries: rawEntries, seed: cfg.seed, timestamp: new Date().toISOString() },
+      null,
+      2,
+    ),
+  );
 
   // Compute aggregate metrics
   const total = rawEntries.length;
   const comparableRate = total > 0 ? comparable / total : 0;
-  const abstentionRate = total > 0 ? abstained / Math.max(1, rawEntries.filter((ee) => ee.status === "degraded").length) : 1;
+  const abstentionRate =
+    total > 0
+      ? abstained / Math.max(1, rawEntries.filter((ee) => ee.status === "degraded").length)
+      : 1;
   const falseAuthRate = total > 0 ? falseAuthoritative / total : 0;
   const installRate = total > 0 ? installFailures / total : 0;
   const fallbackRate = total > 0 ? fallbackGlob / total : 0;
@@ -201,7 +224,9 @@ export async function runShadowLatest(
   const scenarioOverreachRate = total > 0 ? scenarioOverreach / total : 0;
 
   // Score compression: check if scores cluster in narrow band
-  const validScores = rawEntries.map((ee) => ee.consumerApi).filter((ss): ss is number => ss !== null);
+  const validScores = rawEntries
+    .map((ee) => ee.consumerApi)
+    .filter((ss): ss is number => ss !== null);
   let scoreCompression = 0;
   if (validScores.length >= 3) {
     const mean = validScores.reduce((aa, bb) => aa + bb, 0) / validScores.length;
@@ -233,13 +258,19 @@ export async function runShadowLatest(
   }
 
   // Normalize rates
-  for (const vv of Object.values(byTypesSource)) vv.comparableRate = vv.count > 0 ? vv.comparableRate / vv.count : 0;
-  for (const vv of Object.values(bySizeBand)) vv.comparableRate = vv.count > 0 ? vv.comparableRate / vv.count : 0;
-  for (const vv of Object.values(byModuleKind)) vv.comparableRate = vv.count > 0 ? vv.comparableRate / vv.count : 0;
+  for (const vv of Object.values(byTypesSource))
+    vv.comparableRate = vv.count > 0 ? vv.comparableRate / vv.count : 0;
+  for (const vv of Object.values(bySizeBand))
+    vv.comparableRate = vv.count > 0 ? vv.comparableRate / vv.count : 0;
+  for (const vv of Object.values(byModuleKind))
+    vv.comparableRate = vv.count > 0 ? vv.comparableRate / vv.count : 0;
 
   // Compute confidence bounds
   const confidenceBounds = {
-    abstentionCorrectnessRate: wilsonLowerBound(abstained, Math.max(1, rawEntries.filter((ee) => ee.status === "degraded").length)),
+    abstentionCorrectnessRate: wilsonLowerBound(
+      abstained,
+      Math.max(1, rawEntries.filter((ee) => ee.status === "degraded").length),
+    ),
     comparableRate: wilsonLowerBound(comparable, total),
     falseAuthoritativeRate: 1 - wilsonLowerBound(total - falseAuthoritative, total),
     fallbackGlobRate: 1 - wilsonLowerBound(total - fallbackGlob, total),
@@ -257,14 +288,46 @@ export async function runShadowLatest(
   const minFor1Pct = minSampleForBound(0.01, 0.99);
 
   const gateResults: { gate: string; passed: boolean; detail: string }[] = [
-    { detail: `${(falseAuthRate * 100).toFixed(1)}%, 99%CI upper: ${(falseAuthUB * 100).toFixed(1)}%`, gate: "false-authoritative-CI<5%", passed: falseAuthUB < 0.05 },
-    { detail: `${(fallbackRate * 100).toFixed(1)}%, 99%CI upper: ${(fallbackUB * 100).toFixed(1)}%`, gate: "fallback-glob-CI<5%", passed: fallbackUB < 0.05 },
-    { detail: `${(installRate * 100).toFixed(1)}%, 99%CI upper: ${(installUB * 100).toFixed(1)}%`, gate: "install-failure-CI<10%", passed: installUB < 0.10 },
-    { detail: `${(comparableRate * 100).toFixed(1)}%, 99%CI lower: ${(comparableLB * 100).toFixed(1)}%`, gate: "comparable-rate-CI>40%", passed: comparableLB > 0.40 },
-    { detail: `${(domainOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(overreachUB * 100).toFixed(1)}%`, gate: "domain-overreach-CI<20%", passed: overreachUB < 0.20 },
-    { detail: `${(scenarioOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(scenOverreachUB * 100).toFixed(1)}%`, gate: "scenario-overreach-CI<20%", passed: scenOverreachUB < 0.20 },
-    { detail: `${(abstentionRate * 100).toFixed(1)}%`, gate: "abstention-correctness->80%", passed: abstentionRate > 0.8 },
-    { detail: `n=${total}, need ${minFor1Pct} for <1% claim`, gate: "sample-size-adequacy", passed: total >= 50 },
+    {
+      detail: `${(falseAuthRate * 100).toFixed(1)}%, 99%CI upper: ${(falseAuthUB * 100).toFixed(1)}%`,
+      gate: "false-authoritative-CI<5%",
+      passed: falseAuthUB < 0.05,
+    },
+    {
+      detail: `${(fallbackRate * 100).toFixed(1)}%, 99%CI upper: ${(fallbackUB * 100).toFixed(1)}%`,
+      gate: "fallback-glob-CI<5%",
+      passed: fallbackUB < 0.05,
+    },
+    {
+      detail: `${(installRate * 100).toFixed(1)}%, 99%CI upper: ${(installUB * 100).toFixed(1)}%`,
+      gate: "install-failure-CI<10%",
+      passed: installUB < 0.1,
+    },
+    {
+      detail: `${(comparableRate * 100).toFixed(1)}%, 99%CI lower: ${(comparableLB * 100).toFixed(1)}%`,
+      gate: "comparable-rate-CI>40%",
+      passed: comparableLB > 0.4,
+    },
+    {
+      detail: `${(domainOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(overreachUB * 100).toFixed(1)}%`,
+      gate: "domain-overreach-CI<20%",
+      passed: overreachUB < 0.2,
+    },
+    {
+      detail: `${(scenarioOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(scenOverreachUB * 100).toFixed(1)}%`,
+      gate: "scenario-overreach-CI<20%",
+      passed: scenOverreachUB < 0.2,
+    },
+    {
+      detail: `${(abstentionRate * 100).toFixed(1)}%`,
+      gate: "abstention-correctness->80%",
+      passed: abstentionRate > 0.8,
+    },
+    {
+      detail: `n=${total}, need ${minFor1Pct} for <1% claim`,
+      gate: "sample-size-adequacy",
+      passed: total >= 50,
+    },
   ];
 
   const summary: RedactedShadowSummary = {
@@ -297,7 +360,12 @@ function buildEmptySummary(): RedactedShadowSummary {
     abstentionCorrectnessRate: 0,
     allGatesPassed: false,
     comparableRate: 0,
-    confidenceBounds: { abstentionCorrectnessRate: 0, comparableRate: 0, falseAuthoritativeRate: 0, fallbackGlobRate: 0 },
+    confidenceBounds: {
+      abstentionCorrectnessRate: 0,
+      comparableRate: 0,
+      falseAuthoritativeRate: 0,
+      fallbackGlobRate: 0,
+    },
     crossRunStability: 0,
     domainOverreachRate: 0,
     falseAuthoritativeRate: 0,

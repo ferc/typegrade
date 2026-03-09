@@ -37,19 +37,19 @@ pnpm intent:list
 
 When you change code, update the affected skills in the same commit:
 
-| Change area | Affected skills |
-|---|---|
-| CLI commands or flags | `analyze-project`, `score-package`, `compare-packages`, `quality-gate` |
-| JSON output shape or fields | `consume-json` |
-| Scoring dimensions or weights | `analyze-project`, `score-package`, `consume-json` |
-| Confidence or coverage logic | `score-package`, `consume-json`, `quality-gate` |
-| Self-analyze or agent output | `self-analyze` |
-| Fix planning or apply-fixes | `self-analyze`, `consume-json` |
-| Boundary analysis | `analyze-project`, `consume-json` |
-| Diff analysis | `compare-packages`, `consume-json` |
-| Domain detection or scenarios | `score-package`, `consume-json` |
-| Profile system | `analyze-project`, `quality-gate` |
-| Benchmark or CI workflows | `quality-gate`, `maintain-skills` |
+| Change area                   | Affected skills                                                        |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| CLI commands or flags         | `analyze-project`, `score-package`, `compare-packages`, `quality-gate` |
+| JSON output shape or fields   | `consume-json`                                                         |
+| Scoring dimensions or weights | `analyze-project`, `score-package`, `consume-json`                     |
+| Confidence or coverage logic  | `score-package`, `consume-json`, `quality-gate`                        |
+| Self-analyze or agent output  | `self-analyze`                                                         |
+| Fix planning or apply-fixes   | `self-analyze`, `consume-json`                                         |
+| Boundary analysis             | `analyze-project`, `consume-json`                                      |
+| Diff analysis                 | `compare-packages`, `consume-json`                                     |
+| Domain detection or scenarios | `score-package`, `consume-json`                                        |
+| Profile system                | `analyze-project`, `quality-gate`                                      |
+| Benchmark or CI workflows     | `quality-gate`, `maintain-skills`                                      |
 
 ## Validation Workflow
 

@@ -94,7 +94,9 @@ function findLatestEvalSnapshot(): EvalSnapshot | null {
     return null;
   }
 
-  const files = readdirSync(evalDir).filter((fn) => fn.endsWith(".json")).sort();
+  const files = readdirSync(evalDir)
+    .filter((fn) => fn.endsWith(".json"))
+    .sort();
   if (files.length === 0) {
     return null;
   }
@@ -109,7 +111,9 @@ function loadAllEvalSnapshots(): EvalSnapshot[] {
     return [];
   }
 
-  const files = readdirSync(evalDir).filter((fn) => fn.endsWith(".json")).sort();
+  const files = readdirSync(evalDir)
+    .filter((fn) => fn.endsWith(".json"))
+    .sort();
   const snapshots: EvalSnapshot[] = [];
   for (const file of files) {
     try {
@@ -247,7 +251,9 @@ function findLatestTrainSnapshot(): RawBenchmarkSnapshotV2 | null {
     return null;
   }
 
-  const files = readdirSync(resultsDir).filter((fl) => fl.endsWith(".json")).sort();
+  const files = readdirSync(resultsDir)
+    .filter((fl) => fl.endsWith(".json"))
+    .sort();
   for (let idx = files.length - 1; idx >= 0; idx--) {
     try {
       const data = JSON.parse(
@@ -574,7 +580,10 @@ function computePerSeedMetrics(snapshots: EvalSnapshot[]): PerSeedMetrics[] {
 
     let scenarioOverreachCount = 0;
     for (const entry of snap.entries) {
-      if (entry.scenarioScore && (!entry.domainInference || entry.domainInference.confidence < 0.7)) {
+      if (
+        entry.scenarioScore &&
+        (!entry.domainInference || entry.domainInference.confidence < 0.7)
+      ) {
         scenarioOverreachCount++;
       }
     }
@@ -664,7 +673,9 @@ function computeMultiSeedMetrics(snapshots: EvalSnapshot[]): MultiSeedResult | n
   }
 
   // Sort each metric array for percentile computation
-  const domainOverreachRates = perSeed.map((ps) => ps.domainOverreachRate).sort((aa, bb) => aa - bb);
+  const domainOverreachRates = perSeed
+    .map((ps) => ps.domainOverreachRate)
+    .sort((aa, bb) => aa - bb);
   const undersampledRates = perSeed.map((ps) => ps.undersampledRate).sort((aa, bb) => aa - bb);
   const scenarioRates = perSeed.map((ps) => ps.scenarioOverreachRate).sort((aa, bb) => aa - bb);
 
@@ -702,11 +713,7 @@ const BASELINE_METRICS = [
  * Returns null if no baseline file is found or it cannot be parsed.
  */
 function loadApprovedBaseline(): RedactedEvalSummary | null {
-  const baselinePath = join(
-    import.meta.dirname,
-    "baselines",
-    "approved-baseline.json",
-  );
+  const baselinePath = join(import.meta.dirname, "baselines", "approved-baseline.json");
   if (!existsSync(baselinePath)) {
     return null;
   }
@@ -766,7 +773,10 @@ function compareWithBaseline(currentMetrics: RedactedEvalSummary["metrics"]): {
 
 // ─── Gate Builders ────────────────────────────────────────────────────────
 
-function buildEvalGates(metrics: UnlabeledEvalMetrics, totalEntries: number): { gate: string; passed: boolean; detail: string }[] {
+function buildEvalGates(
+  metrics: UnlabeledEvalMetrics,
+  totalEntries: number,
+): { gate: string; passed: boolean; detail: string }[] {
   // CI-bound helpers: compute Wilson upper bounds for failure rates
   const overreachCount = Math.round(metrics.domainOverreachRate * totalEntries);
   const undersampledCount = Math.round(metrics.undersampledRate * totalEntries);
@@ -782,7 +792,7 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics, totalEntries: number): { 
     {
       detail: `${(metrics.domainOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(overreachUB * 100).toFixed(1)}%`,
       gate: "eval-wrong-specific-rate-CI<=10%",
-      passed: overreachUB <= 0.10,
+      passed: overreachUB <= 0.1,
     },
     {
       detail: `${metrics.coverageConfidenceViolations} violation(s)`,
@@ -815,11 +825,12 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics, totalEntries: number): { 
       passed: metrics.scoreCompressionRate < 0.6,
     },
     {
-      detail: metrics.seedInstabilityRate !== undefined
-        ? `${(metrics.seedInstabilityRate * 100).toFixed(1)}%`
-        : "n/a (insufficient seeds)",
+      detail:
+        metrics.seedInstabilityRate !== undefined
+          ? `${(metrics.seedInstabilityRate * 100).toFixed(1)}%`
+          : "n/a (insufficient seeds)",
       gate: "eval-seed-instability-<10%",
-      passed: metrics.seedInstabilityRate === undefined || metrics.seedInstabilityRate < 0.10,
+      passed: metrics.seedInstabilityRate === undefined || metrics.seedInstabilityRate < 0.1,
     },
     {
       detail: `${(metrics.domainOverreachRate * 100).toFixed(1)}%`,
@@ -827,18 +838,21 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics, totalEntries: number): { 
       passed: metrics.domainOverreachRate < 0.15,
     },
     {
-      detail: metrics.trainEvalDrift !== undefined
-        ? `${metrics.trainEvalDrift.toFixed(3)}`
-        : "n/a (no train data)",
+      detail:
+        metrics.trainEvalDrift !== undefined
+          ? `${metrics.trainEvalDrift.toFixed(3)}`
+          : "n/a (no train data)",
       gate: "eval-train-drift-<2.0",
       passed: metrics.trainEvalDrift === undefined || metrics.trainEvalDrift < 2.0,
     },
     {
-      detail: metrics.confidenceModerationRate !== undefined
-        ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%`
-        : "n/a",
+      detail:
+        metrics.confidenceModerationRate !== undefined
+          ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%`
+          : "n/a",
       gate: "eval-confidence-moderation-<20%",
-      passed: metrics.confidenceModerationRate === undefined || metrics.confidenceModerationRate < 0.2,
+      passed:
+        metrics.confidenceModerationRate === undefined || metrics.confidenceModerationRate < 0.2,
     },
   ];
 }
@@ -864,7 +878,7 @@ function buildMultiSeedGates(
     {
       detail: `p50=${(multiSeed.undersampledP50 * 100).toFixed(1)}%`,
       gate: "multi-seed-undersampled-p50-<=10%",
-      passed: multiSeed.undersampledP50 <= 0.10,
+      passed: multiSeed.undersampledP50 <= 0.1,
     },
     {
       detail: `p90=${(multiSeed.undersampledP90 * 100).toFixed(1)}%`,
@@ -874,7 +888,7 @@ function buildMultiSeedGates(
     {
       detail: `p50=${(multiSeed.scenarioOverreachP50 * 100).toFixed(1)}%`,
       gate: "multi-seed-scenario-overreach-p50-<=10%",
-      passed: multiSeed.scenarioOverreachP50 <= 0.10,
+      passed: multiSeed.scenarioOverreachP50 <= 0.1,
     },
     {
       detail: `p90=${(multiSeed.scenarioOverreachP90 * 100).toFixed(1)}%`,
@@ -898,23 +912,25 @@ function printMetrics(metrics: UnlabeledEvalMetrics): void {
   console.log(`  Coverage-confidence viols:  ${metrics.coverageConfidenceViolations}`);
   console.log(`  Pareto violations:          ${metrics.paretoViolationCount}`);
   console.log(`  Score compression:          ${(metrics.scoreCompressionRate * 100).toFixed(1)}%`);
-  const seedLabel = metrics.seedInstabilityRate !== undefined
-    ? `${(metrics.seedInstabilityRate * 100).toFixed(1)}%`
-    : "n/a (insufficient seeds)";
+  const seedLabel =
+    metrics.seedInstabilityRate !== undefined
+      ? `${(metrics.seedInstabilityRate * 100).toFixed(1)}%`
+      : "n/a (insufficient seeds)";
   console.log(`  Seed instability rate:      ${seedLabel}`);
   console.log(`  Domain overreach rate:      ${(metrics.domainOverreachRate * 100).toFixed(1)}%`);
   console.log(`  Scenario overreach rate:    ${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`);
-  const driftLabel = metrics.trainEvalDrift !== undefined
-    ? metrics.trainEvalDrift.toFixed(3)
-    : "n/a (no train data)";
+  const driftLabel =
+    metrics.trainEvalDrift !== undefined
+      ? metrics.trainEvalDrift.toFixed(3)
+      : "n/a (no train data)";
   console.log(`  Train-eval drift:           ${driftLabel}`);
-  const compactLabel = metrics.compactRate !== undefined
-    ? `${(metrics.compactRate * 100).toFixed(1)}%`
-    : "n/a";
+  const compactLabel =
+    metrics.compactRate !== undefined ? `${(metrics.compactRate * 100).toFixed(1)}%` : "n/a";
   console.log(`  Compact package rate:       ${compactLabel}`);
-  const moderationLabel = metrics.confidenceModerationRate !== undefined
-    ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%`
-    : "n/a";
+  const moderationLabel =
+    metrics.confidenceModerationRate !== undefined
+      ? `${(metrics.confidenceModerationRate * 100).toFixed(1)}%`
+      : "n/a";
   console.log(`  Confidence moderation rate: ${moderationLabel}`);
 }
 
@@ -935,8 +951,12 @@ function printMultiSeedMetrics(multiSeed: MultiSeedResult): void {
   console.log(`  Wrong-specific p90:         ${(multiSeed.wrongSpecificP90 * 100).toFixed(1)}%`);
   console.log(`  Undersampled p50:           ${(multiSeed.undersampledP50 * 100).toFixed(1)}%`);
   console.log(`  Undersampled p90:           ${(multiSeed.undersampledP90 * 100).toFixed(1)}%`);
-  console.log(`  Scenario-overreach p50:     ${(multiSeed.scenarioOverreachP50 * 100).toFixed(1)}%`);
-  console.log(`  Scenario-overreach p90:     ${(multiSeed.scenarioOverreachP90 * 100).toFixed(1)}%`);
+  console.log(
+    `  Scenario-overreach p50:     ${(multiSeed.scenarioOverreachP50 * 100).toFixed(1)}%`,
+  );
+  console.log(
+    `  Scenario-overreach p90:     ${(multiSeed.scenarioOverreachP90 * 100).toFixed(1)}%`,
+  );
   console.log(`  Per-family score variance:  ${multiSeed.perFamilyScoreVariance.toFixed(2)}`);
 }
 
@@ -1068,8 +1088,15 @@ function computeConfidenceCalibration(entries: EvalEntry[]): CalibrationBandResu
         bandEntries.push({
           confidence: avgConf,
           consumerApi: entry.consumerApi,
-          domainOverreach: !!(entry.domainInference && entry.domainInference.domain !== "general" && entry.domainInference.confidence < 0.7),
-          isDegraded: entry.consumerApi === null && entry.agentReadiness === null && entry.typeSafety === null,
+          domainOverreach: !!(
+            entry.domainInference &&
+            entry.domainInference.domain !== "general" &&
+            entry.domainInference.confidence < 0.7
+          ),
+          isDegraded:
+            entry.consumerApi === null &&
+            entry.agentReadiness === null &&
+            entry.typeSafety === null,
           undersampled: !!entry.coverageDiagnostics?.undersampled,
           usedFallback: !!entry.graphStats?.usedFallbackGlob,
         });
@@ -1079,16 +1106,20 @@ function computeConfidenceCalibration(entries: EvalEntry[]): CalibrationBandResu
     const count = bandEntries.length;
     if (count === 0) {
       results.push({
-        band: bandDef.band, count: 0, degradedRate: 0, domainOverreachRate: 0,
-        failureModeRate: 0, fallbackRate: 0, meanConfidence: 0, reasonableRate: 0,
+        band: bandDef.band,
+        count: 0,
+        degradedRate: 0,
+        domainOverreachRate: 0,
+        failureModeRate: 0,
+        fallbackRate: 0,
+        meanConfidence: 0,
+        reasonableRate: 0,
         undersampledRate: 0,
       });
       continue;
     }
 
-    const meanConfidence = round3(
-      bandEntries.reduce((sum, be) => sum + be.confidence, 0) / count,
-    );
+    const meanConfidence = round3(bandEntries.reduce((sum, be) => sum + be.confidence, 0) / count);
     const reasonableCount = bandEntries.filter((be) => {
       const score = be.consumerApi ?? 0;
       return score >= 40 && score <= 80;
@@ -1202,9 +1233,10 @@ function computeNormalizedFamilyVariance(familyMetrics: FamilyMetric[]): number 
 
   coefficients.sort((aa, bb) => aa - bb);
   const mid = Math.floor(coefficients.length / 2);
-  const medianCv = coefficients.length % 2 === 0
-    ? (coefficients[mid - 1]! + coefficients[mid]!) / 2
-    : coefficients[mid]!;
+  const medianCv =
+    coefficients.length % 2 === 0
+      ? (coefficients[mid - 1]! + coefficients[mid]!) / 2
+      : coefficients[mid]!;
   return round3(medianCv);
 }
 
@@ -1236,9 +1268,7 @@ function collectWrongSpecificExamples(
 /**
  * Collect fallback-glob examples, redacted to family (tier) only.
  */
-function collectFallbackExamples(
-  entries: EvalEntry[],
-): { family: string; reason: string }[] {
+function collectFallbackExamples(entries: EvalEntry[]): { family: string; reason: string }[] {
   const examples: { family: string; reason: string }[] = [];
   for (const entry of entries) {
     if (entry.graphStats?.usedFallbackGlob) {
@@ -1291,7 +1321,9 @@ function main() {
   const validation = validateSnapshotManifest(snapshot, expectedPoolHash);
   if (!validation.valid) {
     console.error(`Manifest validation FAILED: ${validation.reason}`);
-    console.error("The eval artifact was produced from a different manifest than the current eval pool.");
+    console.error(
+      "The eval artifact was produced from a different manifest than the current eval pool.",
+    );
     console.error("Re-run the eval benchmark with the current manifest.");
     process.exit(1);
   }
@@ -1319,7 +1351,9 @@ function main() {
 
   // Compute score statistics for summary
   const consumerApis = snapshot.entries.map((en) => en.consumerApi ?? 0).filter((sc) => sc > 0);
-  const agentReadinesses = snapshot.entries.map((en) => en.agentReadiness ?? 0).filter((sc) => sc > 0);
+  const agentReadinesses = snapshot.entries
+    .map((en) => en.agentReadiness ?? 0)
+    .filter((sc) => sc > 0);
   const typeSafeties = snapshot.entries.map((en) => en.typeSafety ?? 0).filter((sc) => sc > 0);
 
   const median = (arr: number[]) => {

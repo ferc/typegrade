@@ -73,7 +73,12 @@ interface ResultEntry {
   consumerApi: number | null;
   agentReadiness: number | null;
   typeSafety?: number | null;
-  dimensions?: { key: string; score: number | null; confidence: number | null; metrics?: Record<string, unknown> }[];
+  dimensions?: {
+    key: string;
+    score: number | null;
+    confidence: number | null;
+    metrics?: Record<string, unknown>;
+  }[];
   graphStats?: { usedFallbackGlob: boolean } | null;
   coverageDiagnostics?: { undersampled: boolean; samplingClass?: string } | null;
   domainInference?: { domain: string; confidence: number } | null;
@@ -155,7 +160,7 @@ interface GenerationStats {
 function mulberry32(seed: number): () => number {
   let state = seed;
   return () => {
-    let tt = (state += 0x6D_2B_79_F5);
+    let tt = (state += 0x6d_2b_79_f5);
     tt = Math.imul(tt ^ (tt >>> 15), tt | 1);
     tt ^= tt + Math.imul(tt ^ (tt >>> 7), tt | 61);
     // Convert to unsigned 32-bit integer before dividing
@@ -314,7 +319,9 @@ function findLatestTrainSnapshot(): BenchmarkSnapshot | null {
     if (!existsSync(dir)) {
       continue;
     }
-    const files = readdirSync(dir).filter((ff) => ff.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(ff)).toSorted();
+    const files = readdirSync(dir)
+      .filter((ff) => ff.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(ff))
+      .toSorted();
     for (let idx = files.length - 1; idx >= 0; idx--) {
       const data = JSON.parse(readFileSync(join(dir, files[idx]!), "utf8"));
       if (!data.corpusSplit || data.corpusSplit === "train") {
@@ -411,7 +418,13 @@ function evaluateConcordance(params: {
     }
   }
 
-  return { concordant, hardDiagFailures, mustPassFailures, rate: total > 0 ? concordant / total : 0, total };
+  return {
+    concordant,
+    hardDiagFailures,
+    mustPassFailures,
+    rate: total > 0 ? concordant / total : 0,
+    total,
+  };
 }
 
 /**
@@ -583,16 +596,20 @@ function evaluateIndividual(params: {
 
   // Hard constraints
   const feasible =
-    totalMustPassFails === 0 &&
-    totalHardDiagFails === 0 &&
-    passRate >= CONCORDANCE_FLOOR;
+    totalMustPassFails === 0 && totalHardDiagFails === 0 && passRate >= CONCORDANCE_FLOOR;
 
   return {
     crowdingDistance: 0,
     decoded,
     feasible,
     genes: [...genes],
-    objectives: [wrongSpecificRate, undersampledRate, fallbackRate, assertionError, agentSeparationInverse],
+    objectives: [
+      wrongSpecificRate,
+      undersampledRate,
+      fallbackRate,
+      assertionError,
+      agentSeparationInverse,
+    ],
     rank: 0,
   };
 }
@@ -790,24 +807,26 @@ function sbxCrossover(params: {
 
     // Compute spread factor for lower bound
     const exponent = 1 / (eta + 1);
-    const spreadLow = 1 + (2 * (sortedLow - lo) / diff);
-    const probLow = 2 - spreadLow ** (-(eta + 1));
+    const spreadLow = 1 + (2 * (sortedLow - lo)) / diff;
+    const probLow = 2 - spreadLow ** -(eta + 1);
     const rand1 = rng();
-    const betaq1 = rand1 <= 1 / probLow
-      ? (rand1 * probLow) ** exponent
-      : (1 / (2 - rand1 * probLow)) ** exponent;
+    const betaq1 =
+      rand1 <= 1 / probLow
+        ? (rand1 * probLow) ** exponent
+        : (1 / (2 - rand1 * probLow)) ** exponent;
 
     // Compute spread factor for upper bound
-    const spreadHigh = 1 + (2 * (hi - sortedHigh) / diff);
-    const probHigh = 2 - spreadHigh ** (-(eta + 1));
+    const spreadHigh = 1 + (2 * (hi - sortedHigh)) / diff;
+    const probHigh = 2 - spreadHigh ** -(eta + 1);
     const rand2 = rng();
-    const betaq2 = rand2 <= 1 / probHigh
-      ? (rand2 * probHigh) ** exponent
-      : (1 / (2 - rand2 * probHigh)) ** exponent;
+    const betaq2 =
+      rand2 <= 1 / probHigh
+        ? (rand2 * probHigh) ** exponent
+        : (1 / (2 - rand2 * probHigh)) ** exponent;
 
     // Produce offspring
-    child1[gi] = clampGene(0.5 * ((sortedLow + sortedHigh) - betaq1 * diff), lo, hi);
-    child2[gi] = clampGene(0.5 * ((sortedLow + sortedHigh) + betaq2 * diff), lo, hi);
+    child1[gi] = clampGene(0.5 * (sortedLow + sortedHigh - betaq1 * diff), lo, hi);
+    child2[gi] = clampGene(0.5 * (sortedLow + sortedHigh + betaq2 * diff), lo, hi);
   }
 
   return [child1, child2];
@@ -846,9 +865,10 @@ function polynomialMutation(params: {
     const uu = rng();
 
     const pmExp = 1 / (eta + 1);
-    const deltaq = uu < 0.5
-      ? (2 * uu + (1 - 2 * uu) * ((1 - delta1) ** (eta + 1))) ** pmExp - 1
-      : 1 - (2 * (1 - uu) + 2 * (uu - 0.5) * ((1 - delta2) ** (eta + 1))) ** pmExp;
+    const deltaq =
+      uu < 0.5
+        ? (2 * uu + (1 - 2 * uu) * (1 - delta1) ** (eta + 1)) ** pmExp - 1
+        : 1 - (2 * (1 - uu) + 2 * (uu - 0.5) * (1 - delta2) ** (eta + 1)) ** pmExp;
 
     mutated[gi] = clampGene(val + deltaq * range, lo, hi);
   }
@@ -873,9 +893,7 @@ function initializePopulation(params: {
 }): Individual[] {
   const { baselineGenes, bounds, entries, rng, config } = params;
   // First individual is always the baseline
-  const population: Individual[] = [
-    evaluateIndividual({ bounds, entries, genes: baselineGenes }),
-  ];
+  const population: Individual[] = [evaluateIndividual({ bounds, entries, genes: baselineGenes })];
 
   // Remaining individuals: random within bounds
   for (let idx = 1; idx < config.populationSize; idx++) {
@@ -1010,9 +1028,9 @@ function runOptimizer(params: {
         .join(" ");
       console.log(
         `  Gen ${String(gen).padStart(3)}: ` +
-        `feasible=${String(stats.feasibleCount).padStart(3)} ` +
-        `pareto=${String(stats.paretoFrontSize).padStart(3)} ` +
-        `best=[${bestStr}]`,
+          `feasible=${String(stats.feasibleCount).padStart(3)} ` +
+          `pareto=${String(stats.paretoFrontSize).padStart(3)} ` +
+          `best=[${bestStr}]`,
       );
     }
   }
@@ -1103,7 +1121,11 @@ function selectKneeSolution(population: Individual[]): Individual | null {
 }
 
 /** Print detailed knee solution thresholds and weight changes */
-function printKneeDetails(decoded: DecodedParams, baselineGenes: number[], bounds: GeneBounds[]): void {
+function printKneeDetails(
+  decoded: DecodedParams,
+  baselineGenes: number[],
+  bounds: GeneBounds[],
+): void {
   console.log("\n  Thresholds:");
   console.log(`    Domain confidence:      ${decoded.domainConfidenceThreshold.toFixed(3)}`);
   console.log(`    Domain ambiguity gap:   ${decoded.domainAmbiguityGap.toFixed(3)}`);
@@ -1166,9 +1188,7 @@ function formatDecodedSolution(ind: Individual): Record<string, unknown> {
       minReachableFiles: decoded.minReachableFiles,
       undersampleScoreCap: decoded.undersampleScoreCap,
     },
-    weights: Object.fromEntries(
-      COMPOSITE_KEYS.map((ck) => [ck, decoded.weights[ck]]),
-    ),
+    weights: Object.fromEntries(COMPOSITE_KEYS.map((ck) => [ck, decoded.weights[ck]])),
   };
 }
 
@@ -1201,10 +1221,16 @@ function main() {
   const rng = mulberry32(PRNG_SEED);
 
   console.log(`Gene count: ${bounds.length} decision variables`);
-  console.log(`Objectives: wrongSpecificRate, undersampledRate, fallbackRate, assertionError, agentSeparation`);
+  console.log(
+    `Objectives: wrongSpecificRate, undersampledRate, fallbackRate, assertionError, agentSeparation`,
+  );
 
   // Evaluate baseline
-  const baselineInd = evaluateIndividual({ bounds, entries: snapshot.entries, genes: baselineGenes });
+  const baselineInd = evaluateIndividual({
+    bounds,
+    entries: snapshot.entries,
+    genes: baselineGenes,
+  });
   console.log("\nBaseline objectives:");
   console.log(`  Wrong-specific rate: ${(baselineInd.objectives[0]! * 100).toFixed(1)}%`);
   console.log(`  Undersampled rate:   ${(baselineInd.objectives[1]! * 100).toFixed(1)}%`);
@@ -1262,12 +1288,10 @@ function main() {
   }
 
   // Compare against baseline
-  const anyImproved = knee !== null && knee.objectives.some(
-    (val, oi) => val < baselineInd.objectives[oi]!,
-  );
-  const anyRegressed = knee !== null && knee.objectives.some(
-    (val, oi) => val > baselineInd.objectives[oi]!,
-  );
+  const anyImproved =
+    knee !== null && knee.objectives.some((val, oi) => val < baselineInd.objectives[oi]!);
+  const anyRegressed =
+    knee !== null && knee.objectives.some((val, oi) => val > baselineInd.objectives[oi]!);
 
   console.log("\n=== Aggregate ===");
   console.log(`  Improvement found: ${anyImproved ? "yes" : "no"}`);
@@ -1289,7 +1313,12 @@ function main() {
   const paretoFrontData = paretoFront.map((ind) => formatDecodedSolution(ind));
 
   // Build per-objective best solutions
-  const objectiveLabels = ["wrongSpecificRate", "undersampledRate", "fallbackRate", "assertionError"];
+  const objectiveLabels = [
+    "wrongSpecificRate",
+    "undersampledRate",
+    "fallbackRate",
+    "assertionError",
+  ];
   const bestPerObjective: Record<string, unknown> = {};
   for (let oi = 0; oi < NUM_OBJECTIVES; oi++) {
     const feasible = population.filter((ind) => ind.feasible);
@@ -1338,7 +1367,10 @@ function main() {
   };
 
   // Write to benchmarks/results/ as the spec requires
-  const resultsPath = join(resultsDir, `optimize-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}.json`);
+  const resultsPath = join(
+    resultsDir,
+    `optimize-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}.json`,
+  );
   writeFileSync(resultsPath, JSON.stringify(report, null, 2));
   console.log(`\nPareto front saved to ${resultsPath}`);
 

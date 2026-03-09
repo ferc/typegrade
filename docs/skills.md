@@ -4,15 +4,15 @@ typegrade ships versioned skills for AI coding agents via [TanStack Intent](http
 
 ## Shipped Skills
 
-| Skill | What it teaches |
-|---|---|
-| `analyze-project` | Local codebase analysis with `typegrade analyze`. Profile selection, verbose/explain flags, confidence interpretation. |
-| `score-package` | Published package evaluation with `typegrade score`. Package-vs-source mode differences, confidence/coverage caveats. |
-| `compare-packages` | Side-by-side comparison with `typegrade compare`. Reading deltas, domain fit, avoiding cross-domain mistakes. |
-| `quality-gate` | CI integration with `--min-score`. Exit codes, JSON output, handling low-confidence failures. |
-| `consume-json` | Programmatic JSON consumption. Stable fields, confidence handling, undersampling detection. |
-| `self-analyze` | Closed-loop improvement with `typegrade self-analyze`. Fix batches, risk levels, iterative workflows. |
-| `maintain-skills` | Maintainer skill for keeping skills fresh. Intent validation, stale checks, code-to-skill mapping. |
+| Skill              | What it teaches                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `analyze-project`  | Local codebase analysis with `typegrade analyze`. Profile selection, verbose/explain flags, confidence interpretation. |
+| `score-package`    | Published package evaluation with `typegrade score`. Package-vs-source mode differences, confidence/coverage caveats.  |
+| `compare-packages` | Side-by-side comparison with `typegrade compare`. Reading deltas, domain fit, avoiding cross-domain mistakes.          |
+| `quality-gate`     | CI integration with `--min-score`. Exit codes, JSON output, handling low-confidence failures.                          |
+| `consume-json`     | Programmatic JSON consumption. Stable fields, confidence handling, undersampling detection.                            |
+| `self-analyze`     | Closed-loop improvement with `typegrade self-analyze`. Fix batches, risk levels, iterative workflows.                  |
+| `maintain-skills`  | Maintainer skill for keeping skills fresh. Intent validation, stale checks, code-to-skill mapping.                     |
 
 ## Consumer Setup
 

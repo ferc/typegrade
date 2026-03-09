@@ -65,7 +65,12 @@ export interface RawBenchmarkEntry {
   typeSafety: number | null;
   domainFitScore: number | null;
   scenarioScore: unknown | null;
-  dimensions: { key: string; score: number | null; confidence: number | null; metrics: Record<string, unknown> }[];
+  dimensions: {
+    key: string;
+    score: number | null;
+    confidence: number | null;
+    metrics: Record<string, unknown>;
+  }[];
   graphStats: unknown;
   coverageDiagnostics: unknown | null;
   domainInference: unknown | null;
