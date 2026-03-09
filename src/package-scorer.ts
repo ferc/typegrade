@@ -1,4 +1,5 @@
 import type { AnalysisResult, PackageAnalysisContext, PackageIdentity } from "./types.js";
+import { type AnalyzeOptions, analyzeProject } from "./analyzer.js";
 import { basename, join, resolve } from "node:path";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
 import {
@@ -10,7 +11,6 @@ import {
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { DomainType } from "./domain.js";
 import type { GraphStats } from "./graph/types.js";
-import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
 import { loadProject } from "./utils/project-loader.js";
 import { tmpdir } from "node:os";
@@ -80,14 +80,14 @@ function scoreLocalPackage(
     typesSource: "bundled",
   };
 
-  const opts: Parameters<typeof analyzeProject>[1] = {
+  const opts: AnalyzeOptions = {
     ...(domain !== undefined && { domain }),
     mode: "package",
     packageContext,
     sourceFilesOptions: { includeDts: true, includeNodeModules: true },
   };
   if (graph.filesToAnalyze.length > 0) {
-    opts!.fileFilter = new Set(graph.filesToAnalyze);
+    opts.fileFilter = new Set(graph.filesToAnalyze);
   }
 
   const result = analyzeProject(localPath, opts);
@@ -361,14 +361,14 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       typesSource,
     };
 
-    const opts: Parameters<typeof analyzeProject>[1] = {
+    const opts: AnalyzeOptions = {
       ...(options?.domain !== undefined && { domain: options.domain }),
       mode: "package",
       packageContext,
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     };
     if (graph.filesToAnalyze.length > 0) {
-      opts!.fileFilter = new Set(graph.filesToAnalyze);
+      opts.fileFilter = new Set(graph.filesToAnalyze);
     }
 
     const result = analyzeProject(installRoot, opts);
