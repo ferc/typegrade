@@ -1,6 +1,6 @@
 library:
   name: typegrade
-  version: "0.9.0"
+  version: "0.10.0"
   repository: ferc/typegrade
   description: TypeScript type-safety and precision analyzer for the AI agent era
 
@@ -88,3 +88,10 @@ failure_modes:
       Agent uses scenario scores from one domain to judge another domain.
       Scenario scores are domain-specific.
     skills: [consume-json, score-package]
+
+  - id: degraded-result-trust
+    description: >
+      Agent ignores the status field and acts on scores from a degraded
+      analysis. Degraded results should be checked via status and
+      scoreValidity before using scores for decisions.
+    skills: [consume-json, quality-gate, score-package]

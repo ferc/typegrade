@@ -1,6 +1,6 @@
 library:
   name: typegrade
-  version: "0.9.0"
+  version: "0.10.0"
   repository: ferc/typegrade
   description: TypeScript type-safety and precision analyzer for the AI agent era
 
