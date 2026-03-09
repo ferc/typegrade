@@ -1,8 +1,51 @@
+import { type AsExpression, Node, type SourceFile, SyntaxKind, TypeFlags } from "ts-morph";
 import type { DimensionResult, Issue } from "../types.js";
-import { Node, type SourceFile, TypeFlags } from "ts-morph";
 import { DIMENSION_CONFIGS } from "../constants.js";
 
 const CONFIG = DIMENSION_CONFIGS.find((cfg) => cfg.key === "implementationSoundness")!;
+
+/**
+ * Detect safe type assertions that are not unsoundness signals:
+ * - `as const` — literal narrowing
+ * - `as readonly [...]` — readonly tuple narrowing from const arrays
+ * - `"literal" as const` — string literal narrowing
+ * - `[] as Type[]` — empty array with explicit element type
+ * - Assertions to a string literal union member (narrowing, not widening)
+ */
+function isSafeAssertion(node: AsExpression): boolean {
+  const typeNode = node.getTypeNode();
+  if (!typeNode) {
+    return false;
+  }
+
+  const typeText = typeNode.getText();
+
+  // `as const` is always safe
+  if (typeText === "const") {
+    return true;
+  }
+
+  // `as readonly [...]` — readonly tuple narrowing
+  if (typeText.startsWith("readonly [")) {
+    return true;
+  }
+
+  // Empty array literal with type annotation: `[] as string[]`, `[] as Foo[]`
+  const expr = node.getExpression();
+  if (Node.isArrayLiteralExpression(expr) && expr.getElements().length === 0) {
+    return true;
+  }
+
+  // Narrowing to a string/number literal type from a union context:
+  // E.g. `"general" as const` or `value as "undersampled"` where the target is a literal
+  const targetKind = typeNode.getKind();
+  if (targetKind === SyntaxKind.LiteralType) {
+    // Assertion to a single literal type — this narrows, not widens
+    return true;
+  }
+
+  return false;
+}
 
 interface FileAnalysisResult {
   errorCount: number;
@@ -28,6 +71,11 @@ function analyzeSourceFile(sf: SourceFile): FileAnalysisResult {
       const targetType = node.getType();
       const line = node.getStartLineNumber();
       const col = node.getStart() - node.getStartLinePos() + 1;
+
+      // Skip safe patterns: `as const`, literal narrowing, empty array typing
+      if (isSafeAssertion(node)) {
+        return;
+      }
 
       if (targetType.getFlags() & TypeFlags.Any) {
         errorCount++;

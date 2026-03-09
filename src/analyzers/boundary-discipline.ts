@@ -102,12 +102,11 @@ function analyzeSourceFileBoundaries(sf: SourceFile): BoundaryFileResult {
 export function analyzeBoundaryDiscipline(
   sourceFiles: SourceFile[],
   project: Project,
+  opts?: { boundaryCoverage?: number; totalBoundaries?: number; validatedBoundaries?: number },
 ): DimensionResult {
   const issues: Issue[] = [];
   const positives: string[] = [];
   const negatives: string[] = [];
-
-  let score = 0;
 
   // Check package.json for validation libraries
   const tsconfigPath = project.getCompilerOptions()["configFilePath"];
@@ -118,10 +117,6 @@ export function analyzeBoundaryDiscipline(
   const hasValidationLib = validationLib !== null;
   if (validationLib) {
     positives.push(`Validation library found: ${validationLib}`);
-  }
-
-  if (hasValidationLib) {
-    score += 30;
   }
 
   let typeGuardCount = 0;
@@ -160,27 +155,47 @@ export function analyzeBoundaryDiscipline(
     };
   }
 
+  // Score model: coverage-ratio primary (50pts), mechanism bonus (30pts), penalties (20pts max)
+  // Coverage ratio from actual boundary analysis (if available)
+  const coverageRatio = opts?.boundaryCoverage ?? 0;
+  const totalBoundaries = opts?.totalBoundaries ?? 0;
+  const validatedBoundaries = opts?.validatedBoundaries ?? 0;
+
+  // Coverage-ratio score: 0-50 points based on actual validation rate
+  let coveragePoints = 0;
+  if (totalBoundaries > 0) {
+    coveragePoints = Math.round(coverageRatio * 50);
+    positives.push(
+      `Boundary validation coverage: ${Math.round(coverageRatio * 100)}% (${validatedBoundaries}/${totalBoundaries})`,
+    );
+  }
+
+  // Mechanism bonus: validation lib (15), type guards (8), assertions (5), satisfies (2) — max 30
+  let mechanismBonus = 0;
+  if (hasValidationLib) {
+    mechanismBonus += 15;
+  }
   if (typeGuardCount > 0) {
-    score += 20;
+    mechanismBonus += 8;
     positives.push(`${typeGuardCount} type guard function(s)`);
   }
   if (assertFunctionCount > 0) {
-    score += 15;
+    mechanismBonus += 5;
     positives.push(`${assertFunctionCount} assertion function(s)`);
   }
   if (satisfiesCount > 0) {
-    score += 10;
+    mechanismBonus += 2;
     positives.push(`${satisfiesCount} satisfies usage(s)`);
   }
+  mechanismBonus = Math.min(mechanismBonus, 30);
 
-  const jsonParsePenalty = Math.min(jsonParseCount * 5, 25);
-  score -= jsonParsePenalty;
-
+  // Penalty: unvalidated JSON.parse — max 20 points
+  const jsonParsePenalty = Math.min(jsonParseCount * 4, 20);
   if (jsonParseCount > 0) {
     negatives.push(`${jsonParseCount} JSON.parse() without validation (-${jsonParsePenalty})`);
   }
 
-  score = Math.max(0, Math.min(100, score));
+  const score = Math.max(0, Math.min(100, coveragePoints + mechanismBonus - jsonParsePenalty));
 
   return {
     applicability: "applicable",
@@ -191,10 +206,14 @@ export function analyzeBoundaryDiscipline(
     label: CONFIG.label,
     metrics: {
       assertFunctionCount,
+      coverageRatio,
       hasValidationLib,
       jsonParseCount,
+      mechanismBonus,
       satisfiesCount,
+      totalBoundaries,
       typeGuardCount,
+      validatedBoundaries,
     },
     negatives,
     positives,

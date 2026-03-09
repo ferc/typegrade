@@ -260,15 +260,23 @@ function computeSuppressionBreakdown(
       continue;
     }
 
-    let category = "other";
+    let category = "budget-trimmed";
     if (issue.suppressionReason) {
-      category = "explicit-suppression";
+      category = `explicit-suppression:${issue.suppressionReason}`;
     } else if (issue.ownership && issue.ownership !== "source-owned") {
       category = `ownership:${issue.ownership}`;
     } else if (issue.confidence !== undefined && issue.confidence < 0.7) {
       category = "low-confidence";
-    } else if (issue.fixability === "not_actionable" || issue.fixability === "external") {
-      category = `fixability:${issue.fixability}`;
+    } else if (issue.fixability === "not_actionable") {
+      category = "fixability:not-actionable";
+    } else if (issue.fixability === "external") {
+      category = "fixability:external";
+    } else if (issue.fixability === "indirect") {
+      category = "fixability:indirect";
+    } else if (issue.severity === "info") {
+      category = "info-severity";
+    } else if (issue.fileOrigin && issue.fileOrigin !== "source") {
+      category = `file-origin:${issue.fileOrigin}`;
     }
 
     reasons.set(category, (reasons.get(category) ?? 0) + 1);

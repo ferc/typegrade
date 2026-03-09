@@ -788,11 +788,25 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     analyzeAgentUsability(consumerSurface),
   ];
 
+  // Pre-compute boundary coverage for the dimension scorer (source mode only)
+  let boundaryDisciplineOpts:
+    | { boundaryCoverage: number; totalBoundaries: number; validatedBoundaries: number }
+    | undefined = undefined;
+  if (mode === "source" && !options?.skipBoundaries) {
+    const earlyGraph = buildBoundaryGraph(sourceOnlyFiles, project);
+    const earlySummary = buildBoundarySummary(earlyGraph);
+    boundaryDisciplineOpts = {
+      boundaryCoverage: earlySummary.boundaryCoverage,
+      totalBoundaries: earlySummary.totalBoundaries,
+      validatedBoundaries: earlySummary.totalBoundaries - earlySummary.unvalidatedBoundaries,
+    };
+  }
+
   // Source-only dimensions
   if (mode === "source") {
     dimensions.push(analyzeDeclarationFidelity(sourceOnlyFiles, consumerFiles));
     dimensions.push(analyzeImplementationSoundness(sourceOnlyFiles));
-    dimensions.push(analyzeBoundaryDiscipline(sourceOnlyFiles, project));
+    dimensions.push(analyzeBoundaryDiscipline(sourceOnlyFiles, project, boundaryDisciplineOpts));
     dimensions.push(analyzeConfigDiscipline(sourceOnlyFiles, project));
   } else {
     // Disabled dimensions for package mode
