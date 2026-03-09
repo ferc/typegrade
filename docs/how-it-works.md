@@ -75,6 +75,8 @@ The following fields are always present on every `AnalysisResult`, regardless of
 - `confidenceSummary` — confidence across graph resolution, domain inference, sample coverage, and scenario applicability.
 - `coverageDiagnostics` — reachable files, measured positions, undersampling flag, and types source.
 - `evidenceSummary` — aggregate evidence counts (total declarations, positions, files, and coverage class).
+- `trustSummary` — trust classification (`trusted`, `directional`, or `abstained`) with `canCompare`, `canGate`, and `reasons`. See [Confidence Model: Trust classification](confidence-model.md#trust-classification).
+- `resolutionDiagnostics` — traces the acquisition pipeline stages, chosen strategy, attempted strategies, declaration count, and failure information. See [Scoring Contract: Resolution diagnostics contract](scoring-contract.md#resolution-diagnostics-contract).
 
 ### Degraded result semantics
 
@@ -247,6 +249,34 @@ In package mode, `typegrade` reports:
 - **Types source**: whether types are bundled, from `@types/*`, or mixed.
 
 Undersampled packages get confidence caps based on severity (0.40 / 0.55 / 0.65 depending on how many undersampling reasons apply).
+
+## Trust summary
+
+After all scoring, confidence capping, and validity checks are applied, `normalizeResult` computes a `TrustSummary` that distills the result into one of three trust classifications:
+
+| Classification | Trigger conditions | Consumer guidance |
+|---|---|---|
+| `trusted` | Complete analysis, adequate coverage, `fully-comparable` validity | Safe for ranking, gating, and display |
+| `directional` | Fallback glob, undersampled, `partially-comparable` or `not-comparable` validity | Scores are indicative but should not be used for gating |
+| `abstained` | `degraded`, `invalid-input`, or `unsupported-package` status | No usable scores — do not compare or display |
+
+The trust summary is computed late in the pipeline — after confidence caps, score validity assignment, domain/scenario suppression, and fix batch gating. This ensures it reflects the final state of the result.
+
+See [Confidence Model: Trust classification](confidence-model.md#trust-classification) for the full classification logic and [Scoring Contract: Trust summary contract](scoring-contract.md#trust-summary-contract) for the type contract.
+
+## Resolution diagnostics
+
+Every analysis result includes `ResolutionDiagnostics` tracing the package acquisition pipeline. The pipeline proceeds through these stages in order:
+
+1. **spec-resolution** — parse the package specifier (name, version, local path).
+2. **package-install** — install the package to a temporary directory (package mode) or locate it locally (source mode).
+3. **companion-types-resolution** — resolve `@types/*` companion packages when the main package lacks bundled types.
+4. **declaration-entrypoint-resolution** — resolve `types`/`typings`/`exports` entries from `package.json`.
+5. **graph-build** — build the declaration import graph by walking entrypoints.
+6. **fallback-selection** — if entrypoint resolution fails, fall back to globbing all `.d.ts` files.
+7. **complete** — pipeline finished successfully.
+
+The `chosenStrategy` field records which strategy produced the final result (e.g., `"exports-types"`, `"typings-field"`, `"fallback-glob"`). The `attemptedStrategies` array records all strategies tried in order. For failed analyses, `failureStage` and `failureReason` identify where and why the pipeline stopped.
 
 ## Configuration file
 

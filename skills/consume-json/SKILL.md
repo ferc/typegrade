@@ -72,6 +72,10 @@ interface AnalysisResult {
   coverageDiagnostics: CoverageDiagnostics; // Coverage and sampling info (always present)
   evidenceSummary: EvidenceSummary;         // Evidence quality (always present)
 
+  // --- Trust contract ---
+  trustSummary?: TrustSummary;               // Trust classification for the result
+  resolutionDiagnostics?: ResolutionDiagnostics; // Acquisition pipeline trace
+
   // --- Optional analysis extras ---
   boundaryQuality?: BoundaryQualityScore;  // Source mode
   boundarySummary?: BoundarySummary;        // Source mode
@@ -149,6 +153,40 @@ interface CoverageDiagnostics {
 }
 ```
 
+### TrustSummary
+
+```typescript
+interface TrustSummary {
+  classification: 'trusted' | 'directional' | 'abstained';
+  canCompare: boolean;  // Safe to compare with other results
+  canGate: boolean;     // Safe to use in --min-score gates
+  reasons: string[];    // Why this classification was assigned
+}
+```
+
+- `"trusted"` — high confidence, fully comparable, gateable.
+- `"directional"` — reduced confidence; scores are indicative only.
+- `"abstained"` — result cannot be meaningfully scored. `--min-score`
+  rejects abstained results automatically.
+
+### ResolutionDiagnostics
+
+```typescript
+interface ResolutionDiagnostics {
+  acquisitionStage: AcquisitionStage;   // Stage reached in pipeline
+  chosenStrategy: string;               // Strategy that produced the result
+  attemptedStrategies: string[];        // All strategies tried
+  declarationCount: number;             // Number of .d.ts files found
+  failureStage?: AcquisitionStage;      // Where failure occurred, if any
+  failureReason?: string;               // Error message from failure stage
+}
+```
+
+`AcquisitionStage` is one of: `"spec-resolution"`, `"package-install"`,
+`"companion-types-resolution"`, `"declaration-entrypoint-resolution"`,
+`"graph-build"`. Use `resolutionDiagnostics` to trace exactly where in
+the acquisition pipeline the analysis succeeded or failed.
+
 ## Core Patterns
 
 ### Extract Agent Readiness score
@@ -159,6 +197,13 @@ npx typegrade score zod --json | jq '.globalScores.agentReadiness.score'
 
 # Via composites array (also works)
 npx typegrade score zod --json | jq '.composites[] | select(.key=="agentReadiness") | .score'
+```
+
+### Check trust classification before acting on results
+
+```bash
+npx typegrade score some-lib --json | jq '{trust: .trustSummary.classification, canGate: .trustSummary.canGate}'
+# If classification is "abstained", do not use scores for gating or comparison
 ```
 
 ### Check analysis status before acting on results
@@ -219,7 +264,13 @@ import { scorePackage } from 'typegrade';
 
 const result = scorePackage('some-lib');
 
-// Step 1: Check status — degraded results no longer emit fake zeros
+// Step 1: Check trust classification
+if (result.trustSummary?.classification === 'abstained') {
+  console.warn(`Abstained: ${result.trustSummary.reasons[0]}`);
+  return; // Cannot score, cannot gate
+}
+
+// Step 2: Check status — degraded results no longer emit fake zeros
 if (result.status !== 'complete') {
   console.warn(`Analysis ${result.status}: ${result.degradedReason}`);
   if (result.scoreValidity === 'not-comparable') {
@@ -227,7 +278,7 @@ if (result.status !== 'complete') {
   }
 }
 
-// Step 2: Check confidence
+// Step 3: Check confidence
 const ar = result.globalScores.agentReadiness;
 
 if (ar.score === null) {

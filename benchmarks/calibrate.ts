@@ -74,22 +74,25 @@ interface AssertionEval {
 }
 
 function findLatestResults(): BenchmarkSnapshot | null {
-  const resultsDir = join(import.meta.dirname, "results");
-  if (!existsSync(resultsDir)) {
-    return null;
+  // Try split-specific train subdirectory first, then legacy flat directory
+  const trainDir = join(import.meta.dirname, "results", "train");
+  const legacyDir = join(import.meta.dirname, "results");
+
+  for (const dir of [trainDir, legacyDir]) {
+    if (!existsSync(dir)) {
+      continue;
+    }
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(f))
+      .sort();
+    if (files.length === 0) {
+      continue;
+    }
+    const latestFile = files[files.length - 1];
+    console.log(`Reading latest results: ${dir}/${latestFile}\n`);
+    return JSON.parse(readFileSync(join(dir, latestFile), "utf8"));
   }
-
-  const files = readdirSync(resultsDir)
-    .filter((f) => f.endsWith(".json"))
-    .sort();
-
-  if (files.length === 0) {
-    return null;
-  }
-
-  const latestFile = files[files.length - 1];
-  console.log(`Reading latest results: benchmarks/results/${latestFile}\n`);
-  return JSON.parse(readFileSync(join(resultsDir, latestFile), "utf8"));
+  return null;
 }
 
 function getScoreForComposite(entry: ResultEntry, composite: string): number | null {

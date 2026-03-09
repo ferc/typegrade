@@ -13,6 +13,8 @@ The benchmark corpus is split into isolated sets to prevent overfitting:
 | **Eval-pool** (`manifest.eval.pool.json`) | Large stratified pool for statistical validation | Must NOT read |
 | **Holdout** (`manifest.holdout.json`) | Reserved for final validation | Read-only, no tuning |
 
+The `BenchmarkSplit` type covers all four splits: `"train" | "holdout" | "eval-fixed" | "eval-pool"`.
+
 The quarantine policy is enforced by CI and documented in `CLAUDE.md`.
 
 ## Assertion classes
@@ -78,11 +80,29 @@ Runs typegrade on its own codebase and asserts minimum composite scores:
 
 Ensures the tool's own type quality does not regress.
 
+### Holdout gate (`pnpm gate:holdout`)
+
+Runs against the holdout corpus — a reserved set of packages not used for tuning. The holdout gate validates that scoring generalizes beyond the train set.
+
+**Builder agents may run this gate** but must not tune weights to improve holdout results.
+
 ### Agent-loop-coherence gate
 
 Validates the `self-analyze` agent report structure. Checks that the report contains the required fields: `issues`, `fixBatches`, `stopConditions`, and `verificationSteps`.
 
 Prevents structural regressions in agent-facing output.
+
+### Shadow gate (`pnpm gate:shadow`)
+
+Runs shadow validation against a random sample of npm packages from the eval pool. Measures trust contract correctness on unseen packages:
+
+- Abstention correctness (degraded/not-comparable results are appropriate).
+- Comparable rate (proportion of packages producing usable scores).
+- False-authoritative rate (trusted classification on packages with poor data).
+- Domain and scenario overreach.
+- Score compression and cross-run stability.
+
+**Judge-only.** Raw results go to `benchmarks-output/shadow-raw/`. Only the `RedactedShadowSummary` (aggregate metrics, no package names) is builder-visible. See [Benchmarks: Shadow validation](benchmarks.md#shadow-validation) for the full metric set.
 
 ## Judge system (`pnpm benchmark:judge`)
 
@@ -121,9 +141,24 @@ Each assertion carries:
 
 These boundaries are enforced by CI:
 
-1. **Static import test**: calibration/optimizer code must not import or reference eval manifests.
-2. **Output isolation**: eval commands write to `benchmarks-output/eval-raw/`, never to `benchmarks/results/`.
-3. **Redaction**: `benchmark:judge` emits only `RedactedEvalSummary` — no package names, no per-package scores.
+1. **Static import test**: calibration/optimizer code must not import or reference eval manifests, eval summaries, or shadow raw output.
+2. **Output isolation**: eval commands write to `benchmarks-output/eval-raw/`, shadow commands write to `benchmarks-output/shadow-raw/` — neither writes to `benchmarks/results/`.
+3. **Redaction**: `benchmark:judge` emits only `RedactedEvalSummary`, `benchmark:shadow` emits only `RedactedShadowSummary` — no package names, no per-package scores.
+4. **Split-specific results**: train results go to `benchmarks/results/train/`, holdout results go to `benchmarks/results/holdout/`. Cross-split result contamination is prevented by directory isolation.
+
+### Builder-forbidden paths
+
+- `benchmarks/manifest.eval.fixed.json`
+- `benchmarks/manifest.eval.pool.json`
+- `benchmarks-output/eval-raw/`
+- `benchmarks-output/shadow-raw/`
+
+### Command access matrix
+
+| Role | Allowed commands |
+|---|---|
+| Builder | `benchmark:train`, `benchmark:holdout`, `gate:train`, `gate:holdout`, `benchmark:optimize`, `benchmark:calibrate` |
+| Judge/CI | `benchmark:eval`, `benchmark:pool`, `benchmark:judge`, `benchmark:shadow`, `gate:eval`, `gate:shadow` |
 
 ## Adding new assertions
 
@@ -140,4 +175,6 @@ The CI workflow (`.github/workflows/ci.yml`) runs:
 
 - **Quality job** (all PRs): lint, format check, build, test.
 - **Train gate job** (all PRs): `pnpm gate:train`.
+- **Holdout gate job** (all PRs): `pnpm gate:holdout`.
 - **Eval gate job** (main only): `pnpm gate:eval`.
+- **Shadow gate job** (main only): `pnpm gate:shadow`.

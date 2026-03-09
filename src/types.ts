@@ -8,6 +8,47 @@ export type AnalysisStatus = "complete" | "degraded" | "invalid-input" | "unsupp
 /** How comparable the scores in this result are */
 export type ScoreValidity = "fully-comparable" | "partially-comparable" | "not-comparable";
 
+/** Trust classification for the overall result */
+export type TrustClassification = "trusted" | "directional" | "abstained";
+
+/** Stage of package acquisition where failure occurred or processing stopped */
+export type AcquisitionStage =
+  | "spec-resolution"
+  | "package-install"
+  | "companion-types-resolution"
+  | "declaration-entrypoint-resolution"
+  | "graph-build"
+  | "fallback-selection"
+  | "complete";
+
+/** Trust summary for the overall analysis result */
+export interface TrustSummary {
+  /** Overall trust classification */
+  classification: TrustClassification;
+  /** Whether this result can be compared to other results */
+  canCompare: boolean;
+  /** Whether this result can be used in a quality gate */
+  canGate: boolean;
+  /** Reasons for the trust classification */
+  reasons: string[];
+}
+
+/** Diagnostics from the resolution and acquisition pipeline */
+export interface ResolutionDiagnostics {
+  /** Stage reached in acquisition pipeline */
+  acquisitionStage: AcquisitionStage;
+  /** Strategy that produced the final result */
+  chosenStrategy: string;
+  /** All strategies attempted during resolution */
+  attemptedStrategies: string[];
+  /** Number of declaration files found */
+  declarationCount: number;
+  /** Stage where failure occurred, if any */
+  failureStage?: AcquisitionStage | undefined;
+  /** Error message from the failure stage, if any */
+  failureReason?: string | undefined;
+}
+
 /** Category of degradation explaining why an analysis could not complete normally */
 export type DegradedCategory =
   | "invalid-package-spec"
@@ -566,6 +607,10 @@ export interface AnalysisResult {
   boundaryReport?: BoundaryReport;
   /** Verification plan for post-fix validation */
   verificationPlan?: VerificationPlan;
+  /** Trust summary — classifies the result as trusted, directional, or abstained */
+  trustSummary?: TrustSummary;
+  /** Resolution diagnostics — traces the acquisition pipeline */
+  resolutionDiagnostics?: ResolutionDiagnostics;
 }
 
 export interface PrecisionFeatures {

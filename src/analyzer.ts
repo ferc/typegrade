@@ -25,6 +25,7 @@ import {
   type ScoreValidity,
   type SourceModeConfidence,
   type SuppressionEntry,
+  type TrustSummary,
 } from "./types.js";
 import { type DomainType, detectDomain } from "./domain.js";
 import {
@@ -296,6 +297,9 @@ export function normalizeResult(result: AnalysisResult): AnalysisResult {
     }
   }
 
+  // --- Trust summary computation ---
+  result.trustSummary = computeTrustSummary(result);
+
   // --- Stable issue IDs (WS7) ---
   assignStableIssueIds(result);
 
@@ -321,6 +325,65 @@ function assignStableIssueIds(result: AnalysisResult): void {
       issue.issueId = computeIssueId(issue);
     }
   }
+}
+
+/**
+ * Compute the trust summary for an analysis result.
+ * Classification:
+ * - abstained: status is degraded or invalid-input or unsupported-package
+ * - directional: fallback-glob, undersampled, partially-comparable, or low confidence
+ * - trusted: complete analysis with sufficient coverage and comparable scores
+ */
+function computeTrustSummary(result: AnalysisResult): TrustSummary {
+  const reasons: string[] = [];
+
+  // Abstained: no usable result
+  if (
+    result.status === "degraded" ||
+    result.status === "invalid-input" ||
+    result.status === "unsupported-package"
+  ) {
+    reasons.push(`Analysis status: ${result.status}`);
+    if (result.degradedReason) {
+      reasons.push(result.degradedReason);
+    }
+    return { canCompare: false, canGate: false, classification: "abstained", reasons };
+  }
+
+  // Check for directional signals
+  const isDirectional: boolean =
+    result.scoreValidity === "not-comparable" ||
+    result.scoreValidity === "partially-comparable" ||
+    result.packageIdentity.entrypointStrategy === "fallback-glob" ||
+    result.coverageDiagnostics.undersampled ||
+    result.graphStats.usedFallbackGlob;
+
+  if (isDirectional) {
+    if (
+      result.packageIdentity.entrypointStrategy === "fallback-glob" ||
+      result.graphStats.usedFallbackGlob
+    ) {
+      reasons.push("Fallback glob resolution — scores are directional only");
+    }
+    if (result.coverageDiagnostics.undersampled) {
+      reasons.push("Undersampled coverage — insufficient evidence for trusted classification");
+    }
+    if (result.scoreValidity === "not-comparable") {
+      reasons.push("Score validity: not-comparable");
+    } else if (result.scoreValidity === "partially-comparable") {
+      reasons.push("Score validity: partially-comparable (reduced confidence)");
+    }
+    return {
+      canCompare: result.scoreValidity !== "not-comparable",
+      canGate: false,
+      classification: "directional",
+      reasons,
+    };
+  }
+
+  // Trusted: complete with strong evidence
+  reasons.push("Complete analysis with sufficient coverage");
+  return { canCompare: true, canGate: true, classification: "trusted", reasons };
 }
 
 function computeIssueId(issue: {

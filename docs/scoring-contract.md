@@ -406,6 +406,82 @@ The health report also includes:
 
 When workspace discovery is partial or ambiguous (low `workspaceConfidence`), the health grade should be interpreted with caution.
 
+## Trust summary contract
+
+Every `AnalysisResult` carries a `trustSummary` field that classifies the result into one of three trust tiers. This is the canonical signal for consumers to decide whether to compare, gate, or display the result.
+
+### Trust classifications
+
+| Classification | Meaning | `canCompare` | `canGate` |
+|---|---|---|---|
+| `trusted` | Complete analysis, sufficient coverage, fully-comparable | true | true |
+| `directional` | Scores are directionally correct but not reliable enough for gating | varies | false |
+| `abstained` | No usable scores — analysis could not complete | false | false |
+
+### Computation rules
+
+1. **Abstained** when `status` is `degraded`, `invalid-input`, or `unsupported-package`.
+2. **Directional** when any of: `scoreValidity` is `not-comparable` or `partially-comparable`, entrypoint strategy is `fallback-glob`, coverage is `undersampled`, or graph used fallback glob. `canCompare` is false when `scoreValidity` is `not-comparable`.
+3. **Trusted** otherwise — complete analysis with adequate coverage.
+
+### Contract guarantees
+
+- `canGate: true` implies `canCompare: true`. The reverse is not guaranteed.
+- `--min-score` rejects `abstained` and `not-comparable` results with a contract-specific error before evaluating the score threshold.
+- All three classifications include a `reasons` array with human-readable explanations.
+
+### TrustSummary type
+
+```typescript
+type TrustClassification = "trusted" | "directional" | "abstained";
+
+interface TrustSummary {
+  classification: TrustClassification;
+  canCompare: boolean;
+  canGate: boolean;
+  reasons: string[];
+}
+```
+
+## Resolution diagnostics contract
+
+Every `AnalysisResult` carries a `resolutionDiagnostics` field that traces the package acquisition and resolution pipeline. This provides observability into how the analysis reached its final state.
+
+### ResolutionDiagnostics type
+
+```typescript
+type AcquisitionStage =
+  | "spec-resolution"
+  | "package-install"
+  | "companion-types-resolution"
+  | "declaration-entrypoint-resolution"
+  | "graph-build"
+  | "fallback-selection"
+  | "complete";
+
+interface ResolutionDiagnostics {
+  acquisitionStage: AcquisitionStage;
+  chosenStrategy: string;
+  attemptedStrategies: string[];
+  declarationCount: number;
+  failureStage?: AcquisitionStage;
+  failureReason?: string;
+}
+```
+
+### Fields
+
+| Field | Description |
+|---|---|
+| `acquisitionStage` | The stage the pipeline reached (or stopped at) |
+| `chosenStrategy` | The resolution strategy that produced the final result |
+| `attemptedStrategies` | All strategies tried during resolution, in order |
+| `declarationCount` | Number of `.d.ts` files found |
+| `failureStage` | Stage where failure occurred, if any |
+| `failureReason` | Error message from the failure stage, if any |
+
+For degraded results, `acquisitionStage` is inferred from the `degradedCategory` (e.g., `install-failure` maps to `"package-install"`). For successful analyses, `acquisitionStage` is `"complete"`.
+
 ## Zero-file behavior
 
 When no source files are found: all composites get `score: null`, grade `N/A`, and the result is marked `status: "degraded"` with `degradedCategory: "missing-declarations"`. This prevents degraded results from masquerading as real zero scores.

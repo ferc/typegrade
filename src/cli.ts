@@ -55,6 +55,18 @@ async function outputResult(result: AnalysisResult, opts: OutputOptions) {
 
   // Warn about degraded or non-comparable results before main output
   if (!opts.json) {
+    // Display trust summary if available
+    if (result.trustSummary) {
+      const ts = result.trustSummary;
+      if (ts.classification === "abstained") {
+        console.log(pc.red(`  Abstained: ${ts.reasons[0] ?? "unknown reason"}`));
+      } else if (ts.classification === "directional") {
+        console.log(pc.yellow(`  Directional: ${ts.reasons[0] ?? "reduced confidence"}`));
+      } else {
+        console.log(pc.green("  Trusted"));
+      }
+    }
+
     if (result.status === "degraded") {
       console.log(
         pc.yellow(
@@ -89,9 +101,22 @@ async function outputResult(result: AnalysisResult, opts: OutputOptions) {
   }
 
   const score = getAgentReadinessScore(result);
-  if (typeof opts.minScore === "number" && score < opts.minScore) {
-    console.error(`Score ${score} is below minimum ${opts.minScore}`);
-    process.exit(1);
+  if (typeof opts.minScore === "number") {
+    // Reject abstained/not-comparable results with a contract-specific reason
+    if (result.trustSummary?.classification === "abstained") {
+      console.error(
+        `Gate failed: result is abstained (${result.trustSummary.reasons[0] ?? "unknown"}) — cannot evaluate against min-score`,
+      );
+      process.exit(1);
+    }
+    if (result.scoreValidity === "not-comparable") {
+      console.error("Gate failed: scores are not-comparable — cannot evaluate against min-score");
+      process.exit(1);
+    }
+    if (score < opts.minScore) {
+      console.error(`Score ${score} is below minimum ${opts.minScore}`);
+      process.exit(1);
+    }
   }
 }
 

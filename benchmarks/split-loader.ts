@@ -17,6 +17,7 @@ const BENCHMARKS_DIR = import.meta.dirname;
 /** Canonical manifest filenames per split */
 const MANIFEST_FILES: Record<BenchmarkSplit, string> = {
   train: "manifest.train.json",
+  holdout: "manifest.holdout.json",
   "eval-fixed": "manifest.eval.fixed.json",
   "eval-pool": "manifest.eval.pool.json",
 };
@@ -64,7 +65,8 @@ export function loadManifestByFilename(filename: string): BenchmarkManifestV2 {
 
   // Infer split from filename
   let split: BenchmarkSplit = "train";
-  if (filename.includes("eval.fixed")) split = "eval-fixed";
+  if (filename.includes("holdout")) split = "holdout";
+  else if (filename.includes("eval.fixed")) split = "eval-fixed";
   else if (filename.includes("eval.pool")) split = "eval-pool";
 
   if (!raw.version) {

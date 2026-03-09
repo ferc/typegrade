@@ -52,6 +52,7 @@ export { ANALYSIS_SCHEMA_VERSION } from "./types.js";
 
 // Stable public types
 export type {
+  AcquisitionStage,
   AnalysisMode,
   AnalysisProfile,
   AnalysisResult,
@@ -109,6 +110,7 @@ export type {
   PackageLayer,
   ProfileInfo,
   RedactedEvalSummary,
+  ResolutionDiagnostics,
   RoleClassification,
   RootCauseCategory,
   SafeFixCategory,
@@ -125,7 +127,9 @@ export type {
   SuppressionOverrides,
   TaintFlowChain,
   TaintFlowStep,
+  TrustClassification,
   TrustLevel,
+  TrustSummary,
   TrustZoneCrossing,
   TrustZoneDefinition,
   TypegradeConfig,

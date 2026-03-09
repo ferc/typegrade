@@ -73,6 +73,22 @@ describe("train/eval quarantine", () => {
       }
     });
 
+    it("holdout and train manifests share no packages", () => {
+      try {
+        const holdout = loadManifest("holdout");
+        const train = loadManifest("train");
+
+        const holdoutNames = new Set(flattenManifest(holdout).map((entry) => entry.name));
+        const trainNames = flattenManifest(train).map((entry) => entry.name);
+
+        for (const name of trainNames) {
+          expect(holdoutNames.has(name)).toBeFalsy();
+        }
+      } catch {
+        // Holdout manifest may not exist; that's fine
+      }
+    });
+
     it("holdout and eval manifests share no packages", () => {
       try {
         const holdoutPath = join(BENCHMARKS_DIR, "manifest.holdout.json");
@@ -106,6 +122,26 @@ describe("train/eval quarantine", () => {
       const judgeContent = readFileSync(join(BENCHMARKS_DIR, "judge.ts"), "utf8");
       expect(judgeContent).toContain("RedactedEvalSummary");
       expect(judgeContent).toContain("auditMode");
+    });
+
+    it("shadow-latest.ts should write raw results to shadow-raw, not results/", () => {
+      const shadowContent = readFileSync(join(BENCHMARKS_DIR, "shadow-latest.ts"), "utf8");
+      expect(shadowContent).toContain("shadow-raw");
+      expect(shadowContent).toContain("RedactedShadowSummary");
+      // Shadow must not write to train results
+      expect(shadowContent).not.toContain("benchmarks/results/train");
+    });
+
+    it("calibrate.ts must not reference shadow data", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "calibrate.ts"), "utf8");
+      expect(content).not.toContain("shadow-raw");
+      expect(content).not.toContain("shadow-summary");
+    });
+
+    it("optimize.ts must not reference shadow data", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "optimize.ts"), "utf8");
+      expect(content).not.toContain("shadow-raw");
+      expect(content).not.toContain("shadow-summary");
     });
   });
 

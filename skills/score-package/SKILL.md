@@ -101,6 +101,19 @@ well-known packages, but override when needed. Valid domains: `validation`,
 | 40-54 | D |
 | 0-39 | F |
 
+### Trust classification
+
+The CLI displays a trust label after scoring:
+
+- **Trusted** — high confidence, result is comparable and gateable.
+- **Directional** — reduced confidence; scores are indicative but not firm.
+- **Abstained** — result cannot be meaningfully scored. `--min-score` rejects
+  abstained results automatically.
+
+In JSON output, check `trustSummary.classification` (`"trusted"`,
+`"directional"`, or `"abstained"`), `trustSummary.canCompare`, and
+`trustSummary.canGate` to decide how to act on the result programmatically.
+
 ### Status and coverage diagnostics
 
 Check `status` and `coverageDiagnostics` in JSON output:

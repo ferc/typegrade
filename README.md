@@ -66,6 +66,7 @@ npx typegrade monorepo .
 npx typegrade score zod --json
 
 # CI gate: fail if agent readiness score < 70
+# Rejects abstained/not-comparable results with a contract-specific reason
 npx typegrade --min-score 70
 
 # Detailed per-dimension breakdown
@@ -149,6 +150,7 @@ AI coding agents work against your exported types, not your intentions. When tho
 6. **Analyze boundaries** — track data flow from untrusted sources (HTTP, env, filesystem, queue, database, SDK) through assignments and returns to validation sinks.
 7. **Build fix plans** — group actionable issues into batches with confidence, expected uplift, verification commands, and rollback notes.
 8. **Attach diagnostics** — confidence, coverage classification (complete, compact-complete, compact-partial, undersampled), and coverage failure modes.
+9. **Classify trust** — every result is classified as `trusted`, `directional`, or `abstained` based on evidence quality. `trustSummary` indicates whether the result can be compared (`canCompare`) or used in a quality gate (`canGate`).
 
 For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 
@@ -271,6 +273,18 @@ Returns an `AnalysisResult` with:
     "totalPositions": 156,
     "totalFiles": 12,
     "coverageClass": "complete"
+  },
+  "trustSummary": {
+    "classification": "trusted",
+    "canCompare": true,
+    "canGate": true,
+    "reasons": ["Complete analysis with sufficient coverage"]
+  },
+  "resolutionDiagnostics": {
+    "acquisitionStage": "complete",
+    "chosenStrategy": "exports-map",
+    "attemptedStrategies": ["types-field", "exports-map"],
+    "declarationCount": 15
   },
   "dimensions": [/* 8 dimension results with scores, metrics, issues */],
   "topIssues": [/* top 10 issues by severity */]

@@ -39,8 +39,9 @@ consumers see, then scores the public surface plus 4 implementation dimensions
 npx typegrade analyze ./src
 ```
 
-Prints a summary with global scores (Consumer API, Agent Readiness, Type Safety),
-domain score if detected, and top issues.
+Prints a summary with a trust label (Trusted, Directional, or Abstained),
+global scores (Consumer API, Agent Readiness, Type Safety), domain score
+if detected, and top issues.
 
 ### Verbose per-dimension breakdown
 
@@ -99,9 +100,11 @@ npx typegrade analyze . --json
 
 Returns an `AnalysisResult` object with mandatory envelope fields: `status`,
 `scoreValidity`, `analysisSchemaVersion`, `globalScores`, `profileInfo`,
-`packageIdentity`, and `degradedCategory` (when degraded). Degraded results use
-`status: "degraded"` with `score: null` composites instead of fake zero scores.
-See the `consume-json` skill for field details.
+`packageIdentity`, and `degradedCategory` (when degraded). Results include a
+`trustSummary` with classification (`"trusted"`, `"directional"`, or
+`"abstained"`), `canCompare`, and `canGate` flags. A `resolutionDiagnostics`
+field traces the acquisition pipeline stages. See the `consume-json` skill
+for full field details.
 
 ### Agent-optimized output
 

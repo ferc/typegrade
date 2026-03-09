@@ -53,8 +53,10 @@ pnpm benchmark:optimize
 ### Gate commands
 
 ```bash
-pnpm gate:train   # Run train gate (must-pass assertions + ranking loss)
-pnpm gate:eval    # Run eval gate (main branch only — Pareto, seed robustness, drift)
+pnpm gate:train    # Run train gate (must-pass assertions + ranking loss)
+pnpm gate:holdout  # Run holdout gate (reserved validation set)
+pnpm gate:eval     # Run eval gate (main branch only — Pareto, seed robustness, drift)
+pnpm gate:shadow   # Run shadow gate (judge-only — random npm package generalization)
 ```
 
 ## Corpus structure
@@ -64,9 +66,18 @@ The benchmark corpus is split to prevent overfitting:
 - **Train**: packages used for weight tuning and calibration. Builder agents may read and modify.
 - **Eval-fixed**: stable set for generalization testing. Builder agents must NOT read.
 - **Eval-pool**: large pool for stratified sampling. Builder agents must NOT read.
-- **Holdout**: reserved for final validation.
+- **Holdout**: reserved for final validation. Builder agents may read results but must not tune against them.
 
 See [Benchmark Policy](benchmark-policy.md) for quarantine rules.
+
+### Split-specific result directories
+
+Benchmark results are stored in split-specific subdirectories to prevent cross-contamination:
+
+- **Train results**: `benchmarks/results/train/`
+- **Holdout results**: `benchmarks/results/holdout/`
+- **Eval results**: `benchmarks-output/eval-raw/` (judge-only, never in `benchmarks/results/`)
+- **Shadow results**: `benchmarks-output/shadow-raw/` (judge-only, never in `benchmarks/results/`)
 
 ## Interpreting results
 
@@ -127,9 +138,35 @@ Validates that the `self-analyze` agent report has a consistent structure. Check
 
 This gate prevents structural regressions in the agent-facing output format.
 
+## Shadow validation
+
+The shadow validation track (`pnpm benchmark:shadow` / `pnpm gate:shadow`) measures generalization on random npm packages sampled from the eval pool. It is a **judge-only** command: raw per-package results are written to `benchmarks-output/shadow-raw/`, and only a `RedactedShadowSummary` is builder-visible.
+
+### What shadow validation checks
+
+Shadow validation scores a random sample of npm packages and measures aggregate trust contract behavior:
+
+| Metric | Description |
+|---|---|
+| `comparableRate` | Proportion of packages producing comparable (trusted or directional) results |
+| `abstentionCorrectnessRate` | Proportion of packages where abstention (degraded/not-comparable) was appropriate |
+| `falseAuthoritativeRate` | Proportion of packages that received trusted classification despite poor data |
+| `installFailureRate` | Proportion of packages that failed to install |
+| `fallbackGlobRate` | Proportion of packages that fell back to glob resolution |
+| `domainOverreachRate` | Proportion of domain inferences on packages without clear domain signals |
+| `scenarioOverreachRate` | Proportion of scenario scores on packages without matching domain |
+| `scoreCompressionRate` | Proportion of scores clustering in a narrow band |
+| `crossRunStability` | Stability coefficient across repeated runs (1.0 = perfectly stable) |
+
+The `RedactedShadowSummary` also includes 99% confidence bounds for key metrics and stratification breakdowns by types source, size band, and module kind. No package names or per-package scores are included.
+
+### Shadow gates
+
+The `pnpm gate:shadow` command checks the latest shadow summary against gate thresholds. Gate results are emitted as pass/fail with aggregate metrics only.
+
 ## Benchmark artifacts
 
-Each benchmark run saves per-package results to `benchmarks/results/`. Each result includes:
+Each benchmark run saves per-package results to split-specific subdirectories under `benchmarks/results/`. Each result includes:
 - Dimension scores, confidence, and metrics.
 - Graph stats and dedup stats.
 - Domain inference with signals and matched rules.
@@ -147,8 +184,11 @@ Each benchmark run saves per-package results to `benchmarks/results/`. Each resu
 | `pnpm benchmark:calibrate` | Detailed calibration diagnostics |
 | `pnpm benchmark:optimize` | Weight search on train data |
 | `pnpm benchmark:judge` | Evaluate eval results, emit redacted summary (CI/judge only) |
+| `pnpm benchmark:shadow` | Shadow validation on random npm packages (CI/judge only) |
 | `pnpm gate:train` | Train gate check |
+| `pnpm gate:holdout` | Holdout gate check |
 | `pnpm gate:eval` | Eval gate check (CI/judge only) |
+| `pnpm gate:shadow` | Shadow gate check (CI/judge only) |
 | `pnpm perf` | Run all performance benchmarks |
 | `pnpm perf:cli` | Measure CLI cold-start (`--version`, `--help`) |
 | `pnpm perf:score` | Measure `analyze`, `boundaries`, `fix-plan` latency |

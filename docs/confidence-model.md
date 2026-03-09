@@ -157,6 +157,46 @@ Domain inference now computes a `multiLabelConfidence` value (0-1) on `DomainInf
 | 0.5-0.8 | Moderate — score is directionally correct but may shift with more data |
 | < 0.5 | Low — score should be treated as indicative only; domain and scenario scores are suppressed |
 
+## Trust classification
+
+The top-level `trustSummary` on every `AnalysisResult` distills confidence, coverage, and status signals into a single trust label. This replaces the need for consumers to manually interpret `scoreValidity`, `status`, and coverage fields.
+
+### TrustClassification
+
+| Classification | When assigned | `canCompare` | `canGate` |
+|---|---|---|---|
+| `trusted` | `status` is `complete`, coverage is adequate, `scoreValidity` is `fully-comparable` | true | true |
+| `directional` | Fallback glob, undersampled, `partially-comparable`, or `not-comparable` validity | depends on validity | false |
+| `abstained` | `status` is `degraded`, `invalid-input`, or `unsupported-package` | false | false |
+
+### Classification logic
+
+The classification is computed in `normalizeResult` after all confidence caps and validity checks have been applied:
+
+1. **Abstained**: if `status` is `degraded`, `invalid-input`, or `unsupported-package`, the result is abstained. The `reasons` array includes the status and any `degradedReason`.
+2. **Directional**: if any of these signals are present — `scoreValidity` is `not-comparable` or `partially-comparable`, entrypoint strategy is `fallback-glob`, coverage is undersampled, or graph used fallback glob — the result is directional. `canCompare` is true only if `scoreValidity` is not `not-comparable`.
+3. **Trusted**: complete analysis with sufficient coverage and `fully-comparable` scores. Both `canCompare` and `canGate` are true.
+
+### TrustSummary fields
+
+```typescript
+interface TrustSummary {
+  classification: "trusted" | "directional" | "abstained";
+  canCompare: boolean;   // Safe for ranking comparisons
+  canGate: boolean;      // Safe for --min-score quality gates
+  reasons: string[];     // Human-readable explanation chain
+}
+```
+
+### CLI behavior
+
+In non-JSON mode, the CLI displays the trust label before results:
+- **Trusted**: green label, no additional warnings.
+- **Directional**: yellow label with the primary reason.
+- **Abstained**: red label with the primary reason.
+
+The `--min-score` flag rejects abstained results with a contract-specific error: "result is abstained ... cannot evaluate against min-score". It also rejects `not-comparable` results.
+
 ## Confidence in JSON output
 
 Confidence appears on both dimensions and composites:

@@ -5,7 +5,7 @@
 
 // ─── Manifest V2 ──────────────────────────────────────────────────────────
 
-export type BenchmarkSplit = "train" | "eval-fixed" | "eval-pool";
+export type BenchmarkSplit = "train" | "holdout" | "eval-fixed" | "eval-pool";
 
 /** V1 entry format (backward compat) */
 export type ManifestEntryV1 = string | { spec: string; typesVersion?: string };
@@ -80,7 +80,7 @@ export interface RawBenchmarkEntry {
  */
 export interface RedactedEvalSummary {
   timestamp: string;
-  split: "eval-fixed" | "eval-pool";
+  split: BenchmarkSplit;
   packageCount: number;
   seed?: number;
   /** Aggregate metrics safe for builder consumption */
@@ -194,10 +194,13 @@ export const QUARANTINE_POLICY: BenchmarkQuarantinePolicy = {
     "benchmarks/manifest.eval.fixed.json",
     "benchmarks/manifest.eval.pool.json",
     "benchmarks-output/eval-raw/",
+    "benchmarks-output/shadow-raw/",
   ],
   builderAllowedCommands: [
     "benchmark:train",
+    "benchmark:holdout",
     "gate:train",
+    "gate:holdout",
     "benchmark:optimize",
     "benchmark:calibrate",
   ],
@@ -205,13 +208,16 @@ export const QUARANTINE_POLICY: BenchmarkQuarantinePolicy = {
     "benchmark:eval",
     "benchmark:pool",
     "benchmark:judge",
+    "benchmark:shadow",
     "gate:eval",
+    "gate:shadow",
   ],
   forbiddenImportsForOptimizer: [
     "manifest.eval.fixed.json",
     "manifest.eval.pool.json",
     "eval-raw",
     "eval-summary",
+    "shadow-raw",
   ],
 };
 
@@ -239,6 +245,52 @@ export interface MonotonicConstraint {
   description: string;
   /** Returns true if the constraint is satisfied */
   check: (before: number, after: number) => boolean;
+}
+
+// ─── Redacted Shadow Summary ─────────────────────────────────────────────
+
+/**
+ * Builder-visible shadow validation output.
+ * Contains ONLY aggregate metrics — no package names or per-package details.
+ * Emitted by the judge-only shadow validation track.
+ */
+export interface RedactedShadowSummary {
+  timestamp: string;
+  totalPackages: number;
+  /** Rate of packages producing comparable results */
+  comparableRate: number;
+  /** Rate of correct abstention (degraded/not-comparable for appropriate cases) */
+  abstentionCorrectnessRate: number;
+  /** Rate of false-authoritative results (trusted classification on bad data) */
+  falseAuthoritativeRate: number;
+  /** Rate of install failures */
+  installFailureRate: number;
+  /** Rate of packages using fallback glob */
+  fallbackGlobRate: number;
+  /** Rate of domain inference on packages without clear domain signals */
+  domainOverreachRate: number;
+  /** Rate of scenario scores on packages without matching domain */
+  scenarioOverreachRate: number;
+  /** Rate of scores clustering in narrow band */
+  scoreCompressionRate: number;
+  /** Cross-run stability coefficient (1.0 = perfectly stable) */
+  crossRunStability: number;
+  /** 99% lower confidence bounds for gate metrics */
+  confidenceBounds: {
+    comparableRate: number;
+    abstentionCorrectnessRate: number;
+    falseAuthoritativeRate: number;
+    fallbackGlobRate: number;
+  };
+  /** Stratification breakdown (no package names) */
+  stratification?: {
+    byTypesSource: Record<string, { count: number; comparableRate: number }>;
+    bySizeBand: Record<string, { count: number; comparableRate: number }>;
+    byModuleKind: Record<string, { count: number; comparableRate: number }>;
+  };
+  /** Gate pass/fail results */
+  gates: { gate: string; passed: boolean; detail: string }[];
+  allGatesPassed: boolean;
 }
 
 export const MONOTONIC_CONSTRAINTS: MonotonicConstraint[] = [

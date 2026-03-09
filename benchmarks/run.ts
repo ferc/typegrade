@@ -520,9 +520,12 @@ async function main() {
 
   // Determine output directory based on split
   const isEvalSplit = corpusSplit === "eval-fixed" || corpusSplit === "eval-pool";
+  const isHoldoutSplit = corpusSplit === "holdout";
   const resultsBaseDir = isEvalSplit
     ? join(import.meta.dirname, "..", "benchmarks-output", "eval-raw")
-    : join(import.meta.dirname, "results");
+    : isHoldoutSplit
+      ? join(import.meta.dirname, "results", "holdout")
+      : join(import.meta.dirname, "results", "train");
 
   if (!existsSync(resultsBaseDir)) {
     mkdirSync(resultsBaseDir, { recursive: true });
@@ -605,7 +608,8 @@ async function main() {
 
   const filename = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
   writeFileSync(join(resultsBaseDir, filename), JSON.stringify(snapshot, null, 2));
-  console.log(`\nResults saved to ${isEvalSplit ? "benchmarks-output/eval-raw" : "benchmarks/results"}/${filename}`);
+  const displayDir = isEvalSplit ? "benchmarks-output/eval-raw" : isHoldoutSplit ? "benchmarks/results/holdout" : "benchmarks/results/train";
+  console.log(`\nResults saved to ${displayDir}/${filename}`);
 
   // Exit code 1 only on must-pass failures in train mode
   if (mustPassFailed > 0 && corpusSplit === "train") {

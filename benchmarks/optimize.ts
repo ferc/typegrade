@@ -306,18 +306,21 @@ function normalizeWeights(weights: Record<string, number>): Record<string, numbe
 // ─── Snapshot Loading ────────────────────────────────────────────────────────
 
 function findLatestTrainSnapshot(): BenchmarkSnapshot | null {
-  const resultsDir = join(import.meta.dirname, "results");
-  if (!existsSync(resultsDir)) {
-    return null;
-  }
+  // Try split-specific train subdirectory first, then legacy flat directory
+  const trainDir = join(import.meta.dirname, "results", "train");
+  const legacyDir = join(import.meta.dirname, "results");
 
-  const files = readdirSync(resultsDir).filter((ff) => ff.endsWith(".json")).toSorted();
-  // Find the last snapshot that is from train split
-  for (let idx = files.length - 1; idx >= 0; idx--) {
-    const data = JSON.parse(readFileSync(join(resultsDir, files[idx]!), "utf8"));
-    if (!data.corpusSplit || data.corpusSplit === "train") {
-      console.log(`Reading train snapshot: benchmarks/results/${files[idx]}`);
-      return data;
+  for (const dir of [trainDir, legacyDir]) {
+    if (!existsSync(dir)) {
+      continue;
+    }
+    const files = readdirSync(dir).filter((ff) => ff.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(ff)).toSorted();
+    for (let idx = files.length - 1; idx >= 0; idx--) {
+      const data = JSON.parse(readFileSync(join(dir, files[idx]!), "utf8"));
+      if (!data.corpusSplit || data.corpusSplit === "train") {
+        console.log(`Reading train snapshot: ${dir}/${files[idx]}`);
+        return data;
+      }
     }
   }
   return null;
@@ -1272,7 +1275,7 @@ function main() {
 
   // ── Save Report ─────────────────────────────────────────────────────────
 
-  const resultsDir = join(import.meta.dirname, "results");
+  const resultsDir = join(import.meta.dirname, "results", "train");
   if (!existsSync(resultsDir)) {
     mkdirSync(resultsDir, { recursive: true });
   }

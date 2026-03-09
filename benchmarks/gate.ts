@@ -7,7 +7,8 @@ import { flattenManifest, loadManifest } from "./split-loader.js";
 
 const args = process.argv.slice(2);
 const evalMode = args.includes("--eval");
-const gateMode: "train" | "eval" = evalMode ? "eval" : "train";
+const holdoutMode = args.includes("--holdout");
+const gateMode: "train" | "holdout" | "eval" = evalMode ? "eval" : holdoutMode ? "holdout" : "train";
 
 interface GateResult {
   gate: string;
@@ -42,16 +43,22 @@ function execCheck(cmd: string, cwd: string, timeoutMs = 120_000): { success: bo
 }
 
 function findLatestSnapshot(splitPrefix?: string): Record<string, unknown> | null {
-  const resultsDir = join(import.meta.dirname, "results");
-  if (!existsSync(resultsDir)) return null;
-  const files = readdirSync(resultsDir)
-    .filter((f) => f.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(f))
-    .sort();
-  if (files.length === 0) return null;
-  for (let i = files.length - 1; i >= 0; i--) {
-    const data = JSON.parse(readFileSync(join(resultsDir, files[i]!), "utf8"));
-    if (!splitPrefix || data.corpusSplit === splitPrefix || !data.corpusSplit) {
-      return data;
+  // Try split-specific subdirectory first
+  const splitSubdir = splitPrefix === "holdout" ? "holdout" : "train";
+  const splitDir = join(import.meta.dirname, "results", splitSubdir);
+  const legacyDir = join(import.meta.dirname, "results");
+
+  for (const dir of [splitDir, legacyDir]) {
+    if (!existsSync(dir)) continue;
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".json") && /^\d{4}-\d{2}-\d{2}T/.test(f))
+      .sort();
+    if (files.length === 0) continue;
+    for (let i = files.length - 1; i >= 0; i--) {
+      const data = JSON.parse(readFileSync(join(dir, files[i]!), "utf8"));
+      if (!splitPrefix || data.corpusSplit === splitPrefix || !data.corpusSplit) {
+        return data;
+      }
     }
   }
   return null;
@@ -552,10 +559,90 @@ function runEvalGates(): GateResult[] {
   return gates;
 }
 
+function runHoldoutGates(): GateResult[] {
+  // Holdout gates reuse train gate logic but read from holdout snapshots
+  // Key difference: holdout gates enforce zero false-authoritative and zero train contamination
+  const snapshot = findLatestSnapshot("holdout");
+  if (!snapshot) {
+    console.log("WARNING: No holdout snapshot found. Run 'pnpm benchmark:holdout' first.\n");
+    return [{ detail: "No holdout snapshot", durationMs: 0, gate: "holdout-snapshot-exists", passed: false }];
+  }
+
+  const gates: GateResult[] = [];
+
+  // Gate H1: No false-authoritative outputs — degraded results must have null composites
+  gates.push(
+    runGate("false-authoritative-=0", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        consumerApi: number | null;
+        agentReadiness: number | null;
+        typeSafety: number | null;
+        coverageDiagnostics?: { undersampled?: boolean; samplingClass?: string } | null;
+      }[] | undefined;
+      if (!entries) return { detail: "No entry data", passed: false };
+
+      let violations = 0;
+      for (const en of entries) {
+        const isDegraded = en.coverageDiagnostics?.samplingClass === "undersampled" &&
+          en.coverageDiagnostics?.undersampled === true;
+        const hasNumericScores = en.consumerApi !== null || en.agentReadiness !== null || en.typeSafety !== null;
+        if (isDegraded && hasNumericScores) {
+          violations++;
+        }
+      }
+      return { detail: `${violations} false-authoritative result(s)`, passed: violations === 0 };
+    }),
+  );
+
+  // Gate H2: Fallback glob rate
+  gates.push(
+    runGate("holdout-fallback-glob-<5%", () => {
+      const entries = snapshot["entries"] as {
+        name: string;
+        graphStats?: { usedFallbackGlob?: boolean };
+      }[] | undefined;
+      if (!entries || entries.length === 0) return { detail: "No entry data", passed: true };
+      const fallbackCount = entries.filter((en) => en.graphStats?.usedFallbackGlob).length;
+      const rate = fallbackCount / entries.length;
+      return { detail: `${(rate * 100).toFixed(1)}% (${fallbackCount}/${entries.length})`, passed: rate < 0.05 };
+    }),
+  );
+
+  // Gate H3: Install failures
+  gates.push(
+    runGate("holdout-installability", () => {
+      const failures = snapshot["installFailures"] as unknown[] | undefined;
+      const count = failures?.length ?? 0;
+      return { detail: `${count} install failure(s)`, passed: count === 0 };
+    }),
+  );
+
+  // Gate H4: Degraded rate — holdout allows up to 20% degraded (non-train packages may be harder)
+  gates.push(
+    runGate("holdout-degraded-<20%", () => {
+      const qg = snapshot["qualityGates"] as { degradedRate?: number; degradedResultCount?: number } | undefined;
+      const rate = qg?.degradedRate ?? 0;
+      return { detail: `${(rate * 100).toFixed(1)}%`, passed: rate < 0.2 };
+    }),
+  );
+
+  // Gate H5: Schema consistency
+  gates.push(
+    runGate("holdout-schema-consistency", () => {
+      const qg = snapshot["qualityGates"] as { schemaConsistent?: boolean; schemaVersions?: string[] } | undefined;
+      const consistent = qg?.schemaConsistent ?? true;
+      return { detail: consistent ? "consistent" : `multiple: ${qg?.schemaVersions?.join(", ")}`, passed: consistent };
+    }),
+  );
+
+  return gates;
+}
+
 function main() {
   console.log(`=== typegrade Gate Check (${gateMode}) ===\n`);
 
-  const gates = gateMode === "eval" ? runEvalGates() : runTrainGates();
+  const gates = gateMode === "eval" ? runEvalGates() : gateMode === "holdout" ? runHoldoutGates() : runTrainGates();
 
   // Print results
   console.log("=== Gate Results ===\n");
@@ -574,7 +661,7 @@ function main() {
   const outputDir = join(import.meta.dirname, "..", "benchmarks-output");
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
-  const reportFilename = gateMode === "eval" ? "gate-eval-report.json" : "gate-report.json";
+  const reportFilename = gateMode === "eval" ? "gate-eval-report.json" : gateMode === "holdout" ? "gate-holdout-report.json" : "gate-report.json";
   const reportPath = join(outputDir, reportFilename);
   writeFileSync(
     reportPath,
@@ -582,8 +669,8 @@ function main() {
   );
   console.log(`\nGate report saved to benchmarks-output/${reportFilename}`);
 
-  // Train gates are strict — eval gates are report-only (non-blocking)
-  if (!allPassed && gateMode === "train") {
+  // Train and holdout gates are strict — eval gates are report-only (non-blocking)
+  if (!allPassed && (gateMode === "train" || gateMode === "holdout")) {
     process.exit(1);
   }
   if (!allPassed && gateMode === "eval") {

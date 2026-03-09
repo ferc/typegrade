@@ -1,9 +1,11 @@
 import {
   ANALYSIS_SCHEMA_VERSION,
+  type AcquisitionStage,
   type AnalysisResult,
   type AnalysisStatus,
   type DegradedCategory,
   type PackageAnalysisContext,
+  type ResolutionDiagnostics,
   type ScoreValidity,
 } from "./types.js";
 import { type AnalyzeOptions, analyzeProject } from "./analyzer.js";
@@ -218,6 +220,7 @@ function buildDegradedResult(opts: {
   version: string | null;
   errorMessage: string;
   category: DegradedCategory;
+  resolutionDiagnostics?: ResolutionDiagnostics;
 }): AnalysisResult {
   const zeroComposite = (key: "consumerApi" | "agentReadiness" | "typeSafety") => ({
     compositeConfidenceReasons: ["Degraded analysis — scores are not comparable"],
@@ -281,6 +284,14 @@ function buildDegradedResult(opts: {
       profileReasons: ["Degraded analysis"],
     },
     projectName: opts.packageName,
+    resolutionDiagnostics: opts.resolutionDiagnostics ?? {
+      acquisitionStage: categoryToAcquisitionStage(opts.category),
+      attemptedStrategies: [],
+      chosenStrategy: "none",
+      declarationCount: 0,
+      failureReason: opts.errorMessage,
+      failureStage: categoryToAcquisitionStage(opts.category),
+    },
     scoreComparability: "global",
     scoreProfile: "published-declarations",
     scoreValidity: "not-comparable",
@@ -288,6 +299,21 @@ function buildDegradedResult(opts: {
     timeMs: 0,
     topIssues: [],
   };
+}
+
+/** Map degraded category to the acquisition stage where failure likely occurred */
+function categoryToAcquisitionStage(category: DegradedCategory): AcquisitionStage {
+  const stageMap: Record<DegradedCategory, AcquisitionStage> = {
+    "confidence-collapse": "complete",
+    "install-failure": "package-install",
+    "insufficient-surface": "graph-build",
+    "invalid-package-spec": "spec-resolution",
+    "missing-declarations": "declaration-entrypoint-resolution",
+    "partial-graph-resolution": "graph-build",
+    "unsupported-package-layout": "declaration-entrypoint-resolution",
+    "workspace-discovery-failure": "spec-resolution",
+  };
+  return stageMap[category] ?? "spec-resolution";
 }
 
 /**
@@ -862,6 +888,22 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       resolvedSpec: nameOrPath,
       resolvedVersion,
       typesSource,
+    };
+
+    // Build resolution diagnostics
+    const attemptedStrategies: string[] = ["types-field", "exports-map", "main-field"];
+    if (typesPackageName) {
+      attemptedStrategies.push("@types-companion");
+    }
+    if (graph.stats.usedFallbackGlob) {
+      attemptedStrategies.push("fallback-glob");
+    }
+    const dtsCount = countDtsFiles(effectivePkgDir);
+    result.resolutionDiagnostics = {
+      acquisitionStage: "complete",
+      attemptedStrategies,
+      chosenStrategy: typesPackageName ? "@types-companion" : entrypointStrategy,
+      declarationCount: dtsCount,
     };
 
     // Add caveat for declaration-sparse packages

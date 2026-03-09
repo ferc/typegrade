@@ -16,7 +16,9 @@ sources:
 # typegrade — CI Quality Gate
 
 Use `--min-score` to fail CI when type quality drops below a threshold.
-The gate checks the **Agent Readiness** composite score.
+The gate checks the **Agent Readiness** composite score. Results classified
+as **abstained** (via the trust contract) are rejected automatically --
+`--min-score` exits with code 1 before evaluating the score.
 
 ## Setup
 
@@ -75,6 +77,35 @@ This captures the full report as a CI artifact regardless of pass/fail.
 ```
 
 Scores the tarball as a consumer would see it (package mode, 8 dimensions).
+
+### Trust-aware gate
+
+```bash
+#!/bin/bash
+RESULT=$(npx typegrade analyze . --json)
+TRUST=$(echo "$RESULT" | jq -r '.trustSummary.classification // "unknown"')
+CAN_GATE=$(echo "$RESULT" | jq -r '.trustSummary.canGate // false')
+SCORE=$(echo "$RESULT" | jq -r '.globalScores.agentReadiness.score')
+
+if [ "$TRUST" = "abstained" ]; then
+  echo "Result is abstained — cannot gate"
+  exit 1
+fi
+
+if [ "$CAN_GATE" != "true" ]; then
+  echo "Warning: trust=$TRUST, canGate=false — skipping gate"
+  exit 0
+fi
+
+if [ "$SCORE" -lt 70 ]; then
+  echo "Agent Readiness $SCORE < 70"
+  exit 1
+fi
+```
+
+When using `--min-score` directly, abstained results are rejected
+automatically. For custom JSON-based gates, check `trustSummary.canGate`
+to decide whether the result is reliable enough to gate on.
 
 ### Confidence-aware gate
 
