@@ -256,6 +256,19 @@ Domain-specific consumer benchmark tests:
 
 Each `ScenarioScore` carries a `scenarioApplicability` field indicating whether the scenario was evaluable. Scenarios are gated by domain confidence, graph quality, and domain ambiguity before execution. See [Confidence Model: Scenario applicability gating](confidence-model.md#scenario-applicability-gating) for the full status taxonomy and gating rules.
 
+### Scenario result outcomes
+
+Each individual scenario result within a pack carries an `outcome` field classifying the test result:
+
+| Outcome | Meaning |
+|---------|---------|
+| `pass` | Score >= 70, scenario fully satisfied |
+| `partial` | Score 40-69, scenario partially satisfied |
+| `fail` | Score < 40, scenario not satisfied |
+| `not-applicable` | Scenario could not be evaluated (insufficient surface or confidence) |
+
+Only results with `outcome` other than `not-applicable` contribute to the aggregate scenario score. This prevents inapplicable tests from diluting the score.
+
 ## Root cause categories
 
 Every issue may carry a `rootCauseCategory` identifying why the problem exists. Root cause categories are used by the fix planning pipeline to group related issues and suggest appropriate fixes.

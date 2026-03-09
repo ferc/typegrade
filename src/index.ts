@@ -11,6 +11,8 @@ export {
 } from "./utils/format.js";
 export { comparePackages } from "./compare.js";
 export type { CompareResult, CompareOptions } from "./compare.js";
+export { fitCompare } from "./fit-compare.js";
+export type { FitCompareOptions } from "./fit-compare.js";
 
 // Signal hygiene: file-origin classification and issue filtering
 export { classifyFileOrigin } from "./origin/index.js";
@@ -105,6 +107,9 @@ export type {
   FileOrigin,
   FixabilityKind,
   FixabilityScore,
+  FitCompareDecision,
+  FitCompareResult,
+  FitSignal,
   FixApplicationResult,
   FixBatch,
   FixMode,
@@ -114,7 +119,9 @@ export type {
   Grade,
   ImpactClass,
   Issue,
+  CandidateFitAssessment,
   LayerViolation,
+  MigrationRiskReport,
   MetricDelta,
   MetricProvenance,
   MonorepoConfig,
@@ -133,6 +140,7 @@ export type {
   RootCauseCategory,
   SafeFixCategory,
   ScenarioApplicabilityStatus,
+  ScenarioResultOutcome,
   ScenarioScore,
   ScenarioVariant,
   ScoreComparability,

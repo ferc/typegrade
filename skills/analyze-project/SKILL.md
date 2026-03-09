@@ -8,7 +8,7 @@ description: >
   undersampled results. Use when running typegrade on a local codebase.
 type: core
 library: typegrade
-library_version: "0.12.0"
+library_version: "0.13.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -123,6 +123,24 @@ npx typegrade analyze . --agent
 
 Emits precision-first JSON with fix batches, designed for downstream agent
 consumption in iterative improvement workflows.
+
+### Agent control flags
+
+```bash
+# Include indirectly fixable issues in the report
+npx typegrade analyze . --include-indirect
+
+# Limit actionable issues to N
+npx typegrade analyze . --budget 10
+
+# Strict agent mode (lower budget, higher confidence threshold)
+npx typegrade analyze . --strict-agent
+```
+
+`--include-indirect` adds issues with `fixability: "indirect"` to the output.
+`--budget` caps the number of actionable issues (default: 25 in source mode,
+50 otherwise). `--strict-agent` enforces conservative filtering with a
+`minConfidence` of 0.8 on the agent report.
 
 ### Boundary analysis
 

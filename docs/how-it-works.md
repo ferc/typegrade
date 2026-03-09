@@ -548,6 +548,38 @@ The monorepo report includes `analysisSchemaVersion`, the package list with laye
 - `totalViolations` — total count of layer violations across all packages.
 - `violationsByType` — breakdown of violations by type (`forbidden-cross-layer`, `infra-bypass`, `unstable-leak`, `trust-zone-crossing`).
 
+## Codebase-aware fit comparison
+
+The `fit-compare` command (`typegrade fit-compare <pkgA> <pkgB> --against <path>`) compares two packages for fit against a specific codebase. It combines package quality scoring with codebase context analysis to produce an adoption recommendation.
+
+### Pipeline
+
+1. **Score both packages** using the package scorer (same as `typegrade score`).
+2. **Analyze the codebase** using the source analyzer (same as `typegrade analyze`).
+3. **Compute fit assessments** for each candidate against the codebase — type safety alignment, agent readiness, API quality, boundary compatibility, trust quality, and domain compatibility.
+4. **Compute adoption decision** — determines outcome (`clear-winner`, `marginal-winner`, `equivalent`, `abstained`) with confidence and top reasons.
+5. **Generate first migration batches** for the winning candidate — actionable first steps based on codebase issues and migration risk.
+
+### Fit score formula
+
+```
+fitScore = decisionScore × 0.4 + domainCompatibility × 0.3 + avgFitSignals × 0.3
+```
+
+Where `decisionScore` is a weighted composite of the candidate's scores (consumerApi 0.25, typeSafety 0.35, agentReadiness 0.15, declarationFidelity 0.15, boundaryDiscipline 0.10), `domainCompatibility` measures domain alignment between candidate and codebase, and `avgFitSignals` averages the fit signal scores (type safety alignment, agent readiness, API quality, boundary compatibility, trust quality).
+
+### Migration risk
+
+Each candidate receives a `MigrationRiskReport` with risk levels (`low`, `medium`, `high`) for API mismatch, typing, and boundary concerns, plus estimated touch points and batch counts.
+
+### Programmatic API
+
+```typescript
+import { fitCompare } from 'typegrade';
+const result = fitCompare('zod', 'valibot', { codebasePath: './my-app' });
+console.log(result.adoptionDecision.outcome, result.adoptionDecision.winner);
+```
+
 ## Diff command
 
 The `compare` command (`typegrade compare <pkgA> <pkgB>`) performs a side-by-side comparison of two packages. Both packages are scored independently, and the results are presented with deltas for each composite score.

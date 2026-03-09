@@ -4,6 +4,7 @@ import type {
   BoundaryQualityScore,
   BoundarySummary,
   ComparisonDecisionReport,
+  FitCompareResult,
   FixApplicationResult,
   FixMode,
   FixPlan,
@@ -167,6 +168,9 @@ export function runCli() {
     .option("--profile <profile>", `Analysis profile: ${VALID_PROFILES.join("|")}`)
     .option("--agent", "Agent-optimized output (precision-first, fix batches)")
     .option("--include-generated", "Include generated/dist/vendor issues in ranked findings")
+    .option("--include-indirect", "Include indirectly fixable issues")
+    .option("--budget <n>", "Maximum actionable issues to include", parseInt)
+    .option("--strict-agent", "Enforce most conservative filter mode (with --agent)")
     .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
@@ -177,10 +181,26 @@ export function runCli() {
       const { analyzeProject } = await import("./analyzer.js");
       const result = analyzeProject(projectPath, {
         agent,
+        budget: typeof opts["budget"] === "number" ? opts["budget"] : undefined,
         domain,
         explain: Boolean(opts.explain),
+        includeGenerated: Boolean(opts["includeGenerated"]),
+        includeIndirect: Boolean(opts["includeIndirect"]),
         profile,
       });
+
+      // If --agent + --strict-agent, rebuild agent report with strict settings
+      if (agent && opts["strictAgent"]) {
+        const { buildAgentReport, renderAgentJson } = await import("./agent/index.js");
+        const agentReport = buildAgentReport(result, { minConfidence: 0.8 });
+        if (opts["json"]) {
+          console.log(renderAgentJson(agentReport));
+        } else {
+          await outputResult(result, toOutputOptions(opts));
+        }
+        return;
+      }
+
       await outputResult(result, toOutputOptions(opts));
     });
 
@@ -415,6 +435,30 @@ export function runCli() {
     });
 
   program
+    .command("fit-compare <pkgA> <pkgB>")
+    .description("Compare two packages for fit against a codebase")
+    .option("--json", "Output as JSON")
+    .option("--against <path>", "Path to the codebase to compare against", ".")
+    .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
+    .option("--no-cache", "Disable package cache")
+    .action(async (pkgA: string, pkgB: string, cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+      const domain = parseDomainOption(String(opts.domain ?? "auto"));
+      const noCache = opts.cache === false;
+      const codebasePath = String(opts["against"] ?? ".");
+
+      const { fitCompare } = await import("./fit-compare.js");
+      const result = fitCompare(pkgA, pkgB, { codebasePath, domain, noCache });
+
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(renderFitCompare(result, pkgA, pkgB));
+      }
+    });
+
+  program
     .command("monorepo [path]")
     .description("Analyze monorepo workspace health and layer violations")
     .option("--json", "Output as JSON")
@@ -572,6 +616,31 @@ function renderComparison(opts: ComparisonOpts): string {
     lines.push(`  ${label}${displayA.padEnd(16)}${displayB.padEnd(16)}${deltaStr}`);
   }
 
+  // Dimension-level decision metrics: declarationFidelity, boundaryDiscipline
+  const dimMetricKeys = ["declarationFidelity", "boundaryDiscipline"] as const;
+  const dimLabels: Record<string, string> = {
+    boundaryDiscipline: "Boundary Discipline",
+    declarationFidelity: "Declaration Fidelity",
+  };
+  for (const key of dimMetricKeys) {
+    const dimA = resultA.dimensions.find((dd) => dd.key === key);
+    const dimB = resultB.dimensions.find((dd) => dd.key === key);
+    const sA = dimA?.score;
+    const sB = dimB?.score;
+    // Only show if at least one side has this dimension
+    if ((sA === null || sA === undefined) && (sB === null || sB === undefined)) {
+      continue;
+    }
+    const displayA = sA === null || sA === undefined ? "N/A" : String(sA);
+    const displayB = sB === null || sB === undefined ? "N/A" : String(sB);
+    const deltaStr =
+      sA !== null && sA !== undefined && sB !== null && sB !== undefined
+        ? formatDelta(sA - sB)
+        : pc.dim("n/a");
+    const label = (dimLabels[key] ?? key).padEnd(22);
+    lines.push(`  ${label}${displayA.padEnd(16)}${displayB.padEnd(16)}${deltaStr}`);
+  }
+
   // Domain scores if available
   if (resultA.domainScore || resultB.domainScore) {
     lines.push("");
@@ -584,8 +653,29 @@ function renderComparison(opts: ComparisonOpts): string {
     lines.push(`  ${domainLabel}${String(domA).padEnd(16)}${String(domB).padEnd(16)}`);
   }
 
+  // Scenario scores if available
+  if (resultA.scenarioScore || resultB.scenarioScore) {
+    const scA = resultA.scenarioScore?.score ?? "n/a";
+    const scB = resultB.scenarioScore?.score ?? "n/a";
+    const scenarioLabel =
+      `Scenario (${resultA.scenarioScore?.domain ?? resultB.scenarioScore?.domain ?? "?"})`.padEnd(
+        22,
+      );
+    lines.push(`  ${scenarioLabel}${String(scA).padEnd(16)}${String(scB).padEnd(16)}`);
+  }
+
   lines.push("");
   return lines.join("\n");
+}
+
+function formatDelta(delta: number): string {
+  if (delta === 0) {
+    return "0";
+  }
+  if (delta > 0) {
+    return pc.green(`+${delta}`);
+  }
+  return pc.red(`${delta}`);
 }
 
 function scoreToColor(score: number): (str: string) => string {
@@ -966,6 +1056,101 @@ function renderApplyFixesReport(appResult: FixApplicationResult): string {
     `    Verification: ${appResult.verificationPassed ? pc.green("passed") : pc.yellow("pending")}`,
   );
   lines.push("");
+
+  return lines.join("\n");
+}
+
+function renderFitCompare(result: FitCompareResult, nameA: string, nameB: string): string {
+  const lines: string[] = ["", pc.bold("  typegrade fit-compare"), ""];
+  const { adoptionDecision, candidateA, candidateB } = result;
+
+  // Decision header
+  switch (adoptionDecision.outcome) {
+    case "clear-winner": {
+      lines.push(pc.green(`  Recommendation: ${adoptionDecision.winner} (clear fit winner)`));
+      break;
+    }
+    case "marginal-winner": {
+      lines.push(
+        pc.yellow(
+          `  Recommendation: ${adoptionDecision.winner} (marginal fit — review recommended)`,
+        ),
+      );
+      break;
+    }
+    case "equivalent": {
+      lines.push(pc.blue("  Recommendation: Equivalent fit — either library works"));
+      break;
+    }
+    case "abstained": {
+      lines.push(pc.red("  Recommendation: Abstained — insufficient evidence"));
+      break;
+    }
+    default: {
+      lines.push(pc.yellow(`  Recommendation: ${adoptionDecision.outcome}`));
+    }
+  }
+  lines.push(`  Confidence: ${Math.round(adoptionDecision.decisionConfidence * 100)}%`);
+  lines.push("");
+
+  if (adoptionDecision.topReasons.length > 0) {
+    lines.push("  Key factors:");
+    for (const reason of adoptionDecision.topReasons) {
+      lines.push(`    ${reason}`);
+    }
+    lines.push("");
+  }
+
+  if (adoptionDecision.blockingReasons.length > 0) {
+    lines.push(pc.yellow("  Blockers:"));
+    for (const reason of adoptionDecision.blockingReasons) {
+      lines.push(`    ${reason}`);
+    }
+    lines.push("");
+  }
+
+  // Fit scores table
+  lines.push(`  ${"─".repeat(60)}`);
+  lines.push(`  ${"".padEnd(22)}${nameA.padEnd(16)}${nameB.padEnd(16)}${"Delta"}`);
+  lines.push(`  ${"─".repeat(60)}`);
+
+  const fitDelta = candidateA.fitScore - candidateB.fitScore;
+  const fitDeltaStr = formatDelta(fitDelta);
+  lines.push(
+    `  ${"Fit Score".padEnd(22)}${String(candidateA.fitScore).padEnd(16)}${String(candidateB.fitScore).padEnd(16)}${fitDeltaStr}`,
+  );
+
+  const dsDeltaStr =
+    candidateA.decisionScore === null || candidateB.decisionScore === null
+      ? pc.dim("n/a")
+      : formatDelta(Math.round(candidateA.decisionScore - candidateB.decisionScore));
+  lines.push(
+    `  ${"Package Quality".padEnd(22)}${String(candidateA.decisionScore ?? "N/A").padEnd(16)}${String(candidateB.decisionScore ?? "N/A").padEnd(16)}${dsDeltaStr}`,
+  );
+
+  lines.push(
+    `  ${"Domain Compat.".padEnd(22)}${String(candidateA.domainCompatibility).padEnd(16)}${String(candidateB.domainCompatibility).padEnd(16)}`,
+  );
+  lines.push("");
+
+  // Migration risk summary
+  lines.push(pc.bold("  Migration Risk:"));
+  lines.push(
+    `    ${nameA}: API ${candidateA.migrationRisk.apiMismatchRisk}, Typing ${candidateA.migrationRisk.typingRisk}, Boundary ${candidateA.migrationRisk.boundaryRisk}`,
+  );
+  lines.push(
+    `    ${nameB}: API ${candidateB.migrationRisk.apiMismatchRisk}, Typing ${candidateB.migrationRisk.typingRisk}, Boundary ${candidateB.migrationRisk.boundaryRisk}`,
+  );
+  lines.push("");
+
+  // First migration batches
+  if (result.firstMigrationBatches.length > 0) {
+    lines.push(pc.bold("  First Migration Steps:"));
+    for (const batch of result.firstMigrationBatches) {
+      lines.push(`    - ${batch}`);
+    }
+    lines.push("");
+  }
 
   return lines.join("\n");
 }

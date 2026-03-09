@@ -9,7 +9,7 @@ description: >
   in agent-driven refactoring or self-improvement loops.
 type: core
 library: typegrade
-library_version: "0.12.0"
+library_version: "0.13.0"
 sources:
   - "ferc/typegrade:src/cli.ts"
   - "ferc/typegrade:src/agent/report.ts"

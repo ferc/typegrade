@@ -28,6 +28,7 @@ describe("pack smoke test", () => {
       "enrichFixBatches",
       "evaluateBoundaryPolicies",
       "filterIssues",
+      "fitCompare",
       "gatherProfileSignals",
       "loadConfig",
       "normalizeResult",

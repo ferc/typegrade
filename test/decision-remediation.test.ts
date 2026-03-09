@@ -317,6 +317,6 @@ describe("agent contract: execution-ready", () => {
 
 describe("schema version", () => {
   it("current schema version is 0.12.0", () => {
-    expect(ANALYSIS_SCHEMA_VERSION).toBe("0.12.0");
+    expect(ANALYSIS_SCHEMA_VERSION).toBe("0.13.0");
   });
 });

@@ -197,6 +197,22 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
     });
   }
 
+  // Scenario score delta (if both have scenario scores for the same domain)
+  if (
+    resultA.scenarioScore &&
+    resultB.scenarioScore &&
+    resultA.scenarioScore.domain === resultB.scenarioScore.domain
+  ) {
+    const delta = resultA.scenarioScore.score - resultB.scenarioScore.score;
+    metricDeltas.push({
+      delta,
+      metric: `scenario:${resultA.scenarioScore.domain}`,
+      significant: Math.abs(delta) >= SIGNIFICANCE_THRESHOLD,
+      valueA: resultA.scenarioScore.score,
+      valueB: resultB.scenarioScore.score,
+    });
+  }
+
   // Compute decision scores (weighted sum of composites with penalties)
   const decisionScoreA = computeDecisionScore(resultA, nameA);
   const decisionScoreB = computeDecisionScore(resultB, nameB);
@@ -243,8 +259,14 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
     winner = nameB;
   }
 
-  // Build top reasons
-  const topReasons = buildTopReasons(metricDeltas, nameA, nameB);
+  // Build top reasons with granular explanations
+  const topReasons = buildTopReasons({
+    deltas: metricDeltas,
+    nameA,
+    nameB,
+    resultA,
+    resultB,
+  });
 
   return {
     blockingReasons: [],
@@ -362,10 +384,19 @@ function computeDecisionConfidence(input: ConfidenceInput): number {
   return Math.round(confidence * 100) / 100;
 }
 
+interface TopReasonsInput {
+  deltas: MetricDelta[];
+  nameA: string;
+  nameB: string;
+  resultA?: AnalysisResult;
+  resultB?: AnalysisResult;
+}
+
 /**
- * Build top reasons from significant metric deltas.
+ * Build top reasons from significant metric deltas with granular explanations.
  */
-function buildTopReasons(deltas: MetricDelta[], nameA: string, nameB: string): string[] {
+function buildTopReasons(input: TopReasonsInput): string[] {
+  const { deltas, nameA, nameB, resultA, resultB } = input;
   const labels: Record<string, string> = {
     agentReadiness: "Agent Readiness",
     boundaryDiscipline: "Boundary Discipline",
@@ -377,12 +408,87 @@ function buildTopReasons(deltas: MetricDelta[], nameA: string, nameB: string): s
   return deltas
     .filter((md) => md.significant && md.delta !== null)
     .toSorted((lhs, rhs) => Math.abs(rhs.delta!) - Math.abs(lhs.delta!))
-    .slice(0, 3)
+    .slice(0, 5)
     .map((md) => {
       const label = labels[md.metric] ?? md.metric;
       const favors = md.delta! > 0 ? nameA : nameB;
+      const detail = buildReasonDetail({ md, nameA, nameB, resultA, resultB });
+      if (detail) {
+        return `${label}: ${favors} leads by ${Math.abs(md.delta!)} points (${detail})`;
+      }
       return `${label}: ${favors} leads by ${Math.abs(md.delta!)} points`;
     });
+}
+
+interface ReasonDetailInput {
+  md: MetricDelta;
+  nameA: string;
+  nameB: string;
+  resultA?: AnalysisResult | undefined;
+  resultB?: AnalysisResult | undefined;
+}
+
+/**
+ * Build a detail explanation for a specific metric delta.
+ */
+function buildReasonDetail(input: ReasonDetailInput): string | null {
+  const { md, nameA, nameB, resultA, resultB } = input;
+  if (!resultA || !resultB) {
+    return null;
+  }
+
+  // For composite metrics, look at underlying dimension contributions
+  if (md.metric === "typeSafety") {
+    const anyA = resultA.dimensions.find((dd) => dd.key === "anyLeakage");
+    const anyB = resultB.dimensions.find((dd) => dd.key === "anyLeakage");
+    const scoreA = anyA?.score;
+    const scoreB = anyB?.score;
+    if (
+      scoreA !== null &&
+      scoreA !== undefined &&
+      scoreB !== null &&
+      scoreB !== undefined &&
+      Math.abs(scoreA - scoreB) >= 5
+    ) {
+      const better = scoreA > scoreB ? nameA : nameB;
+      return `${better} has less any-type leakage`;
+    }
+  }
+
+  if (md.metric === "consumerApi") {
+    const specA = resultA.dimensions.find((dd) => dd.key === "apiSpecificity");
+    const specB = resultB.dimensions.find((dd) => dd.key === "apiSpecificity");
+    const scoreA = specA?.score;
+    const scoreB = specB?.score;
+    if (
+      scoreA !== null &&
+      scoreA !== undefined &&
+      scoreB !== null &&
+      scoreB !== undefined &&
+      Math.abs(scoreA - scoreB) >= 5
+    ) {
+      const better = scoreA > scoreB ? nameA : nameB;
+      return `${better} has more specific API types`;
+    }
+  }
+
+  if (md.metric === "declarationFidelity") {
+    return "measures how well declaration files represent the implementation";
+  }
+
+  if (md.metric === "boundaryDiscipline") {
+    return "measures validation of data crossing trust boundaries";
+  }
+
+  if (md.metric.startsWith("domainFit:")) {
+    return "domain-adjusted scoring for this library category";
+  }
+
+  if (md.metric.startsWith("scenario:")) {
+    return "consumer benchmark scenario tests";
+  }
+
+  return null;
 }
 
 /**

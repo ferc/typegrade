@@ -1,4 +1,11 @@
-import type { DomainKey, Grade, ScenarioResult, ScenarioScore, ScenarioVariant } from "../types.js";
+import type {
+  DomainKey,
+  Grade,
+  ScenarioApplicabilityStatus,
+  ScenarioResult,
+  ScenarioScore,
+  ScenarioVariant,
+} from "../types.js";
 import type { PublicSurface } from "../surface/index.js";
 
 /** A single scenario test within a domain pack */
@@ -45,17 +52,29 @@ export function evaluateScenarioPack(
   const results: ScenarioResult[] = [];
   let totalScore = 0;
   let passedCount = 0;
+  let applicableCount = 0;
 
   for (const scenario of pack.scenarios) {
     const result = scenario.evaluate(surface, packageName);
+
+    // Derive outcome if not set by the scenario
+    if (!result.outcome) {
+      result.outcome = result.passed ? "passed" : "failed";
+    }
+
     results.push(result);
-    totalScore += result.score;
-    if (result.passed) {
-      passedCount++;
+
+    // Only count applicable results in score aggregation
+    if (result.outcome !== "not_applicable" && result.outcome !== "insufficient_evidence") {
+      totalScore += result.score;
+      applicableCount++;
+      if (result.passed) {
+        passedCount++;
+      }
     }
   }
 
-  const avgScore = pack.scenarios.length > 0 ? Math.round(totalScore / pack.scenarios.length) : 0;
+  const avgScore = applicableCount > 0 ? Math.round(totalScore / applicableCount) : 0;
 
   let grade: Grade = "F";
   if (avgScore >= 95) {
@@ -70,6 +89,17 @@ export function evaluateScenarioPack(
     grade = "D";
   }
 
+  // Determine pack-level applicability from individual results
+  const insufficientCount = results.filter((rr) => rr.outcome === "insufficient_evidence").length;
+  const notApplicableCount = results.filter((rr) => rr.outcome === "not_applicable").length;
+
+  const scenarioApplicability = deriveApplicability({
+    applicableCount,
+    insufficientCount,
+    notApplicableCount,
+    totalCount: results.length,
+  });
+
   return {
     comparability: "scenario",
     domain: pack.domain,
@@ -77,8 +107,28 @@ export function evaluateScenarioPack(
     passedScenarios: passedCount,
     results,
     scenario: pack.name,
+    ...(scenarioApplicability ? { scenarioApplicability } : {}),
     ...(pack.variant ? { scenarioVariant: pack.variant } : {}),
     score: avgScore,
     totalScenarios: pack.scenarios.length,
   };
+}
+
+/** Derive pack-level applicability from individual scenario outcomes. */
+function deriveApplicability(opts: {
+  notApplicableCount: number;
+  insufficientCount: number;
+  applicableCount: number;
+  totalCount: number;
+}): ScenarioApplicabilityStatus | undefined {
+  if (opts.notApplicableCount === opts.totalCount) {
+    return "not_applicable";
+  }
+  if (opts.insufficientCount > opts.totalCount / 2) {
+    return "insufficient_evidence";
+  }
+  if (opts.insufficientCount > 0 || opts.applicableCount < opts.totalCount) {
+    return "applicable_but_weak";
+  }
+  return undefined;
 }

@@ -8,11 +8,12 @@ description: >
   dependencies.
 type: core
 library: typegrade
-library_version: "0.12.0"
+library_version: "0.13.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
   - "ferc/typegrade:src/compare.ts"
+  - "ferc/typegrade:src/fit-compare.ts"
 ---
 
 # typegrade — Compare Packages
@@ -182,3 +183,39 @@ npx typegrade diff my-lib@1.0 my-lib@2.0
 ```
 
 `diff` produces per-composite and per-dimension deltas with direction indicators.
+
+## Codebase-Aware Comparison (fit-compare)
+
+For choosing which library fits a specific codebase better:
+
+```bash
+npx typegrade fit-compare zod valibot --against ./my-app
+```
+
+This scores both packages and also analyzes the local codebase, then produces
+a fit assessment considering:
+
+- Package quality (decision score)
+- Domain compatibility with the codebase
+- Type safety alignment
+- Boundary discipline compatibility
+- Migration risk (API mismatch, typing, boundary)
+
+The output includes migration risk levels and first migration steps.
+
+### JSON output
+
+```bash
+npx typegrade fit-compare zod valibot --against . --json
+```
+
+Returns a `FitCompareResult` with `candidateA`, `candidateB`, `codebase`,
+`adoptionDecision`, and `firstMigrationBatches`.
+
+### Programmatic API
+
+```typescript
+import { fitCompare } from 'typegrade';
+const result = fitCompare('zod', 'valibot', { codebasePath: './my-app' });
+console.log(result.adoptionDecision.outcome, result.adoptionDecision.winner);
+```

@@ -558,6 +558,8 @@ export interface ScenarioResult {
   passed: boolean;
   score: number;
   reason: string;
+  /** Granular outcome for this scenario test (backward compatible — derived from passed if absent) */
+  outcome?: ScenarioResultOutcome | undefined;
 }
 
 export interface GlobalScores {
@@ -676,6 +678,8 @@ export interface AnalysisResult {
   boundaryHotspots?: BoundaryHotspot[];
   /** Concrete next-action recommendations (max 3) */
   recommendations?: Recommendation[];
+  /** Recommended fixes for boundary hotspots */
+  boundaryRecommendedFixes?: BoundaryRecommendedFix[];
 }
 
 export interface PrecisionFeatures {
@@ -1266,7 +1270,92 @@ export interface AbortCondition {
   reason: string;
 }
 
+// --- Fit-Compare (Codebase-Aware Library Comparison) ---
+
+/** Risk of migrating to a candidate library */
+export interface MigrationRiskReport {
+  /** Risk from API shape mismatches */
+  apiMismatchRisk: "low" | "medium" | "high";
+  /** Risk from typing differences */
+  typingRisk: "low" | "medium" | "high";
+  /** Risk from boundary handling differences */
+  boundaryRisk: "low" | "medium" | "high";
+  /** Estimated number of files to modify */
+  estimatedTouchPoints: number;
+  /** Estimated number of fix batches needed */
+  estimatedBatchCount: number;
+  /** Whether human review is required */
+  requiresHumanReview: boolean;
+}
+
+/** Fit signal for a candidate relative to a codebase */
+export interface FitSignal {
+  /** Name of the signal */
+  name: string;
+  /** Score contribution (0-100) */
+  score: number;
+  /** Human-readable explanation */
+  explanation: string;
+}
+
+/** Per-candidate fit assessment */
+export interface CandidateFitAssessment {
+  /** Package name */
+  packageName: string;
+  /** Package analysis result */
+  result: AnalysisResult;
+  /** Decision score from comparison engine */
+  decisionScore: number | null;
+  /** Domain compatibility with the codebase */
+  domainCompatibility: number;
+  /** Fit signals computed from codebase context */
+  fitSignals: FitSignal[];
+  /** Migration risk assessment */
+  migrationRisk: MigrationRiskReport;
+  /** Overall fit score (0-100) */
+  fitScore: number;
+}
+
+/** Decision from a fit-compare analysis */
+export interface FitCompareDecision {
+  /** Recommendation outcome */
+  outcome: ComparisonOutcome;
+  /** Winning candidate (null if equivalent/abstained) */
+  winner: string | null;
+  /** Confidence in the decision (0-1) */
+  decisionConfidence: number;
+  /** Blocking reasons for incomparable/abstained outcomes */
+  blockingReasons: string[];
+  /** Top reasons supporting the decision */
+  topReasons: string[];
+}
+
+/** Result of a codebase-aware library fit comparison */
+export interface FitCompareResult {
+  /** Schema version */
+  analysisSchemaVersion: string;
+  /** First candidate assessment */
+  candidateA: CandidateFitAssessment;
+  /** Second candidate assessment */
+  candidateB: CandidateFitAssessment;
+  /** Codebase analysis result */
+  codebase: AnalysisResult;
+  /** Adoption decision */
+  adoptionDecision: FitCompareDecision;
+  /** First migration batches for the winning candidate */
+  firstMigrationBatches: string[];
+}
+
+// --- Scenario Result Outcome ---
+
+/** Granular outcome for an individual scenario test */
+export type ScenarioResultOutcome =
+  | "passed"
+  | "failed"
+  | "not_applicable"
+  | "insufficient_evidence";
+
 // --- Analysis Schema ---
 
 /** Current schema version for analysis output */
-export const ANALYSIS_SCHEMA_VERSION = "0.12.0";
+export const ANALYSIS_SCHEMA_VERSION = "0.13.0";

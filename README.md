@@ -44,6 +44,9 @@ npx typegrade score express@5
 # Compare two packages side-by-side
 npx typegrade compare zod valibot
 
+# Compare two packages for codebase fit (which one fits your project better?)
+npx typegrade fit-compare zod valibot --against .
+
 # Compare score changes between two packages or versions
 npx typegrade diff zod@3.22 zod@3.23
 
@@ -96,6 +99,9 @@ typegrade analyze ./src --verbose
 ```bash
 typegrade compare zod valibot
 # Side-by-side global scores, domain scores, and deltas
+
+typegrade fit-compare zod valibot --against .
+# Codebase-aware comparison: fit assessment, migration risk, first steps
 ```
 
 **AI workflow feeding downstream tooling:**
@@ -218,7 +224,7 @@ Returns an `AnalysisResult` with:
 
 ```jsonc
 {
-  "analysisSchemaVersion": "0.12.0",
+  "analysisSchemaVersion": "0.13.0",
   "status": "complete",
   "scoreValidity": "fully-comparable",
   "mode": "package",
@@ -289,6 +295,7 @@ Returns an `AnalysisResult` with:
   "dimensions": [/* 8 dimension results with scores, metrics, issues */],
   "topIssues": [/* top 10 issues by severity */],
   "boundaryHotspots": [/* ranked unvalidated boundary points with risk scores */],
+  "boundaryRecommendedFixes": [/* concrete fixes for boundary hotspots */],
   "recommendations": [/* actionable recommendations by category (source mode) */]
 }
 ```
@@ -300,6 +307,7 @@ import {
   analyzeProject,
   scorePackage,
   comparePackages,
+  fitCompare,
   buildFixPlan,
   computeDiff,
   normalizeResult,
@@ -312,6 +320,10 @@ import {
 const sourceResult = analyzeProject('./src');
 const packageResult = scorePackage('zod');
 const comparison = comparePackages('zod', 'valibot');
+
+// Codebase-aware library fit comparison
+const fit = fitCompare('zod', 'valibot', { codebasePath: './my-app' });
+console.log(fit.adoptionDecision.outcome, fit.adoptionDecision.winner);
 
 // Fix planning
 const plan = buildFixPlan(sourceResult);

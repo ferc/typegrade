@@ -271,6 +271,13 @@ function buildDegradedResult(opts: {
     globalScores: { agentReadiness, consumerApi, typeSafety },
     graphStats: makeFallbackGraphStats(),
     mode: "package",
+    noiseSummary: {
+      excludedPaths: [],
+      generatedIssueCount: 0,
+      generatedIssueRatio: 0,
+      sourceOwnedIssueCount: 0,
+      suppressedGeneratedCount: 0,
+    },
     packageIdentity: {
       displayName: opts.packageName,
       entrypointStrategy: "unknown",
@@ -298,6 +305,12 @@ function buildDegradedResult(opts: {
     status: "degraded",
     timeMs: 0,
     topIssues: [],
+    trustSummary: {
+      canCompare: false,
+      canGate: false,
+      classification: "abstained",
+      reasons: [opts.errorMessage],
+    },
   };
 }
 

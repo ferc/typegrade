@@ -571,6 +571,12 @@ export interface AnalyzeOptions {
   skipDeclEmit?: boolean;
   /** Skip boundary analysis (source mode only) */
   skipBoundaries?: boolean;
+  /** Include generated/dist/vendor issues in ranked findings */
+  includeGenerated?: boolean;
+  /** Include indirectly fixable issues */
+  includeIndirect?: boolean;
+  /** Maximum actionable issues to include */
+  budget?: number;
 }
 
 /**
@@ -958,10 +964,14 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   // Collect top issues using the shared signal-hygiene filter as single source of truth
   const allIssues: Issue[] = dimensions.flatMap((dim) => dim.issues);
-  const topIssueFilter = filterIssues(allIssues, {
-    budget: 10,
-    includeGenerated: false,
-  });
+  const filterOpts: { budget: number; includeGenerated: boolean; includeIndirect?: boolean } = {
+    budget: options?.budget ?? 10,
+    includeGenerated: options?.includeGenerated ?? false,
+  };
+  if (options?.includeIndirect !== undefined) {
+    filterOpts.includeIndirect = options.includeIndirect;
+  }
+  const topIssueFilter = filterIssues(allIssues, filterOpts);
   // Fall back to severity-sorted all issues if no source issues pass the filter
   const topIssues =
     topIssueFilter.actionable.length > 0
@@ -1142,7 +1152,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     globalScores,
     graphStats,
     mode,
-    noiseSummary: noiseSummary.generatedIssueCount > 0 ? noiseSummary : undefined,
+    noiseSummary,
     packageIdentity,
     profileInfo,
     projectName,
@@ -1186,10 +1196,11 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   if (boundarySummary) {
     result.boundarySummary = boundarySummary;
-    // Wire boundary hotspots into the result
+    // Wire boundary hotspots and recommended fixes into the result
     const hotspots = computeBoundaryHotspots(boundarySummary);
     if (hotspots.length > 0) {
       result.boundaryHotspots = hotspots;
+      result.boundaryRecommendedFixes = generateBoundaryFixes(hotspots);
     }
   }
   if (boundaryQuality) {

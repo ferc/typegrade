@@ -8,7 +8,7 @@ description: >
   or documentation.
 type: lifecycle
 library: typegrade
-library_version: "0.12.0"
+library_version: "0.13.0"
 sources:
   - "ferc/typegrade:AGENTS.md"
   - "ferc/typegrade:skills/_artifacts/domain_map.yaml"
@@ -159,7 +159,7 @@ library_version: "0.11.0"
 Correct:
 
 ```yaml
-library_version: "0.12.0"
+library_version: "0.13.0"
 ```
 
 The `stale` check compares `library_version` against the published npm version.
