@@ -134,8 +134,18 @@ export interface RedactedEvalSummary {
     regressions: { metric: string; baseline: number; current: number }[];
     improvements: { metric: string; baseline: number; current: number }[];
   };
-  /** Confidence calibration bands — measures how well confidence predicts reasonable scores */
-  calibration?: { band: string; count: number; meanConfidence: number; reasonableRate: number }[];
+  /** Confidence calibration bands — measures how well confidence predicts quality and failure modes */
+  calibration?: {
+    band: string;
+    count: number;
+    meanConfidence: number;
+    reasonableRate: number;
+    undersampledRate?: number;
+    fallbackRate?: number;
+    domainOverreachRate?: number;
+    degradedRate?: number;
+    failureModeRate?: number;
+  }[];
 }
 
 // ─── Unlabeled Eval Metrics ────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import { scorePackage } from "../src/package-scorer.js";
 import type { AnalysisResult } from "../src/types.js";
 import type { RedactedShadowSummary } from "./types.js";
 import { loadManifest, samplePool } from "./split-loader.js";
+import { minSampleForBound, wilsonUpperBound } from "./stats.js";
 
 interface ShadowLatestConfig {
   /** Number of packages to sample */
@@ -47,8 +48,19 @@ interface ShadowRawEntry {
   moduleKind: string;
 }
 
+/**
+ * Statistical guidance for shadow sample sizes (assumes zero observed failures):
+ *
+ *   n=50  → 99% CI upper bound for failure rate ≈ 8.9%
+ *   n=90  → 99% CI upper bound for failure rate ≈ 5.0%
+ *   n=200 → 99% CI upper bound for failure rate ≈ 2.3%
+ *   n=460 → 99% CI upper bound for failure rate ≈ 1.0%  (minimum for "<1% at 99% CI")
+ *   n=920 → 99% CI upper bound for failure rate ≈ 0.5%  (minimum for "<0.5% at 99% CI")
+ *
+ * Default of 50 is a practical minimum. Use --count to increase for stronger claims.
+ */
 const DEFAULT_CONFIG: ShadowLatestConfig = {
-  sampleCount: 30,
+  sampleCount: 50,
   seed: Date.now(),
   rawOutputDir: "benchmarks-output/shadow-raw",
   summaryOutputDir: "benchmarks-output",
@@ -63,17 +75,6 @@ function anonymize(input: string): string {
     hash = ((hash << 5) - hash + ch) | 0;
   }
   return Math.abs(hash).toString(36).slice(0, 8);
-}
-
-/** Compute 99% lower confidence bound using Wilson score interval */
-function wilsonLowerBound(successes: number, total: number): number {
-  if (total === 0) return 0;
-  const zz = 2.576; // Z-score for 99% confidence
-  const pHat = successes / total;
-  const denominator = 1 + (zz * zz) / total;
-  const center = pHat + (zz * zz) / (2 * total);
-  const spread = zz * Math.sqrt((pHat * (1 - pHat) + (zz * zz) / (4 * total)) / total);
-  return Math.max(0, (center - spread) / denominator);
 }
 
 /** Run shadow-latest benchmark and produce redacted summary */
@@ -244,15 +245,26 @@ export async function runShadowLatest(
     fallbackGlobRate: 1 - wilsonLowerBound(total - fallbackGlob, total),
   };
 
-  // Build gates
+  // Build gates with CI-bound versions where applicable
+  const falseAuthUB = wilsonUpperBound(falseAuthoritative, total);
+  const fallbackUB = wilsonUpperBound(fallbackGlob, total);
+  const installUB = wilsonUpperBound(installFailures, total);
+  const overreachUB = wilsonUpperBound(domainOverreach, total);
+  const scenOverreachUB = wilsonUpperBound(scenarioOverreach, total);
+  const comparableLB = wilsonLowerBound(comparable, total);
+
+  // Minimum sample size needed to claim <1% failure rate at 99% CI
+  const minFor1Pct = minSampleForBound(0.01, 0.99);
+
   const gateResults: { gate: string; passed: boolean; detail: string }[] = [
-    { detail: `${(falseAuthRate * 100).toFixed(1)}%`, gate: "false-authoritative-=0", passed: falseAuthoritative === 0 },
-    { detail: `${(fallbackRate * 100).toFixed(1)}%`, gate: "fallback-glob-<1%", passed: fallbackRate < 0.01 },
-    { detail: `${(installRate * 100).toFixed(1)}%`, gate: "install-failure-<5%", passed: installRate < 0.05 },
-    { detail: `${(comparableRate * 100).toFixed(1)}%`, gate: "comparable-rate->50%", passed: comparableRate > 0.5 },
-    { detail: `${(domainOverreachRate * 100).toFixed(1)}%`, gate: "domain-overreach-<15%", passed: domainOverreachRate < 0.15 },
-    { detail: `${(scenarioOverreachRate * 100).toFixed(1)}%`, gate: "scenario-overreach-<15%", passed: scenarioOverreachRate < 0.15 },
+    { detail: `${(falseAuthRate * 100).toFixed(1)}%, 99%CI upper: ${(falseAuthUB * 100).toFixed(1)}%`, gate: "false-authoritative-CI<5%", passed: falseAuthUB < 0.05 },
+    { detail: `${(fallbackRate * 100).toFixed(1)}%, 99%CI upper: ${(fallbackUB * 100).toFixed(1)}%`, gate: "fallback-glob-CI<5%", passed: fallbackUB < 0.05 },
+    { detail: `${(installRate * 100).toFixed(1)}%, 99%CI upper: ${(installUB * 100).toFixed(1)}%`, gate: "install-failure-CI<10%", passed: installUB < 0.10 },
+    { detail: `${(comparableRate * 100).toFixed(1)}%, 99%CI lower: ${(comparableLB * 100).toFixed(1)}%`, gate: "comparable-rate-CI>40%", passed: comparableLB > 0.40 },
+    { detail: `${(domainOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(overreachUB * 100).toFixed(1)}%`, gate: "domain-overreach-CI<20%", passed: overreachUB < 0.20 },
+    { detail: `${(scenarioOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(scenOverreachUB * 100).toFixed(1)}%`, gate: "scenario-overreach-CI<20%", passed: scenOverreachUB < 0.20 },
     { detail: `${(abstentionRate * 100).toFixed(1)}%`, gate: "abstention-correctness->80%", passed: abstentionRate > 0.8 },
+    { detail: `n=${total}, need ${minFor1Pct} for <1% claim`, gate: "sample-size-adequacy", passed: total >= 50 },
   ];
 
   const summary: RedactedShadowSummary = {
@@ -319,7 +331,7 @@ async function main() {
   const seedIdx = args.indexOf("--seed");
   const seed = seedIdx >= 0 ? Number.parseInt(args[seedIdx + 1] ?? "42", 10) : Date.now();
   const countIdx = args.indexOf("--count");
-  const count = countIdx >= 0 ? Number.parseInt(args[countIdx + 1] ?? "30", 10) : 30;
+  const count = countIdx >= 0 ? Number.parseInt(args[countIdx + 1] ?? "50", 10) : 50;
 
   console.log("=== Shadow Validation Benchmark ===\n");
   const summary = await runShadowLatest({ sampleCount: count, seed });

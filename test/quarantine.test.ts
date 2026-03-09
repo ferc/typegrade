@@ -193,4 +193,127 @@ describe("train/eval quarantine", () => {
       expect(content).toContain("manifest.eval.pool.json");
     });
   });
+
+  describe("benchmark plumbing: install-failure visibility", () => {
+    it("run.ts snapshot entries include status and degradedCategory fields", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "run.ts"), "utf8");
+      // Snapshot entry construction must persist status and degradedCategory
+      expect(content).toMatch(/status:\s*en\.result\.status/);
+      expect(content).toMatch(/degradedCategory:\s*en\.result\.degradedCategory/);
+    });
+
+    it("run.ts tracks absorbed install-failure degradations in installFailures", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "run.ts"), "utf8");
+      // Both sequential and parallel paths must check for install-failure degradations
+      expect(content).toContain('result.degradedCategory === "install-failure"');
+    });
+
+    it("gate.ts holdout-installability counts degraded install failures", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "gate.ts"), "utf8");
+      // Holdout gate must check both installFailures array AND entry degradedCategory
+      expect(content).toContain('en.degradedCategory === "install-failure"');
+    });
+
+    it("gate.ts train installability gate counts degraded install failures", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "gate.ts"), "utf8");
+      // Train gate must also check for absorbed install-failure degradations
+      const trainGateSection = content.slice(
+        content.indexOf("installability-=0"),
+        content.indexOf("installability-=0") + 800,
+      );
+      expect(trainGateSection).toContain("degradedCategory");
+    });
+  });
+
+  describe("step 3: manifest pre-flight for non-train splits", () => {
+    it("run.ts validates manifest before scoring on non-train splits", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "run.ts"), "utf8");
+      expect(content).toContain("manifestPreflightPassed");
+      expect(content).toContain("isNonTrainSplit");
+      expect(content).toContain("validateManifest()");
+    });
+
+    it("run.ts persists manifest pre-flight status in snapshot", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "run.ts"), "utf8");
+      expect(content).toContain("manifestPreflightPassed:");
+    });
+
+    it("gate.ts holdout gates check manifest pre-flight", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "gate.ts"), "utf8");
+      expect(content).toContain("holdout-manifest-preflight");
+      expect(content).toContain("manifestPreflightPassed");
+    });
+  });
+
+  describe("step 4: comparable vs non-comparable tracking", () => {
+    it("run.ts computes and persists comparableCount in qualityGates", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "run.ts"), "utf8");
+      expect(content).toContain("comparableCount");
+      expect(content).toContain("nonComparableCount");
+      expect(content).toContain("comparableRate");
+    });
+
+    it("gate.ts holdout gates compute comparable rate with CI bounds", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "gate.ts"), "utf8");
+      expect(content).toContain("holdout-comparable-CI>50%");
+      expect(content).toContain("wilsonLowerBound");
+    });
+  });
+
+  describe("step 5: calibration tracks failure modes", () => {
+    it("judge.ts calibration tracks undersampled, fallback, overreach, degraded rates", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "judge.ts"), "utf8");
+      expect(content).toContain("undersampledRate");
+      expect(content).toContain("fallbackRate");
+      expect(content).toContain("domainOverreachRate");
+      expect(content).toContain("failureModeRate");
+      expect(content).toContain("CalibrationBandResult");
+    });
+  });
+
+  describe("step 6: shadow validation sample size", () => {
+    it("shadow-latest.ts default sample count is at least 50", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "shadow-latest.ts"), "utf8");
+      const match = content.match(/sampleCount:\s*(\d+)/);
+      expect(match).toBeTruthy();
+      expect(Number(match![1])).toBeGreaterThanOrEqual(50);
+    });
+
+    it("shadow-latest.ts includes sample size adequacy gate", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "shadow-latest.ts"), "utf8");
+      expect(content).toContain("sample-size-adequacy");
+      expect(content).toContain("minSampleForBound");
+    });
+  });
+
+  describe("step 7: CI-bound gates", () => {
+    it("stats.ts exports Wilson CI utilities", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "stats.ts"), "utf8");
+      expect(content).toContain("export function wilsonLowerBound");
+      expect(content).toContain("export function wilsonUpperBound");
+      expect(content).toContain("export function minSampleForBound");
+    });
+
+    it("gate.ts holdout uses CI-bound gates", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "gate.ts"), "utf8");
+      expect(content).toContain("holdout-fallback-glob-CI<10%");
+      expect(content).toContain("holdout-degraded-CI<25%");
+      expect(content).toContain("wilsonUpperBound");
+    });
+
+    it("judge.ts eval gates use CI bounds", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "judge.ts"), "utf8");
+      expect(content).toContain("eval-wrong-specific-rate-CI<=10%");
+      expect(content).toContain("eval-undersampled-rate-CI<=15%");
+      expect(content).toContain("eval-fallback-rate-CI<=5%");
+      expect(content).toContain("wilsonUpperBound");
+    });
+
+    it("shadow-latest.ts uses CI-bound gates", () => {
+      const content = readFileSync(join(BENCHMARKS_DIR, "shadow-latest.ts"), "utf8");
+      expect(content).toContain("false-authoritative-CI<5%");
+      expect(content).toContain("fallback-glob-CI<5%");
+      expect(content).toContain("comparable-rate-CI>40%");
+    });
+  });
 });

@@ -126,6 +126,21 @@ async function main() {
     process.exit(1);
   }
 
+  // Step 3: Mandatory manifest pre-flight for non-train splits.
+  // Separates corpus hygiene (stale specs) from analyzer quality (scoring bugs).
+  // Train split skips this — train packages are assumed stable and pinned.
+  const isNonTrainSplit = holdoutMode || evalMode;
+  let manifestPreflightPassed = true;
+  let manifestPreflightFailures: { spec: string; tier: string; error: string }[] = [];
+  if (isNonTrainSplit) {
+    console.log("Running manifest pre-flight validation (non-train split)...\n");
+    manifestPreflightPassed = validateManifest();
+    if (!manifestPreflightPassed) {
+      console.warn("\nWARNING: Some specs failed pre-flight resolution. These will appear as install failures.");
+      console.warn("Fix the manifest before attributing failures to analyzer quality.\n");
+    }
+  }
+
   if (poolCount > 0) {
     // Pool sampling mode — stratified sample from eval-pool
     const manifest = loadManifest("eval-pool");
@@ -184,6 +199,12 @@ async function main() {
       }
 
       const result = poolResult.result;
+
+      // Track absorbed install-failure degradations
+      if (result.status === "degraded" && result.degradedCategory === "install-failure") {
+        installFailures.push({ error: result.degradedReason ?? "install failure (degraded)", spec: poolResult.spec, tier });
+      }
+
       const domainFitScore = result.domainScore?.score ?? null;
       const scenarioScore: ScenarioScore | null = result.scenarioScore ?? null;
 
@@ -207,6 +228,13 @@ async function main() {
       console.log(`Scoring ${spec}...`);
       try {
         const result = scorePackage(spec, typesVersion ? { typesVersion } : undefined);
+
+        // Track absorbed install-failure degradations
+        if (result.status === "degraded" && result.degradedCategory === "install-failure") {
+          installFailures.push({ error: result.degradedReason ?? "install failure (degraded)", spec, tier });
+          console.log(`  DEGRADED (install-failure): ${result.degradedReason ?? "unknown"}`);
+        }
+
         const domainFitScore = result.domainScore?.score ?? null;
         const scenarioScore: ScenarioScore | null = result.scenarioScore ?? null;
 
@@ -518,6 +546,30 @@ async function main() {
   }
   const issueNoiseRate = totalIssues > 0 ? noisyIssues / totalIssues : 0;
 
+  // Step 4: Track comparable vs non-comparable results.
+  // Non-comparable = degraded | fallback-glob | undersampled — excluded from ranking success metrics.
+  const comparableEntries = entries.filter((en) => {
+    if (en.result.status === "degraded") return false;
+    if (en.result.graphStats.usedFallbackGlob) return false;
+    if (en.result.coverageDiagnostics?.undersampled) return false;
+    return true;
+  });
+  const nonComparableEntries = entries.filter((en) => !comparableEntries.includes(en));
+  const comparableCount = comparableEntries.length;
+  const nonComparableCount = nonComparableEntries.length;
+  const comparableRate = entries.length > 0 ? comparableCount / entries.length : 0;
+
+  if (nonComparableEntries.length > 0) {
+    console.log(`\n=== Non-Comparable Results (${nonComparableCount}/${entries.length}) ===\n`);
+    for (const en of nonComparableEntries) {
+      const reasons: string[] = [];
+      if (en.result.status === "degraded") reasons.push(`degraded: ${en.result.degradedCategory ?? "unknown"}`);
+      if (en.result.graphStats.usedFallbackGlob) reasons.push("fallback-glob");
+      if (en.result.coverageDiagnostics?.undersampled) reasons.push("undersampled");
+      console.log(`  ${en.name}: ${reasons.join(", ")}`);
+    }
+  }
+
   // Determine output directory based on split
   const isEvalSplit = corpusSplit === "eval-fixed" || corpusSplit === "eval-pool";
   const isHoldoutSplit = corpusSplit === "holdout";
@@ -540,6 +592,7 @@ async function main() {
       consumerApi: en.consumerApi,
       coverageDiagnostics: en.result.coverageDiagnostics ?? null,
       dedupStats: en.result.dedupStats,
+      degradedCategory: en.result.degradedCategory ?? null,
       dimensions: en.result.dimensions.map((dim) => ({
         confidence: dim.confidence ?? null,
         key: dim.key,
@@ -554,6 +607,7 @@ async function main() {
       name: en.name,
       scenarioDiagnostics: en.result.scenarioDiagnostics ?? null,
       scenarioScore: en.scenarioScore ?? null,
+      status: en.result.status,
       tier: en.tier,
       topIssues: en.result.topIssues.slice(0, 5),
       typeSafety: en.typeSafety,
@@ -583,13 +637,17 @@ async function main() {
       wrongSpecificRate: Math.round(wrongSpecificRate * 1000) / 1000,
     },
     qualityGates: {
+      comparableCount,
+      comparableRate: Math.round(comparableRate * 1000) / 1000,
       degradedRate: Math.round(degradedRate * 1000) / 1000,
       degradedResultCount: degradedResults.length,
       domainAbstentionRate: Math.round(domainAbstentionRate * 1000) / 1000,
       issueNoiseRate: Math.round(issueNoiseRate * 1000) / 1000,
+      nonComparableCount,
       schemaConsistent,
       schemaVersions: [...schemaVersions],
     },
+    manifestPreflightPassed: isNonTrainSplit ? manifestPreflightPassed : undefined,
     installFailures: installFailures.length > 0 ? installFailures : undefined,
     manifestSource: manifestFilename,
     sampleCount: poolSampleCount > 0 ? poolSampleCount : poolCount > 0 ? poolCount : undefined,

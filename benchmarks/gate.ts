@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS } from "./assertions.js";
 import { flattenManifest, loadManifest } from "./split-loader.js";
+import { formatCIDetail, formatCILowerDetail, wilsonLowerBound, wilsonUpperBound } from "./stats.js";
 
 const args = process.argv.slice(2);
 const evalMode = args.includes("--eval");
@@ -339,23 +340,38 @@ function runTrainGates(): GateResult[] {
 
   // Gate 16: Installability — any install failures in the benchmark run indicate
   // a broken manifest entry or transient npm issue. Zero tolerance for install failures.
+  // Checks both graphStats.installError (legacy) AND absorbed install-failure degradations.
   gates.push(
     runGate("installability-=0", () => {
       const entries = snapshot["entries"] as {
         name: string;
         graphStats?: { installError?: string | null } | null;
+        status?: string;
+        degradedCategory?: string | null;
       }[] | undefined;
       if (!entries) return { detail: "No entry data", passed: true };
 
-      let failures = 0;
+      let legacyFailures = 0;
+      let absorbedFailures = 0;
       for (const en of entries) {
         if (en.graphStats && "installError" in en.graphStats && en.graphStats.installError) {
-          failures++;
+          legacyFailures++;
+        }
+        if (en.status === "degraded" && en.degradedCategory === "install-failure") {
+          absorbedFailures++;
         }
       }
+
+      const explicitFailures = snapshot["installFailures"] as unknown[] | undefined;
+      const thrownCount = explicitFailures?.length ?? 0;
+      const totalFailures = legacyFailures + absorbedFailures + thrownCount;
+
+      const detail = absorbedFailures > 0 || thrownCount > 0
+        ? `${totalFailures} install failure(s) (${legacyFailures} legacy, ${absorbedFailures} degraded, ${thrownCount} thrown)`
+        : `${totalFailures} install failure(s)`;
       return {
-        detail: `${failures} install failure(s)`,
-        passed: failures === 0,
+        detail,
+        passed: totalFailures === 0,
       };
     }),
   );
@@ -560,8 +576,9 @@ function runEvalGates(): GateResult[] {
 }
 
 function runHoldoutGates(): GateResult[] {
-  // Holdout gates reuse train gate logic but read from holdout snapshots
-  // Key difference: holdout gates enforce zero false-authoritative and zero train contamination
+  // Holdout gates read from holdout snapshots.
+  // Key differences from train: enforce zero false-authoritative, use CI-bound gates,
+  // track comparable vs non-comparable results, and count absorbed install failures.
   const snapshot = findLatestSnapshot("holdout");
   if (!snapshot) {
     console.log("WARNING: No holdout snapshot found. Run 'pnpm benchmark:holdout' first.\n");
@@ -570,22 +587,34 @@ function runHoldoutGates(): GateResult[] {
 
   const gates: GateResult[] = [];
 
+  // Pre-compute holdout entry classification for reuse across gates
+  type HoldoutEntry = {
+    name: string;
+    consumerApi: number | null;
+    agentReadiness: number | null;
+    typeSafety: number | null;
+    status?: string;
+    degradedCategory?: string | null;
+    graphStats?: { usedFallbackGlob?: boolean };
+    coverageDiagnostics?: { undersampled?: boolean; samplingClass?: string } | null;
+  };
+  const entries = (snapshot["entries"] as HoldoutEntry[] | undefined) ?? [];
+  const total = entries.length;
+  const comparableEntries = entries.filter((en) => {
+    if (en.status === "degraded") return false;
+    if (en.graphStats?.usedFallbackGlob) return false;
+    if (en.coverageDiagnostics?.undersampled) return false;
+    return true;
+  });
+  const comparableCount = comparableEntries.length;
+
   // Gate H1: No false-authoritative outputs — degraded results must have null composites
   gates.push(
     runGate("false-authoritative-=0", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        consumerApi: number | null;
-        agentReadiness: number | null;
-        typeSafety: number | null;
-        coverageDiagnostics?: { undersampled?: boolean; samplingClass?: string } | null;
-      }[] | undefined;
-      if (!entries) return { detail: "No entry data", passed: false };
-
+      if (total === 0) return { detail: "No entry data", passed: false };
       let violations = 0;
       for (const en of entries) {
-        const isDegraded = en.coverageDiagnostics?.samplingClass === "undersampled" &&
-          en.coverageDiagnostics?.undersampled === true;
+        const isDegraded = en.status === "degraded";
         const hasNumericScores = en.consumerApi !== null || en.agentReadiness !== null || en.typeSafety !== null;
         if (isDegraded && hasNumericScores) {
           violations++;
@@ -595,35 +624,46 @@ function runHoldoutGates(): GateResult[] {
     }),
   );
 
-  // Gate H2: Fallback glob rate
+  // Gate H2: Fallback glob rate (CI-bound: upper bound of failure rate < 10% at 99% CI)
   gates.push(
-    runGate("holdout-fallback-glob-<5%", () => {
-      const entries = snapshot["entries"] as {
-        name: string;
-        graphStats?: { usedFallbackGlob?: boolean };
-      }[] | undefined;
-      if (!entries || entries.length === 0) return { detail: "No entry data", passed: true };
+    runGate("holdout-fallback-glob-CI<10%", () => {
+      if (total === 0) return { detail: "No entry data", passed: true };
       const fallbackCount = entries.filter((en) => en.graphStats?.usedFallbackGlob).length;
-      const rate = fallbackCount / entries.length;
-      return { detail: `${(rate * 100).toFixed(1)}% (${fallbackCount}/${entries.length})`, passed: rate < 0.05 };
+      const rate = fallbackCount / total;
+      const upperBound = wilsonUpperBound(fallbackCount, total);
+      return {
+        detail: formatCIDetail(fallbackCount, total, rate, upperBound, 0.1),
+        passed: upperBound < 0.1,
+      };
     }),
   );
 
-  // Gate H3: Install failures
+  // Gate H3: Install failures — count both explicit failures AND absorbed install-failure degradations
   gates.push(
     runGate("holdout-installability", () => {
-      const failures = snapshot["installFailures"] as unknown[] | undefined;
-      const count = failures?.length ?? 0;
-      return { detail: `${count} install failure(s)`, passed: count === 0 };
+      const explicitFailures = snapshot["installFailures"] as unknown[] | undefined;
+      const explicitCount = explicitFailures?.length ?? 0;
+      const absorbedCount = entries.filter(
+        (en) => en.status === "degraded" && en.degradedCategory === "install-failure",
+      ).length;
+      const totalCount = explicitCount + absorbedCount;
+      const detail = absorbedCount > 0
+        ? `${totalCount} install failure(s) (${explicitCount} thrown, ${absorbedCount} degraded)`
+        : `${totalCount} install failure(s)`;
+      return { detail, passed: totalCount === 0 };
     }),
   );
 
-  // Gate H4: Degraded rate — holdout allows up to 20% degraded (non-train packages may be harder)
+  // Gate H4: Degraded rate (CI-bound: upper bound < 25% at 99% CI)
   gates.push(
-    runGate("holdout-degraded-<20%", () => {
-      const qg = snapshot["qualityGates"] as { degradedRate?: number; degradedResultCount?: number } | undefined;
-      const rate = qg?.degradedRate ?? 0;
-      return { detail: `${(rate * 100).toFixed(1)}%`, passed: rate < 0.2 };
+    runGate("holdout-degraded-CI<25%", () => {
+      const degradedCount = entries.filter((en) => en.status === "degraded").length;
+      const rate = total > 0 ? degradedCount / total : 0;
+      const upperBound = wilsonUpperBound(degradedCount, total);
+      return {
+        detail: formatCIDetail(degradedCount, total, rate, upperBound, 0.25),
+        passed: upperBound < 0.25,
+      };
     }),
   );
 
@@ -633,6 +673,27 @@ function runHoldoutGates(): GateResult[] {
       const qg = snapshot["qualityGates"] as { schemaConsistent?: boolean; schemaVersions?: string[] } | undefined;
       const consistent = qg?.schemaConsistent ?? true;
       return { detail: consistent ? "consistent" : `multiple: ${qg?.schemaVersions?.join(", ")}`, passed: consistent };
+    }),
+  );
+
+  // Gate H6: Comparable rate (CI-bound: lower bound > 50% at 99% CI)
+  gates.push(
+    runGate("holdout-comparable-CI>50%", () => {
+      const lowerBound = wilsonLowerBound(comparableCount, total);
+      const rate = total > 0 ? comparableCount / total : 0;
+      return {
+        detail: formatCILowerDetail(comparableCount, total, rate, lowerBound, 0.5),
+        passed: lowerBound > 0.5,
+      };
+    }),
+  );
+
+  // Gate H7: Manifest pre-flight (non-train corpus hygiene)
+  gates.push(
+    runGate("holdout-manifest-preflight", () => {
+      const preflight = snapshot["manifestPreflightPassed"] as boolean | undefined;
+      if (preflight === undefined) return { detail: "No pre-flight data (legacy snapshot)", passed: true };
+      return { detail: preflight ? "all specs resolved" : "some specs failed resolution", passed: preflight };
     }),
   );
 

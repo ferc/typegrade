@@ -4,12 +4,14 @@ import {
   type CompositeScore,
   type ConfidenceSummary,
   type CoverageDiagnostics,
+  type DegradedCategory,
   type EvidenceSummary,
   type GlobalScores,
   type Grade,
   type PackageIdentity,
   type ProfileInfo,
 } from "../src/types.js";
+import { minSampleForBound, wilsonLowerBound, wilsonUpperBound } from "../benchmarks/stats.js";
 import type { GraphStats } from "../src/graph/types.js";
 import { normalizeResult } from "../src/analyzer.js";
 
@@ -314,5 +316,144 @@ describe("trust contract: trust summary monotonicity", () => {
     });
     const normalized = normalizeResult(result);
     expect(normalized.trustSummary!.classification).not.toBe("trusted");
+  });
+});
+
+describe("trust contract: install-failure degradations are visible to gates", () => {
+  it("install-failure degraded result has correct status and category", () => {
+    const result = buildTestResult({
+      degradedCategory: "install-failure" as DegradedCategory,
+      degradedReason: "Package install failed: ETARGET",
+      status: "degraded",
+    });
+    const normalized = normalizeResult(result);
+
+    expect(normalized.status).toBe("degraded");
+    expect(normalized.degradedCategory).toBe("install-failure");
+    expect(normalized.trustSummary!.classification).toBe("abstained");
+    expect(normalized.scoreValidity).toBe("not-comparable");
+  });
+
+  it("install-failure degraded result has null composites", () => {
+    const result = buildTestResult({
+      degradedCategory: "install-failure" as DegradedCategory,
+      degradedReason: "Package install failed: 404",
+      status: "degraded",
+    });
+    const normalized = normalizeResult(result);
+
+    for (const comp of normalized.composites) {
+      expect(comp.score).toBeNull();
+    }
+  });
+
+  it("snapshot entry shape includes status and degradedCategory for gate consumption", () => {
+    // Simulate the snapshot entry shape produced by benchmarks/run.ts
+    const result = buildTestResult({
+      degradedCategory: "install-failure" as DegradedCategory,
+      degradedReason: "Package install failed: network error",
+      status: "degraded",
+    });
+
+    // Mirror the snapshot entry construction from benchmarks/run.ts
+    const snapshotEntry = {
+      degradedCategory: result.degradedCategory ?? null,
+      name: "test-pkg",
+      status: result.status,
+    };
+
+    // Gate should be able to detect install-failure degradations from snapshot entries
+    expect(snapshotEntry.status).toBe("degraded");
+    expect(snapshotEntry.degradedCategory).toBe("install-failure");
+
+    // Verify the gate detection logic
+    const isInstallFailure =
+      snapshotEntry.status === "degraded" && snapshotEntry.degradedCategory === "install-failure";
+    expect(isInstallFailure).toBeTruthy();
+  });
+
+  it("non-install degradations are not counted as install failures", () => {
+    const categories: DegradedCategory[] = [
+      "missing-declarations",
+      "partial-graph-resolution",
+      "insufficient-surface",
+      "confidence-collapse",
+    ];
+
+    for (const category of categories) {
+      const result = buildTestResult({
+        degradedCategory: category,
+        degradedReason: `Test: ${category}`,
+        status: "degraded",
+      });
+
+      const snapshotEntry = {
+        degradedCategory: result.degradedCategory ?? null,
+        status: result.status,
+      };
+
+      const isInstallFailure =
+        snapshotEntry.status === "degraded" && snapshotEntry.degradedCategory === "install-failure";
+      expect(isInstallFailure).toBeFalsy();
+    }
+  });
+});
+
+describe("trust contract: Wilson CI utilities (stats.ts)", () => {
+  it("wilsonUpperBound returns 1 for zero total", () => {
+    expect(wilsonUpperBound(0, 0)).toBe(1);
+  });
+
+  it("wilsonLowerBound returns 0 for zero total", () => {
+    expect(wilsonLowerBound(0, 0)).toBe(0);
+  });
+
+  it("wilsonUpperBound is always >= point estimate", () => {
+    const pointRate = 2 / 50;
+    const upper = wilsonUpperBound(2, 50);
+    expect(upper).toBeGreaterThan(pointRate);
+    expect(upper).toBeLessThan(1);
+  });
+
+  it("wilsonLowerBound is always <= point estimate", () => {
+    const pointRate = 48 / 50;
+    const lower = wilsonLowerBound(48, 50);
+    expect(lower).toBeLessThan(pointRate);
+    expect(lower).toBeGreaterThan(0);
+  });
+
+  it("confidence interval width narrows with larger sample sizes", () => {
+    // Same 4% failure rate at n=50 and n=500
+    const ub50 = wilsonUpperBound(2, 50);
+    const ub500 = wilsonUpperBound(20, 500);
+    // Interval should be tighter at n=500
+    expect(ub500 - 0.04).toBeLessThan(ub50 - 0.04);
+  });
+
+  it("zero failures with n=460 gives upper bound < 1%", () => {
+    // This is the key statistical threshold for a 99% CI "<1% failure rate" claim
+    const upper = wilsonUpperBound(0, 460);
+    // Should be close to 1%
+    expect(upper).toBeLessThan(0.015);
+  });
+
+  it("minSampleForBound computes known values", () => {
+    // Need ~459 for <1% at 99% CI
+    const n1pct = minSampleForBound(0.01, 0.99);
+    expect(n1pct).toBeGreaterThanOrEqual(458);
+    expect(n1pct).toBeLessThanOrEqual(460);
+
+    // Need ~90 for <5% at 99% CI
+    const n5pct = minSampleForBound(0.05, 0.99);
+    expect(n5pct).toBeGreaterThanOrEqual(89);
+    expect(n5pct).toBeLessThanOrEqual(92);
+  });
+
+  it("wilsonUpperBound with perfect record at small n gives wide bound", () => {
+    // With 0/30 failures, upper bound should be substantial (> 5%)
+    const upper = wilsonUpperBound(0, 30);
+    expect(upper).toBeGreaterThan(0.05);
+    // But still bounded (< 20%)
+    expect(upper).toBeLessThan(0.2);
   });
 });

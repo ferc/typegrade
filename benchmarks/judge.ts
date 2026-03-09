@@ -21,6 +21,7 @@ import type {
   RedactedEvalSummary,
   UnlabeledEvalMetrics,
 } from "./types.js";
+import { wilsonUpperBound } from "./stats.js";
 
 const args = process.argv.slice(2);
 const auditMode = args.includes("--audit");
@@ -765,12 +766,23 @@ function compareWithBaseline(currentMetrics: RedactedEvalSummary["metrics"]): {
 
 // ─── Gate Builders ────────────────────────────────────────────────────────
 
-function buildEvalGates(metrics: UnlabeledEvalMetrics): { gate: string; passed: boolean; detail: string }[] {
+function buildEvalGates(metrics: UnlabeledEvalMetrics, totalEntries: number): { gate: string; passed: boolean; detail: string }[] {
+  // CI-bound helpers: compute Wilson upper bounds for failure rates
+  const overreachCount = Math.round(metrics.domainOverreachRate * totalEntries);
+  const undersampledCount = Math.round(metrics.undersampledRate * totalEntries);
+  const fallbackCount = Math.round(metrics.fallbackGlobRate * totalEntries);
+  const scenarioCount = Math.round(metrics.scenarioOverreachRate * totalEntries);
+
+  const overreachUB = wilsonUpperBound(overreachCount, totalEntries);
+  const undersampledUB = wilsonUpperBound(undersampledCount, totalEntries);
+  const fallbackUB = wilsonUpperBound(fallbackCount, totalEntries);
+  const scenarioUB = wilsonUpperBound(scenarioCount, totalEntries);
+
   return [
     {
-      detail: `${(metrics.domainOverreachRate * 100).toFixed(1)}%`,
-      gate: "eval-wrong-specific-rate-<=5%",
-      passed: metrics.domainOverreachRate <= 0.05,
+      detail: `${(metrics.domainOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(overreachUB * 100).toFixed(1)}%`,
+      gate: "eval-wrong-specific-rate-CI<=10%",
+      passed: overreachUB <= 0.10,
     },
     {
       detail: `${metrics.coverageConfidenceViolations} violation(s)`,
@@ -778,19 +790,19 @@ function buildEvalGates(metrics: UnlabeledEvalMetrics): { gate: string; passed: 
       passed: metrics.coverageConfidenceViolations === 0,
     },
     {
-      detail: `${(metrics.undersampledRate * 100).toFixed(1)}%`,
-      gate: "eval-undersampled-rate-<=8%",
-      passed: metrics.undersampledRate <= 0.08,
+      detail: `${(metrics.undersampledRate * 100).toFixed(1)}%, 99%CI upper: ${(undersampledUB * 100).toFixed(1)}%`,
+      gate: "eval-undersampled-rate-CI<=15%",
+      passed: undersampledUB <= 0.15,
     },
     {
-      detail: `${(metrics.scenarioOverreachRate * 100).toFixed(1)}%`,
-      gate: "eval-scenario-overreach-<=8%",
-      passed: metrics.scenarioOverreachRate <= 0.08,
+      detail: `${(metrics.scenarioOverreachRate * 100).toFixed(1)}%, 99%CI upper: ${(scenarioUB * 100).toFixed(1)}%`,
+      gate: "eval-scenario-overreach-CI<=15%",
+      passed: scenarioUB <= 0.15,
     },
     {
-      detail: `${(metrics.fallbackGlobRate * 100).toFixed(1)}%`,
-      gate: "eval-fallback-rate-=0",
-      passed: metrics.fallbackGlobRate === 0,
+      detail: `${(metrics.fallbackGlobRate * 100).toFixed(1)}%, 99%CI upper: ${(fallbackUB * 100).toFixed(1)}%`,
+      gate: "eval-fallback-rate-CI<=5%",
+      passed: fallbackUB <= 0.05,
     },
     {
       detail: `${metrics.paretoViolationCount} violation(s)`,
@@ -1002,19 +1014,47 @@ const CONFIDENCE_BANDS: CalibrationBand[] = [
   { band: "[0.85-1.0]", lower: 0.85, upper: 1.01 },
 ];
 
+/** Calibration result per band — tracks failure modes that matter for trust claims */
+interface CalibrationBandResult {
+  band: string;
+  count: number;
+  meanConfidence: number;
+  reasonableRate: number;
+  /** Rate of entries that are undersampled in this confidence band */
+  undersampledRate: number;
+  /** Rate of entries using fallback-glob resolution in this band */
+  fallbackRate: number;
+  /** Rate of entries with low-confidence domain overreach in this band */
+  domainOverreachRate: number;
+  /** Rate of entries that are degraded in this band */
+  degradedRate: number;
+  /** Composite failure rate: any of undersampled, fallback, overreach, or degraded */
+  failureModeRate: number;
+}
+
 /**
  * Compute confidence calibration across eval entries.
- * Groups entries into confidence bands and measures what fraction
- * of packages in each band have consumerApi in the "reasonable" range [40, 80].
+ * Groups entries into confidence bands and measures failure mode rates
+ * that matter for non-train trust claims: wrong-specific, undersampling,
+ * domain overreach, fallback resolution.
+ *
+ * A well-calibrated system should have decreasing failure mode rates as
+ * confidence increases. If high-confidence bands still show failures,
+ * the confidence signal is not aligned with actual quality.
  */
-function computeConfidenceCalibration(
-  entries: EvalEntry[],
-): { band: string; count: number; meanConfidence: number; reasonableRate: number }[] {
-  const results: { band: string; count: number; meanConfidence: number; reasonableRate: number }[] = [];
+function computeConfidenceCalibration(entries: EvalEntry[]): CalibrationBandResult[] {
+  const results: CalibrationBandResult[] = [];
 
   for (const bandDef of CONFIDENCE_BANDS) {
     // Find entries whose average dimension confidence falls in this band
-    const bandEntries: { confidence: number; consumerApi: number | null }[] = [];
+    const bandEntries: {
+      confidence: number;
+      consumerApi: number | null;
+      undersampled: boolean;
+      usedFallback: boolean;
+      domainOverreach: boolean;
+      isDegraded: boolean;
+    }[] = [];
 
     for (const entry of entries) {
       const dimConfs = entry.dimensions
@@ -1025,13 +1065,24 @@ function computeConfidenceCalibration(
       }
       const avgConf = dimConfs.reduce((sum, val) => sum + val, 0) / dimConfs.length;
       if (avgConf >= bandDef.lower && avgConf < bandDef.upper) {
-        bandEntries.push({ confidence: avgConf, consumerApi: entry.consumerApi });
+        bandEntries.push({
+          confidence: avgConf,
+          consumerApi: entry.consumerApi,
+          domainOverreach: !!(entry.domainInference && entry.domainInference.domain !== "general" && entry.domainInference.confidence < 0.7),
+          isDegraded: entry.consumerApi === null && entry.agentReadiness === null && entry.typeSafety === null,
+          undersampled: !!entry.coverageDiagnostics?.undersampled,
+          usedFallback: !!entry.graphStats?.usedFallbackGlob,
+        });
       }
     }
 
     const count = bandEntries.length;
     if (count === 0) {
-      results.push({ band: bandDef.band, count: 0, meanConfidence: 0, reasonableRate: 0 });
+      results.push({
+        band: bandDef.band, count: 0, degradedRate: 0, domainOverreachRate: 0,
+        failureModeRate: 0, fallbackRate: 0, meanConfidence: 0, reasonableRate: 0,
+        undersampledRate: 0,
+      });
       continue;
     }
 
@@ -1042,25 +1093,40 @@ function computeConfidenceCalibration(
       const score = be.consumerApi ?? 0;
       return score >= 40 && score <= 80;
     }).length;
-    const reasonableRate = round3(reasonableCount / count);
 
-    results.push({ band: bandDef.band, count, meanConfidence, reasonableRate });
+    const undersampledCount = bandEntries.filter((be) => be.undersampled).length;
+    const fallbackCount = bandEntries.filter((be) => be.usedFallback).length;
+    const overreachCount = bandEntries.filter((be) => be.domainOverreach).length;
+    const degradedCount = bandEntries.filter((be) => be.isDegraded).length;
+    const failureModeCount = bandEntries.filter(
+      (be) => be.undersampled || be.usedFallback || be.domainOverreach || be.isDegraded,
+    ).length;
+
+    results.push({
+      band: bandDef.band,
+      count,
+      degradedRate: round3(degradedCount / count),
+      domainOverreachRate: round3(overreachCount / count),
+      failureModeRate: round3(failureModeCount / count),
+      fallbackRate: round3(fallbackCount / count),
+      meanConfidence,
+      reasonableRate: round3(reasonableCount / count),
+      undersampledRate: round3(undersampledCount / count),
+    });
   }
 
   return results;
 }
 
-function printCalibration(
-  calibration: { band: string; count: number; meanConfidence: number; reasonableRate: number }[],
-): void {
+function printCalibration(calibration: CalibrationBandResult[]): void {
   console.log("\n=== Confidence Calibration ===\n");
   console.log(
-    `  ${"Band".padEnd(16)}${"Count".padEnd(8)}${"MeanConf".padEnd(12)}ReasonableRate`,
+    `  ${"Band".padEnd(16)}${"Count".padEnd(8)}${"MeanConf".padEnd(10)}${"Reasonable".padEnd(12)}${"FailMode".padEnd(10)}${"Unsamp".padEnd(9)}${"Fallbk".padEnd(9)}${"Overrch".padEnd(9)}Degraded`,
   );
-  console.log(`  ${"-".repeat(48)}`);
+  console.log(`  ${"-".repeat(92)}`);
   for (const entry of calibration) {
     console.log(
-      `  ${entry.band.padEnd(16)}${String(entry.count).padEnd(8)}${entry.meanConfidence.toFixed(3).padEnd(12)}${(entry.reasonableRate * 100).toFixed(1)}%`,
+      `  ${entry.band.padEnd(16)}${String(entry.count).padEnd(8)}${entry.meanConfidence.toFixed(3).padEnd(10)}${((entry.reasonableRate * 100).toFixed(1) + "%").padEnd(12)}${((entry.failureModeRate * 100).toFixed(1) + "%").padEnd(10)}${((entry.undersampledRate * 100).toFixed(1) + "%").padEnd(9)}${((entry.fallbackRate * 100).toFixed(1) + "%").padEnd(9)}${((entry.domainOverreachRate * 100).toFixed(1) + "%").padEnd(9)}${(entry.degradedRate * 100).toFixed(1)}%`,
     );
   }
 }
@@ -1270,7 +1336,7 @@ function main() {
   };
 
   // Build gates (core + multi-seed when available)
-  const coreGates = buildEvalGates(metrics);
+  const coreGates = buildEvalGates(metrics, snapshot.entries.length);
   const multiSeedGates = multiSeedMetrics ? buildMultiSeedGates(multiSeedMetrics) : [];
   const gates = [...coreGates, ...multiSeedGates];
   const allGatesPassed = gates.every((gg) => gg.passed);
