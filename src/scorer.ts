@@ -1,10 +1,12 @@
 import type {
   AnalysisMode,
+  AnalysisProfile,
   CompositeKey,
   CompositeScore,
   DimensionResult,
   Grade,
 } from "./types.js";
+import { PROFILE_WEIGHT_ADJUSTMENTS } from "./constants.js";
 
 export function computeGrade(score: number | null): Grade {
   if (score === null) {
@@ -31,13 +33,48 @@ export function computeGrade(score: number | null): Grade {
 export function computeComposites(
   dimensions: DimensionResult[],
   mode: AnalysisMode,
+  profile?: AnalysisProfile,
 ): CompositeScore[] {
-  const consumerApi = computeComposite("consumerApi", dimensions, mode);
-  const implementationQuality = computeComposite("implementationQuality", dimensions, mode);
-  const typeSafety = computeComposite("typeSafety", dimensions, mode);
-  const agentReadiness = computeComposite("agentReadiness", dimensions, mode);
+  // Apply profile-aware weight adjustments if a profile is active
+  const adjustedDimensions = profile ? applyProfileWeights(dimensions, profile) : dimensions;
+
+  const consumerApi = computeComposite("consumerApi", adjustedDimensions, mode);
+  const implementationQuality = computeComposite("implementationQuality", adjustedDimensions, mode);
+  const typeSafety = computeComposite("typeSafety", adjustedDimensions, mode);
+  const agentReadiness = computeComposite("agentReadiness", adjustedDimensions, mode);
 
   return [agentReadiness, consumerApi, typeSafety, implementationQuality];
+}
+
+/**
+ * Apply profile-specific weight adjustments to dimension results.
+ * Returns a new array with adjusted weights (does not mutate originals).
+ */
+function applyProfileWeights(
+  dimensions: DimensionResult[],
+  profile: AnalysisProfile,
+): DimensionResult[] {
+  const adjustments = PROFILE_WEIGHT_ADJUSTMENTS[profile];
+  if (!adjustments || adjustments.length === 0) {
+    return dimensions;
+  }
+
+  const adjustmentMap = new Map(adjustments.map((adj) => [adj.dimension, adj.weight]));
+
+  return dimensions.map((dim) => {
+    const multiplier = adjustmentMap.get(dim.key);
+    if (!multiplier || multiplier === 1) {
+      return dim;
+    }
+
+    // Shallow-clone and adjust all composite weights by the multiplier
+    const adjustedWeights: Record<string, number> = {};
+    for (const [compositeKey, weight] of Object.entries(dim.weights)) {
+      adjustedWeights[compositeKey] = weight * multiplier;
+    }
+
+    return { ...dim, weights: adjustedWeights };
+  });
 }
 
 function computeComposite(

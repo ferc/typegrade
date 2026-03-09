@@ -3,11 +3,12 @@
  * NSGA-II multi-objective evolutionary optimizer — searches for improved
  * scoring parameters using ONLY train data.
  *
- * Four simultaneous objectives (all minimized):
+ * Five simultaneous objectives (all minimized):
  *   0. Wrong-specific rate — domain accuracy misclassifications
  *   1. Undersampled rate — fraction of packages flagged as undersampled
  *   2. Fallback rate — fraction of packages using fallback glob
  *   3. 1 - assertion pass rate — inverse of pairwise concordance
+ *   4. 1 - agent separation — inverse of agentReadiness vs consumerApi score differentiation
  *
  * Decision variables:
  *   - Composite weight perturbations (per dimension per composite)
@@ -43,7 +44,7 @@ import { join } from "node:path";
 const COMPOSITE_KEYS: CompositeKey[] = ["consumerApi", "agentReadiness", "typeSafety"];
 const POPULATION_SIZE = 100;
 const GENERATIONS = 50;
-const NUM_OBJECTIVES = 4;
+const NUM_OBJECTIVES = 5;
 const PRNG_SEED = 42;
 
 /** SBX crossover distribution index */
@@ -481,6 +482,37 @@ function computeUndersampledRate(entries: ResultEntry[], decoded: DecodedParams)
   return totalChecked > 0 ? undersampled / totalChecked : 0;
 }
 
+/**
+ * Compute agent-consumer score separation.
+ * The agentReadiness composite should differentiate from consumerApi —
+ * libraries that are more agent-friendly should score distinctly.
+ * Returns 1 - separation (to minimize: lower = better separation).
+ */
+function computeAgentSeparation(entries: ResultEntry[], decoded: DecodedParams): number {
+  let totalSeparation = 0;
+  let counted = 0;
+
+  for (const entry of entries) {
+    const agentScore = recomputeComposite(entry, decoded.weights.agentReadiness);
+    const consumerScore = recomputeComposite(entry, decoded.weights.consumerApi);
+    if (agentScore === null || consumerScore === null) {
+      continue;
+    }
+    // Absolute difference between agent and consumer scores
+    totalSeparation += Math.abs(agentScore - consumerScore);
+    counted++;
+  }
+
+  if (counted === 0) {
+    return 1;
+  }
+
+  // Normalize: average separation / 100 (max possible)
+  const avgSeparation = totalSeparation / counted;
+  // We want separation > 0; return inverse so optimizer minimizes
+  return 1 - Math.min(avgSeparation / 30, 1);
+}
+
 /** Compute fallback glob rate from entries */
 function computeFallbackRate(entries: ResultEntry[]): number {
   let fallbackCount = 0;
@@ -543,6 +575,9 @@ function evaluateIndividual(params: {
   const passRate = totalAssertions > 0 ? totalConcordant / totalAssertions : 0;
   const assertionError = 1 - passRate;
 
+  // Objective 4: Agent-consumer separation (minimize inverse = maximize separation)
+  const agentSeparationInverse = computeAgentSeparation(entries, decoded);
+
   // Hard constraints
   const feasible =
     totalMustPassFails === 0 &&
@@ -554,7 +589,7 @@ function evaluateIndividual(params: {
     decoded,
     feasible,
     genes: [...genes],
-    objectives: [wrongSpecificRate, undersampledRate, fallbackRate, assertionError],
+    objectives: [wrongSpecificRate, undersampledRate, fallbackRate, assertionError, agentSeparationInverse],
     rank: 0,
   };
 }
@@ -1163,7 +1198,7 @@ function main() {
   const rng = mulberry32(PRNG_SEED);
 
   console.log(`Gene count: ${bounds.length} decision variables`);
-  console.log(`Objectives: wrongSpecificRate, undersampledRate, fallbackRate, assertionError`);
+  console.log(`Objectives: wrongSpecificRate, undersampledRate, fallbackRate, assertionError, agentSeparation`);
 
   // Evaluate baseline
   const baselineInd = evaluateIndividual({ bounds, entries: snapshot.entries, genes: baselineGenes });
@@ -1172,6 +1207,7 @@ function main() {
   console.log(`  Undersampled rate:   ${(baselineInd.objectives[1]! * 100).toFixed(1)}%`);
   console.log(`  Fallback rate:       ${(baselineInd.objectives[2]! * 100).toFixed(1)}%`);
   console.log(`  Assertion error:     ${(baselineInd.objectives[3]! * 100).toFixed(1)}%`);
+  console.log(`  Agent separation:    ${((1 - baselineInd.objectives[4]!) * 100).toFixed(1)}%`);
   console.log(`  Feasible: ${baselineInd.feasible ? "yes" : "no"}\n`);
 
   // Configuration
@@ -1212,6 +1248,7 @@ function main() {
     console.log(`  Undersampled rate:   ${(knee.objectives[1]! * 100).toFixed(1)}%`);
     console.log(`  Fallback rate:       ${(knee.objectives[2]! * 100).toFixed(1)}%`);
     console.log(`  Assertion error:     ${(knee.objectives[3]! * 100).toFixed(1)}%`);
+    console.log(`  Agent separation:    ${((1 - knee.objectives[4]!) * 100).toFixed(1)}%`);
 
     if (knee.decoded) {
       printKneeDetails(knee.decoded, baselineGenes, bounds);

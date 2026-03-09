@@ -5,6 +5,91 @@ import type { GraphStats } from "./graph/types.js";
 /** Whether a dimension is meaningful for a given library */
 export type Applicability = "applicable" | "not_applicable" | "insufficient_evidence";
 
+// --- Analysis Profiles ---
+
+/** Analysis profile determining scoring behavior and report mode */
+export type AnalysisProfile = "library" | "package" | "application" | "autofix-agent";
+
+// --- Boundary Types ---
+
+/** Classification of a data boundary in the codebase */
+export type BoundaryType =
+  | "network"
+  | "filesystem"
+  | "env"
+  | "config"
+  | "serialization"
+  | "IPC"
+  | "UI-input"
+  | "trusted-local"
+  | "unknown";
+
+// --- Fixability ---
+
+/** How directly fixable an issue is */
+export type FixabilityKind = "direct" | "indirect" | "external" | "not_actionable";
+
+// --- Ownership ---
+
+/** Who owns the code where an issue originates */
+export type OwnershipClass =
+  | "source-owned"
+  | "generated"
+  | "dependency-owned"
+  | "standard-library-owned"
+  | "mixed"
+  | "unresolved";
+
+// --- Trust Levels ---
+
+/** Trust classification for a boundary data source */
+export type TrustLevel =
+  | "untrusted-external"
+  | "semi-trusted-external"
+  | "trusted-local"
+  | "generated-local"
+  | "internal-only"
+  | "unknown";
+
+// --- Root Cause Categories ---
+
+/** Root cause category for an issue */
+export type RootCauseCategory =
+  | "missing-validation"
+  | "weak-type"
+  | "unsafe-cast"
+  | "missing-narrowing"
+  | "opaque-dependency"
+  | "config-gap"
+  | "boundary-leak"
+  | "other";
+
+// --- Suggested Fix Kinds ---
+
+/** Kind of fix suggested for an issue */
+export type SuggestedFixKind =
+  | "add-type-annotation"
+  | "add-validation"
+  | "replace-any"
+  | "add-narrowing"
+  | "add-type-guard"
+  | "strengthen-generic"
+  | "add-overload"
+  | "other";
+
+// --- Suppression Categories ---
+
+/** Category of suppression applied to a finding */
+export type SuppressionCategory =
+  | "trusted-local-tooling"
+  | "dependency-owned-opaque"
+  | "generated-artifact"
+  | "benchmark-self-referential"
+  | "non-applicable-boundary"
+  | "low-evidence"
+  | "ambiguous-ownership"
+  | "expected-generic-density";
+
 // --- Export Roles ---
 
 /** Functional role of an exported declaration in the public API */
@@ -35,6 +120,12 @@ export interface CentralityWeight {
   role: ExportRole;
   isEntrypoint: boolean;
   isReexported: boolean;
+  /** Consumer relevance score (0-1) for profile-aware weighting */
+  consumerRelevance?: number;
+  /** Boundary relevance score (0-1) for boundary-quality weighting */
+  boundaryRelevance?: number;
+  /** Agent fix priority (0-1) for autofix-agent ordering */
+  agentFixPriority?: number;
 }
 
 // --- Package Identity ---
@@ -55,6 +146,104 @@ export interface EvidenceSummary {
   specializationEvidence: number;
   domainEvidence: number;
   scenarioEvidence: number;
+}
+
+// --- Profile Info ---
+
+/** Profile detection result */
+export interface ProfileInfo {
+  profile: AnalysisProfile;
+  profileConfidence: number;
+  profileReasons: string[];
+}
+
+// --- Boundary Summary ---
+
+/** Single boundary entry in the inventory */
+export interface BoundaryInventoryEntry {
+  file: string;
+  line: number;
+  boundaryType: BoundaryType;
+  trustLevel: TrustLevel;
+  hasValidation: boolean;
+  description: string;
+}
+
+/** Summary of boundary analysis across the codebase */
+export interface BoundarySummary {
+  totalBoundaries: number;
+  validatedBoundaries: number;
+  unvalidatedBoundaries: number;
+  inventory: BoundaryInventoryEntry[];
+  boundaryCoverage: number;
+  missingValidationHotspots: {
+    file: string;
+    line: number;
+    boundaryType: BoundaryType;
+    trustLevel: TrustLevel;
+  }[];
+  trustedLocalSuppressions: { file: string; line: number; reason: string }[];
+  taintBreaks: { file: string; line: number; source: string; sink: string }[];
+}
+
+// --- Fix Batch ---
+
+/** A grouped batch of related fixes for agent consumption */
+export interface FixBatch {
+  id: string;
+  title: string;
+  rationale: string;
+  targetFiles: string[];
+  issueIds: string[];
+  risk: "low" | "medium" | "high";
+  expectedImpact: number;
+  requiresPublicApiChange: boolean;
+  requiresHumanReview: boolean;
+}
+
+// --- Autofix Summary ---
+
+/** Summary for autofix-agent consumption */
+export interface AutofixSummary {
+  actionableIssues: Issue[];
+  fixBatches: FixBatch[];
+  suppressedCount: number;
+  suppressionReasons: { category: string; count: number }[];
+}
+
+// --- Suppression Entry ---
+
+/** Record of a suppression applied to a finding */
+export interface SuppressionEntry {
+  issueIndex: number;
+  category: SuppressionCategory;
+  reason: string;
+  confidence: number;
+}
+
+// --- Boundary Quality Score ---
+
+/** Boundary-specific quality score */
+export interface BoundaryQualityScore {
+  score: number;
+  grade: Grade;
+  totalBoundaries: number;
+  validatedRatio: number;
+  trustModelAccuracy: number;
+  rationale: string[];
+}
+
+// --- Fixability Score ---
+
+/** Fixability meta-score computed from issue-level fixability assessments */
+export interface FixabilityScore {
+  score: number;
+  grade: Grade;
+  directlyFixable: number;
+  indirectlyFixable: number;
+  externalOnly: number;
+  notActionable: number;
+  rationale: string[];
 }
 
 export type AnalysisMode = "source" | "package";
@@ -137,6 +326,10 @@ export interface DimensionResult {
   applicabilityReason?: string;
   confidence?: number;
   confidenceSignals?: ConfidenceSignal[];
+  /** How directly fixable issues in this dimension are */
+  fixability?: FixabilityKind;
+  /** Ownership classification for this dimension's findings */
+  ownership?: OwnershipClass;
 }
 
 export interface Issue {
@@ -146,6 +339,22 @@ export interface Issue {
   message: string;
   severity: "error" | "warning" | "info";
   dimension: string;
+  /** Confidence in this finding (0-1) */
+  confidence?: number;
+  /** Who owns the code where this issue originates */
+  ownership?: OwnershipClass;
+  /** How directly fixable this issue is */
+  fixability?: FixabilityKind;
+  /** Boundary type if this is a boundary-related issue */
+  boundaryType?: BoundaryType;
+  /** Root cause category */
+  rootCauseCategory?: RootCauseCategory;
+  /** If suppressed, the reason */
+  suppressionReason?: string;
+  /** Priority for agent consumption (0-100, higher = more important) */
+  agentPriority?: number;
+  /** Suggested fix approach */
+  suggestedFixKind?: SuggestedFixKind;
 }
 
 /** Domain-adjusted score — only comparable within the same domain */
@@ -247,6 +456,18 @@ export interface AnalysisResult {
     scenarioPack: string;
     failures: { scenario: string; expected: string; actual: string }[];
   };
+  /** Analysis profile used for this run */
+  profileInfo?: ProfileInfo;
+  /** Boundary analysis summary */
+  boundarySummary?: BoundarySummary;
+  /** Autofix-agent summary with actionable issues and fix batches */
+  autofixSummary?: AutofixSummary;
+  /** Boundary-specific quality score */
+  boundaryQuality?: BoundaryQualityScore;
+  /** Fixability meta-score */
+  fixabilityScore?: FixabilityScore;
+  /** Suppressions applied during analysis */
+  suppressions?: SuppressionEntry[];
 }
 
 export interface PrecisionFeatures {

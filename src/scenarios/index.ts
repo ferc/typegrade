@@ -22,6 +22,13 @@ import type { ScenarioPack } from "./types.js";
 
 export { evaluateScenarioPack, isScenarioApplicable } from "./types.js";
 export type { ScenarioPack, ScenarioTest } from "./types.js";
+export {
+  compileBackedResult,
+  generateBasicCompileTests,
+  runCompileTests,
+  scoreCompileResults,
+} from "./compile-check.js";
+export type { CompileBackedResultOpts, CompileTest, CompileTestResult } from "./compile-check.js";
 
 const SCENARIO_PACKS: Record<string, ScenarioPack> = {
   cli: CLI_PACK,

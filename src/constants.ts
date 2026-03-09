@@ -190,6 +190,70 @@ export const DOMAIN_PATTERNS = {
  * Domain-fit weight adjustments.
  * These modify the domain-adjusted score, never the global score.
  */
+/**
+ * Profile-specific weight adjustments.
+ * These modify dimension weights based on the analysis profile,
+ * allowing different profiles to emphasize different quality aspects.
+ *
+ * Multiplier > 1 = boost importance, < 1 = reduce importance.
+ */
+export const PROFILE_WEIGHT_ADJUSTMENTS: Record<
+  string,
+  { dimension: string; weight: number; reason: string }[]
+> = {
+  application: [
+    {
+      dimension: "boundaryDiscipline",
+      reason: "Applications must validate external inputs rigorously",
+      weight: 1.5,
+    },
+    {
+      dimension: "configDiscipline",
+      reason: "Application config safety is critical",
+      weight: 1.3,
+    },
+    {
+      dimension: "implementationSoundness",
+      reason: "Application implementation quality directly affects users",
+      weight: 1.2,
+    },
+    {
+      dimension: "publishQuality",
+      reason: "Publish quality is less relevant for applications",
+      weight: 0.3,
+    },
+    {
+      dimension: "surfaceConsistency",
+      reason: "Public surface consistency is less relevant for applications",
+      weight: 0.5,
+    },
+  ],
+  "autofix-agent": [
+    {
+      dimension: "agentUsability",
+      reason: "Agent profile prioritizes machine-consumable API surface",
+      weight: 1.4,
+    },
+    {
+      dimension: "apiSpecificity",
+      reason: "Precise types enable better agent code generation",
+      weight: 1.3,
+    },
+    {
+      dimension: "surfaceConsistency",
+      reason: "Consistent naming helps agent pattern matching",
+      weight: 1.2,
+    },
+    {
+      dimension: "surfaceComplexity",
+      reason: "Agent tolerance for complexity is lower than human",
+      weight: 1.3,
+    },
+  ],
+  library: [],
+  package: [],
+};
+
 export const DOMAIN_FIT_ADJUSTMENTS: Record<
   string,
   { dimension: string; weight: number; reason: string }[]

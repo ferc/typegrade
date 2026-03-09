@@ -1,5 +1,6 @@
 import type {
   AnalysisMode,
+  AnalysisProfile,
   AnalysisResult,
   CompositeScore,
   ConfidenceSummary,
@@ -10,18 +11,28 @@ import type {
   DomainScore,
   EvidenceSummary,
   ExplainabilityReport,
+  FixabilityScore,
   GlobalScores,
+  Grade,
   Issue,
   PackageAnalysisContext,
   ScenarioScore,
   ScoreComparability,
+  SuppressionEntry,
 } from "./types.js";
 import { type DomainType, detectDomain } from "./domain.js";
 import { type GetSourceFilesOptions, getSourceFiles, loadProject } from "./utils/project-loader.js";
 import { basename, resolve } from "node:path";
+import { buildAgentReport, buildAutofixSummary } from "./agent/index.js";
+import {
+  buildBoundaryGraph,
+  buildBoundarySummary,
+  computeBoundaryQuality,
+} from "./boundaries/index.js";
 import { buildDerivedIndex, extractPublicSurface } from "./surface/index.js";
 import { classifyPublicSurface, computeRoleBreakdown } from "./roles/index.js";
 import { computeComposites, computeGrade } from "./scorer.js";
+import { detectProfile, gatherProfileSignals, resolveProfile } from "./profiles/index.js";
 import { evaluateScenarioPack, isScenarioApplicable } from "./scenarios/types.js";
 import { DOMAIN_FIT_ADJUSTMENTS } from "./constants.js";
 import type { GraphStats } from "./graph/types.js";
@@ -38,7 +49,9 @@ import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
 import { analyzeSpecializationPower } from "./analyzers/specialization-power.js";
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
+import { applySuppressions } from "./suppression/index.js";
 import { getScenarioPackWithVariant } from "./scenarios/index.js";
+import { resolveFileOwnership } from "./ownership/index.js";
 
 /** Minimum domain confidence to emit domainFitScore */
 const DOMAIN_CONFIDENCE_THRESHOLD = 0.7;
@@ -212,6 +225,10 @@ export interface AnalyzeOptions {
   explain?: boolean;
   /** Force domain inference to a specific domain (auto = auto-detect, off = disable) */
   domain?: "auto" | "off" | DomainType;
+  /** Explicit analysis profile override (auto-detected if omitted) */
+  profile?: AnalysisProfile;
+  /** If true, generate agent-oriented output with fix batches */
+  agent?: boolean;
 }
 
 /**
@@ -425,7 +442,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     caveats.push(`Source mode: ${consumerFiles.length} consumer files analyzed`);
   }
 
-  const composites = computeComposites(dimensions, mode);
+  // Resolve profile early so we can pass it to the scorer
+  const declarationFileRatio = mode === "package" ? 1 : 0;
+  const profileSignals = gatherProfileSignals(absolutePath, {
+    declarationFileRatio,
+    isPackageMode: isPackageMode,
+    sourceFileCount: filesAnalyzed,
+  });
+  const detectedProfile = detectProfile(profileSignals);
+  const profileInfo = resolveProfile(detectedProfile, options?.profile);
+
+  const composites = computeComposites(dimensions, mode, profileInfo.profile);
 
   // Build globalScores structure
   const globalScores = buildGlobalScores(composites);
@@ -547,6 +574,44 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Build evidence summary
   const evidenceSummary = buildEvidenceSummary(dimensions, domainInference, scenarioScore);
 
+  // --- Boundary analysis (source mode only) ---
+  let boundarySummary = undefined;
+  let boundaryQuality = undefined;
+  if (mode === "source") {
+    const boundaryGraph = buildBoundaryGraph(sourceOnlyFiles, project);
+    boundarySummary = buildBoundarySummary(boundaryGraph);
+    boundaryQuality = computeBoundaryQuality(boundarySummary);
+  }
+
+  // --- Ownership enrichment ---
+  enrichIssueOwnership(dimensions, absolutePath);
+
+  // --- Suppression engine ---
+  let suppressions: SuppressionEntry[] = [];
+  if (profileInfo.profile === "autofix-agent" || options?.agent) {
+    const suppressableIssues = dimensions.flatMap((dim) => dim.issues);
+    const suppressionResult = applySuppressions(
+      suppressableIssues,
+      profileInfo.profile === "autofix-agent" ? "autofix-agent" : profileInfo.profile,
+    );
+    ({ suppressions } = suppressionResult);
+
+    // Update dimension issues with suppression info
+    let issueIdx = 0;
+    for (const dim of dimensions) {
+      for (let jj = 0; jj < dim.issues.length; jj++) {
+        const suppressed = suppressionResult.filtered[issueIdx];
+        if (suppressed) {
+          dim.issues[jj] = suppressed;
+        }
+        issueIdx++;
+      }
+    }
+  }
+
+  // --- Fixability score ---
+  const fixabilityScore = computeFixabilityScore(dimensions);
+
   const result: AnalysisResult = {
     caveats,
     composites,
@@ -558,9 +623,11 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     domainScore,
     evidenceSummary,
     filesAnalyzed,
+    fixabilityScore,
     globalScores,
     graphStats,
     mode,
+    profileInfo,
     projectName,
     roleBreakdown: computeRoleBreakdown(centralityWeights),
     scenarioScore,
@@ -570,9 +637,25 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     topIssues,
   };
 
+  if (boundarySummary) {
+    result.boundarySummary = boundarySummary;
+  }
+  if (boundaryQuality) {
+    result.boundaryQuality = boundaryQuality;
+  }
+  if (suppressions.length > 0) {
+    result.suppressions = suppressions;
+  }
+
   // Build explainability report if requested
   if (options?.explain) {
     result.explainability = buildExplainability(dimensions, domainInference);
+  }
+
+  // Build agent report if requested
+  if (options?.agent || profileInfo.profile === "autofix-agent") {
+    const agentReport = buildAgentReport(result);
+    result.autofixSummary = buildAutofixSummary(agentReport);
   }
 
   return result;
@@ -941,5 +1024,215 @@ function buildExplainability(
     lowestSpecificity,
     lowestUsability,
     safetyLeaks,
+  };
+}
+
+/**
+ * Enrich issue ownership on all dimensions.
+ * Sets ownership and fixability fields on issues based on file paths.
+ */
+function enrichIssueOwnership(dimensions: DimensionResult[], projectRoot: string): void {
+  for (const dim of dimensions) {
+    for (const issue of dim.issues) {
+      if (!issue.ownership) {
+        const resolution = resolveFileOwnership(issue.file, projectRoot);
+        issue.ownership = resolution.ownershipClass;
+
+        // Set confidence from ownership resolution
+        if (issue.confidence === undefined) {
+          issue.confidence = resolution.confidence;
+        }
+      }
+
+      // Set fixability based on ownership
+      if (!issue.fixability) {
+        switch (issue.ownership) {
+          case "source-owned": {
+            issue.fixability = "direct";
+            break;
+          }
+          case "generated": {
+            issue.fixability = "indirect";
+            break;
+          }
+          case "dependency-owned":
+          case "standard-library-owned": {
+            issue.fixability = "external";
+            break;
+          }
+          default: {
+            issue.fixability = "not_actionable";
+          }
+        }
+      }
+
+      // Set root cause category if not already set
+      if (issue.rootCauseCategory === undefined) {
+        const rootCause = inferRootCause(issue);
+        if (rootCause) {
+          issue.rootCauseCategory = rootCause;
+        }
+      }
+
+      // Set suggested fix kind if not already set
+      if (issue.suggestedFixKind === undefined) {
+        const suggestedFix = inferSuggestedFix(issue);
+        if (suggestedFix) {
+          issue.suggestedFixKind = suggestedFix;
+        }
+      }
+
+      // Compute agent priority
+      if (issue.agentPriority === undefined) {
+        issue.agentPriority = computeAgentPriority(issue);
+      }
+    }
+
+    // Set dimension-level ownership and fixability
+    if (!dim.ownership && dim.issues.length > 0) {
+      const sourceOwned = dim.issues.filter((iss) => iss.ownership === "source-owned").length;
+      dim.ownership = sourceOwned > dim.issues.length / 2 ? "source-owned" : "mixed";
+    }
+    if (!dim.fixability && dim.issues.length > 0) {
+      const directlyFixable = dim.issues.filter((iss) => iss.fixability === "direct").length;
+      dim.fixability = directlyFixable > dim.issues.length / 2 ? "direct" : "indirect";
+    }
+  }
+}
+
+function inferRootCause(issue: Issue): NonNullable<Issue["rootCauseCategory"]> {
+  const msg = issue.message.toLowerCase();
+  if (msg.includes("any") || msg.includes("unknown")) {
+    return "weak-type";
+  }
+  if (msg.includes("cast") || msg.includes("assertion")) {
+    return "unsafe-cast";
+  }
+  if (msg.includes("validation") || msg.includes("parse")) {
+    return "missing-validation";
+  }
+  if (msg.includes("narrow") || msg.includes("guard")) {
+    return "missing-narrowing";
+  }
+  if (msg.includes("boundary") || msg.includes("leak")) {
+    return "boundary-leak";
+  }
+  if (msg.includes("config") || msg.includes("strict")) {
+    return "config-gap";
+  }
+  return "other";
+}
+
+function inferSuggestedFix(issue: Issue): NonNullable<Issue["suggestedFixKind"]> {
+  const msg = issue.message.toLowerCase();
+  if (msg.includes("any")) {
+    return "replace-any";
+  }
+  if (msg.includes("validation") || msg.includes("parse")) {
+    return "add-validation";
+  }
+  if (msg.includes("narrow") || msg.includes("guard")) {
+    return "add-narrowing";
+  }
+  if (msg.includes("type annotation") || msg.includes("return type")) {
+    return "add-type-annotation";
+  }
+  if (msg.includes("generic") || msg.includes("constraint")) {
+    return "strengthen-generic";
+  }
+  if (msg.includes("overload")) {
+    return "add-overload";
+  }
+  return "other";
+}
+
+function computeAgentPriority(issue: Issue): number {
+  let priority = 50;
+
+  // Severity boost
+  if (issue.severity === "error") {
+    priority += 25;
+  } else if (issue.severity === "warning") {
+    priority += 10;
+  }
+
+  // Fixability boost
+  if (issue.fixability === "direct") {
+    priority += 15;
+  } else if (issue.fixability === "indirect") {
+    priority += 5;
+  } else if (issue.fixability === "external" || issue.fixability === "not_actionable") {
+    priority -= 30;
+  }
+
+  // Ownership boost
+  if (issue.ownership === "source-owned") {
+    priority += 10;
+  } else if (issue.ownership === "dependency-owned") {
+    priority -= 20;
+  }
+
+  // Confidence factor
+  if (issue.confidence !== undefined) {
+    priority = Math.round(priority * issue.confidence);
+  }
+
+  return Math.max(0, Math.min(100, priority));
+}
+
+/**
+ * Compute fixability score from issue-level fixability assessments.
+ */
+function computeFixabilityScore(dimensions: DimensionResult[]): FixabilityScore {
+  const allIssues = dimensions.flatMap((dim) => dim.issues);
+  if (allIssues.length === 0) {
+    return {
+      directlyFixable: 0,
+      externalOnly: 0,
+      grade: "A+" as Grade,
+      indirectlyFixable: 0,
+      notActionable: 0,
+      rationale: ["No issues found"],
+      score: 100,
+    };
+  }
+
+  const directlyFixable = allIssues.filter((iss) => iss.fixability === "direct").length;
+  const indirectlyFixable = allIssues.filter((iss) => iss.fixability === "indirect").length;
+  const externalOnly = allIssues.filter((iss) => iss.fixability === "external").length;
+  const notActionable = allIssues.filter((iss) => iss.fixability === "not_actionable").length;
+
+  // Score: ratio of directly fixable issues
+  const actionableRatio = (directlyFixable + indirectlyFixable * 0.5) / allIssues.length;
+  const score = Math.round(actionableRatio * 100);
+
+  const rationale = [
+    `${directlyFixable}/${allIssues.length} directly fixable`,
+    `${indirectlyFixable} indirectly fixable`,
+    `${externalOnly} external-only`,
+    `${notActionable} not actionable`,
+  ];
+
+  let grade: Grade = "F";
+  if (score >= 95) {
+    grade = "A+";
+  } else if (score >= 85) {
+    grade = "A";
+  } else if (score >= 70) {
+    grade = "B";
+  } else if (score >= 55) {
+    grade = "C";
+  } else if (score >= 40) {
+    grade = "D";
+  }
+
+  return {
+    directlyFixable,
+    externalOnly,
+    grade,
+    indirectlyFixable,
+    notActionable,
+    rationale,
+    score,
   };
 }

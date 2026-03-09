@@ -34,6 +34,16 @@ function gradeColor(grade: string): (str: string) => string {
   return pc.red;
 }
 
+function riskToColor(risk: string): (str: string) => string {
+  if (risk === "low") {
+    return pc.green;
+  }
+  if (risk === "medium") {
+    return pc.yellow;
+  }
+  return pc.red;
+}
+
 function severityIcon(severity: string): string {
   if (severity === "error") {
     return pc.red("\u2716");
@@ -74,10 +84,11 @@ function compositeLabel(key: string): string {
  * ```
  */
 export function renderReport(result: AnalysisResult): string {
-  const lines: string[] = ["", pc.bold("  typegrade v0.5.0"), ""];
+  const lines: string[] = ["", pc.bold("  typegrade v0.7.1"), ""];
 
   const modeLabel = result.mode === "package" ? "package analysis" : "source analysis";
-  lines.push(`  Project: ${pc.bold(result.projectName)} (${modeLabel})`);
+  const profileLabel = result.profileInfo ? ` [${result.profileInfo.profile}]` : "";
+  lines.push(`  Project: ${pc.bold(result.projectName)} (${modeLabel}${profileLabel})`);
   lines.push(`  Files: ${result.filesAnalyzed} analyzed in ${(result.timeMs / 1000).toFixed(1)}s`);
   if (result.domainInference && result.domainInference.confidence >= 0.5) {
     lines.push(
@@ -132,6 +143,24 @@ export function renderReport(result: AnalysisResult): string {
       lines.push(`    ${icon} ${sr.name}: ${sr.score}/100 — ${pc.dim(sr.reason)}`);
     }
   }
+
+  // Boundary quality if available
+  if (result.boundaryQuality && result.boundaryQuality.totalBoundaries > 0) {
+    const bq = result.boundaryQuality;
+    const gc = gradeColor(bq.grade);
+    lines.push(
+      `  Boundary Quality: ${gc(`${bq.score}/100 (${bq.grade})`)} — ${bq.totalBoundaries} boundary(ies), ${Math.round(bq.validatedRatio * 100)}% validated`,
+    );
+  }
+
+  // Fixability score if available
+  if (result.fixabilityScore && result.fixabilityScore.directlyFixable > 0) {
+    const fs = result.fixabilityScore;
+    const gc = gradeColor(fs.grade);
+    lines.push(
+      `  Fixability: ${gc(`${fs.score}/100 (${fs.grade})`)} — ${fs.directlyFixable} direct, ${fs.indirectlyFixable} indirect, ${fs.externalOnly} external`,
+    );
+  }
   lines.push("");
 
   // Split into consumer and implementation
@@ -180,8 +209,35 @@ export function renderReport(result: AnalysisResult): string {
     for (const issue of result.topIssues.slice(0, 10)) {
       const icon = severityIcon(issue.severity);
       const loc = issue.file ? `${issue.file}:${issue.line}` : "";
-      lines.push(`   ${icon}  ${pc.dim(loc)} \u2014 ${issue.message}`);
+      const ownership = issue.ownership ? pc.dim(` [${issue.ownership}]`) : "";
+      const fixability = issue.fixability ? pc.dim(` (${issue.fixability})`) : "";
+      lines.push(`   ${icon}  ${pc.dim(loc)} \u2014 ${issue.message}${ownership}${fixability}`);
     }
+    lines.push("");
+  }
+
+  // Autofix summary if available
+  if (result.autofixSummary) {
+    const af = result.autofixSummary;
+    lines.push(pc.bold("  Agent Summary:"));
+    lines.push(`    Actionable issues: ${af.actionableIssues.length}`);
+    lines.push(`    Fix batches: ${af.fixBatches.length}`);
+    lines.push(`    Suppressed: ${af.suppressedCount}`);
+    if (af.fixBatches.length > 0) {
+      lines.push(pc.bold("  Fix Batches:"));
+      for (const batch of af.fixBatches.slice(0, 5)) {
+        const riskColor = riskToColor(batch.risk);
+        lines.push(
+          `    ${riskColor(`[${batch.risk}]`)} ${batch.title} (impact: ${batch.expectedImpact})`,
+        );
+      }
+    }
+    lines.push("");
+  }
+
+  // Suppression summary if available
+  if (result.suppressions && result.suppressions.length > 0) {
+    lines.push(`  ${pc.dim(`${result.suppressions.length} finding(s) suppressed`)}`);
     lines.push("");
   }
 

@@ -9,11 +9,20 @@ describe("pack smoke test", () => {
     const exportedNames = Object.keys(indexExports).toSorted();
     expect(exportedNames).toStrictEqual([
       "analyzeProject",
+      "applySuppressions",
+      "buildAgentReport",
+      "buildBoundaryGraph",
+      "buildBoundarySummary",
       "comparePackages",
+      "computeBoundaryQuality",
+      "detectProfile",
+      "gatherProfileSignals",
+      "renderAgentJson",
       "renderDimensionTable",
       "renderExplainability",
       "renderJson",
       "renderReport",
+      "resolveFileOwnership",
       "scorePackage",
     ]);
   });
