@@ -18,7 +18,8 @@
     "intent": "./bin/intent.js"
   },
   "files": [
-    "dist",
+    "dist/*.js",
+    "dist/*.d.ts",
     "skills",
     "bin",
     "!skills/_artifacts",
