@@ -114,6 +114,11 @@ export type BoundaryType =
 /** How directly fixable an issue is */
 export type FixabilityKind = "direct" | "indirect" | "external" | "not_actionable";
 
+// --- File Origin ---
+
+/** Classification of a file's origin for signal hygiene filtering */
+export type FileOrigin = "source" | "generated" | "dist" | "vendor" | "test" | "config";
+
 // --- Ownership ---
 
 /** Who owns the code where an issue originates */
@@ -322,6 +327,56 @@ export interface AutofixSummary {
   suppressionReasons: { category: string; count: number }[];
 }
 
+// --- Noise Summary ---
+
+/** Noise accounting: how many issues come from generated/non-source files */
+export interface NoiseSummary {
+  /** Total issues from generated/dist/vendor/config files */
+  generatedIssueCount: number;
+  /** Ratio of generated issues to total issues (0-1) */
+  generatedIssueRatio: number;
+  /** Issues from source-origin files only */
+  sourceOwnedIssueCount: number;
+  /** Issues suppressed because they came from generated/non-source files */
+  suppressedGeneratedCount: number;
+  /** File paths excluded from ranked findings due to origin classification */
+  excludedPaths: string[];
+}
+
+// --- Actionability Summary ---
+
+/** Summary of actionability across all issues */
+export interface ActionabilitySummary {
+  /** Total actionable issues (source-owned, not suppressed) */
+  actionableIssueCount: number;
+  /** Actionable issues with high confidence (>=0.7) */
+  highConfidenceActionableCount: number;
+  /** Actionable issues from source-origin files */
+  sourceOwnedActionableCount: number;
+  /** Directly fixable issues */
+  directlyFixableCount: number;
+  /** Actionability score (0-1): ratio of actionable to total */
+  actionabilityScore: number;
+}
+
+// --- Boundary Hotspot Summary ---
+
+/** Summary of boundary hotspot risk for a single file */
+export interface BoundaryHotspotSummary {
+  /** Aggregate hotspot risk score */
+  hotspotScore: number;
+  /** File path */
+  file: string;
+  /** Boundary types present in this file */
+  boundaryTypes: BoundaryType[];
+  /** Number of unvalidated boundaries */
+  unvalidatedCount: number;
+  /** Number of critical (untrusted-external) boundaries */
+  criticalBoundaryCount: number;
+  /** Recommended fix approach */
+  recommendedFixKind: SuggestedFixKind;
+}
+
 // --- Suppression Entry ---
 
 /** Record of a suppression applied to a finding */
@@ -456,6 +511,8 @@ export interface Issue {
   confidence?: number;
   /** Who owns the code where this issue originates */
   ownership?: OwnershipClass;
+  /** File origin classification for signal hygiene */
+  fileOrigin?: FileOrigin;
   /** How directly fixable this issue is */
   fixability?: FixabilityKind;
   /** Boundary type if this is a boundary-related issue */
@@ -593,6 +650,10 @@ export interface AnalysisResult {
   boundarySummary?: BoundarySummary;
   /** Autofix-agent summary with actionable issues and fix batches */
   autofixSummary?: AutofixSummary;
+  /** Noise summary: source-vs-generated issue accounting */
+  noiseSummary?: NoiseSummary | undefined;
+  /** Actionability summary across all issues */
+  actionabilitySummary?: ActionabilitySummary | undefined;
   /** Boundary-specific quality score */
   boundaryQuality?: BoundaryQualityScore;
   /** Fixability meta-score */
@@ -1006,6 +1067,67 @@ export interface DimensionDiff {
   baseline: number;
   target: number;
   delta: number;
+}
+
+// --- Comparison Decision ---
+
+/** Outcome of a package comparison decision */
+export type ComparisonOutcome =
+  | "clear-winner"
+  | "marginal-winner"
+  | "equivalent"
+  | "incomparable"
+  | "abstained";
+
+/** Provenance trace for a single metric used in the decision */
+export interface MetricProvenance {
+  /** Which metric this traces */
+  metric: string;
+  /** Inputs that contributed to this metric */
+  inputs: string[];
+  /** Penalties applied during scoring */
+  penaltiesApplied: string[];
+  /** Confidence in this particular metric (0-1) */
+  confidence: number;
+}
+
+/** A single metric delta between two packages */
+export interface MetricDelta {
+  /** Metric name */
+  metric: string;
+  /** Value for package A */
+  valueA: number | null;
+  /** Value for package B */
+  valueB: number | null;
+  /** Absolute delta (A - B) */
+  delta: number | null;
+  /** Whether this delta is significant (above noise threshold) */
+  significant: boolean;
+}
+
+/** Full decision report from a package comparison */
+export interface ComparisonDecisionReport {
+  /** Decision outcome */
+  outcome: ComparisonOutcome;
+  /** Winning package name (null if equivalent/incomparable/abstained) */
+  winner: string | null;
+  /** Decision-adjusted score for package A */
+  decisionScoreA: number | null;
+  /** Decision-adjusted score for package B */
+  decisionScoreB: number | null;
+  /** Confidence in the decision (0-1) */
+  decisionConfidence: number;
+  /** Reasons the decision cannot be made (for incomparable/abstained) */
+  blockingReasons: string[];
+  /** Top reasons supporting the decision */
+  topReasons: string[];
+  /** Per-metric deltas */
+  metricDeltas: MetricDelta[];
+  /** Provenance for each metric used */
+  metricProvenance: MetricProvenance[];
+  /** Trust summaries for both packages */
+  trustA?: TrustSummary;
+  trustB?: TrustSummary;
 }
 
 // --- Source Mode Confidence ---

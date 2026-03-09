@@ -1,6 +1,7 @@
 import type { AgentReport, StopCondition } from "./types.js";
 import type { AnalysisResult, AutofixSummary, Issue } from "../types.js";
 import { computeExecutionOrder, enrichFixBatches, groupFixBatches } from "./fix-batch.js";
+import { filterIssues } from "../origin/filter.js";
 
 /**
  * Build an agent-oriented report from an analysis result.
@@ -81,38 +82,11 @@ export function buildAgentReport(
   // Collect all issues from dimensions
   const allIssues = result.dimensions.flatMap((dim) => dim.issues);
 
-  // Filter to actionable issues
-  const actionableIssues = allIssues.filter((issue) => {
-    // Must not be suppressed
-    if (issue.suppressionReason) {
-      return false;
-    }
-
-    // Confidence gate
-    if (issue.confidence !== undefined && issue.confidence < minConfidence) {
-      return false;
-    }
-
-    // Ownership gate: only source-owned or workspace-owned
-    if (
-      issue.ownership &&
-      issue.ownership !== "source-owned" &&
-      issue.ownership !== "workspace-owned"
-    ) {
-      return false;
-    }
-
-    // Fixability gate: direct or (optionally) indirect
-    if (issue.fixability) {
-      if (issue.fixability === "not_actionable" || issue.fixability === "external") {
-        return false;
-      }
-      if (issue.fixability === "indirect" && !includeIndirect) {
-        return false;
-      }
-    }
-
-    return true;
+  // Filter to actionable issues using shared signal-hygiene filter
+  const { actionable: actionableIssues } = filterIssues(allIssues, {
+    includeGenerated: false,
+    includeIndirect,
+    minConfidence,
   });
 
   // Apply source-mode priority boost when analyzing own source

@@ -7,6 +7,7 @@ import {
   type SafeFixCategory,
   type SuggestedFixKind,
 } from "../types.js";
+import { filterIssues } from "../origin/filter.js";
 
 /**
  * Map from SuggestedFixKind to SafeFixCategory where there is a safe, deterministic mapping.
@@ -52,8 +53,11 @@ export function buildFixPlan(result: AnalysisResult): FixPlan {
   // Collect all issues from dimensions
   const allIssues = result.dimensions.flatMap((dim) => dim.issues);
 
-  // Filter to source-owned, directly fixable, unsuppressed issues
-  const actionableIssues = filterActionableIssues(allIssues);
+  // Filter to source-owned, directly fixable, unsuppressed issues using shared filter
+  const { actionable: actionableIssues } = filterIssues(allIssues, {
+    includeGenerated: false,
+    includeIndirect: false,
+  });
 
   // Group by file + dimension
   const groups = groupByFileDimension(actionableIssues);
@@ -79,31 +83,6 @@ export function buildFixPlan(result: AnalysisResult): FixPlan {
     totalExpectedUplift: Math.min(totalExpectedUplift, 40),
     verificationCommands: [...DEFAULT_VERIFICATION_COMMANDS],
   };
-}
-
-/**
- * Filter issues to those that are source-owned, directly fixable, and not suppressed.
- * Mirrors the agent report filtering logic.
- */
-function filterActionableIssues(issues: Issue[]): Issue[] {
-  return issues.filter((issue) => {
-    // Must not be suppressed
-    if (issue.suppressionReason) {
-      return false;
-    }
-
-    // Ownership gate: only source-owned or unset
-    if (issue.ownership && issue.ownership !== "source-owned") {
-      return false;
-    }
-
-    // Fixability gate: only directly fixable
-    if (issue.fixability && issue.fixability !== "direct") {
-      return false;
-    }
-
-    return true;
-  });
 }
 
 /**

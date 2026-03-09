@@ -203,6 +203,14 @@ export function renderReport(result: AnalysisResult): string {
     lines.push("");
   }
 
+  // Noise summary
+  if (result.noiseSummary && result.noiseSummary.generatedIssueCount > 0) {
+    lines.push(
+      `  ${pc.dim(`${result.noiseSummary.generatedIssueCount} generated-file issue(s) excluded (${Math.round(result.noiseSummary.generatedIssueRatio * 100)}% of total)`)}`,
+    );
+    lines.push("");
+  }
+
   // Top issues
   if (result.topIssues.length > 0) {
     lines.push(pc.bold("  Top issues:"));

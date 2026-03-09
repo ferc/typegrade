@@ -12,6 +12,11 @@ export {
 export { comparePackages } from "./compare.js";
 export type { CompareResult, CompareOptions } from "./compare.js";
 
+// Signal hygiene: file-origin classification and issue filtering
+export { classifyFileOrigin } from "./origin/index.js";
+export { filterIssues } from "./origin/index.js";
+export type { IssueFilterOptions, IssueFilterResult } from "./origin/index.js";
+
 // Agent and profile APIs
 export { buildAgentReport, enrichFixBatches, renderAgentJson } from "./agent/index.js";
 export type {
@@ -52,6 +57,7 @@ export { ANALYSIS_SCHEMA_VERSION } from "./types.js";
 
 // Stable public types
 export type {
+  ActionabilitySummary,
   AcquisitionStage,
   AnalysisMode,
   AnalysisProfile,
@@ -60,6 +66,7 @@ export type {
   AnalysisStatus,
   Applicability,
   AutofixSummary,
+  BoundaryHotspotSummary,
   BoundaryFindingCategory,
   BoundaryHotspot,
   BoundaryInventoryEntry,
@@ -71,6 +78,8 @@ export type {
   BoundarySummary,
   BoundaryType,
   CentralityWeight,
+  ComparisonDecisionReport,
+  ComparisonOutcome,
   CompositeDiff,
   CompositeKey,
   CompositeScore,
@@ -90,6 +99,7 @@ export type {
   EvidenceSummary,
   ExplainabilityReport,
   ExportRole,
+  FileOrigin,
   FixabilityKind,
   FixabilityScore,
   FixApplicationResult,
@@ -101,10 +111,13 @@ export type {
   Grade,
   Issue,
   LayerViolation,
+  MetricDelta,
+  MetricProvenance,
   MonorepoConfig,
   MonorepoHealthSummary,
   MonorepoPackageInfo,
   MonorepoReport,
+  NoiseSummary,
   OwnershipClass,
   PackageIdentity,
   PackageLayer,

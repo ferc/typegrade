@@ -62,6 +62,8 @@ import { analyzeSpecializationPower } from "./analyzers/specialization-power.js"
 import { analyzeSurfaceComplexity } from "./analyzers/surface-complexity.js";
 import { analyzeSurfaceConsistency } from "./analyzers/surface-consistency.js";
 import { applySuppressions } from "./suppression/index.js";
+import { classifyFileOrigin } from "./origin/classifier.js";
+import { filterIssues } from "./origin/filter.js";
 import { getScenarioPackWithVariant } from "./scenarios/index.js";
 import { resolveFileOwnership } from "./ownership/index.js";
 
@@ -954,7 +956,15 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     unresolved: 6,
     "workspace-owned": 1,
   };
-  const topIssues = allIssues
+  // Filter top issues: exclude generated/dist/vendor/config-origin by default
+  const noiseOrigins = new Set(["generated", "dist", "vendor", "config"]);
+  const sourceIssues = allIssues.filter((iss) => {
+    const origin = iss.fileOrigin ?? "source";
+    return !noiseOrigins.has(origin);
+  });
+  // Fall back to all issues if no source issues exist
+  const issueCandidates = sourceIssues.length > 0 ? sourceIssues : allIssues;
+  const topIssues = issueCandidates
     .toSorted((lhs, rhs) => {
       // Source-owned issues sort first
       const byOwnership =
@@ -1079,6 +1089,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     }
   }
 
+  // --- Signal hygiene: noise and actionability accounting ---
+  const allIssuesForNoise = dimensions.flatMap((dim) => dim.issues);
+  const { noiseSummary, actionabilitySummary } = filterIssues(allIssuesForNoise);
+
   // --- Fixability score ---
   const fixabilityScore = computeFixabilityScore(dimensions);
 
@@ -1127,6 +1141,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
 
   const result: AnalysisResult = {
+    actionabilitySummary,
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     analysisScope,
     caveats,
@@ -1143,6 +1158,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     globalScores,
     graphStats,
     mode,
+    noiseSummary: noiseSummary.generatedIssueCount > 0 ? noiseSummary : undefined,
     packageIdentity,
     profileInfo,
     projectName,
@@ -1605,6 +1621,11 @@ function enrichIssueOwnership(dimensions: DimensionResult[], projectRoot: string
         if (issue.confidence === undefined) {
           issue.confidence = resolution.confidence;
         }
+      }
+
+      // Classify file origin for signal hygiene
+      if (!issue.fileOrigin) {
+        issue.fileOrigin = classifyFileOrigin(issue.file);
       }
 
       // Set fixability based on ownership

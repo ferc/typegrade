@@ -3,6 +3,7 @@ import type {
   AnalysisResult,
   BoundaryQualityScore,
   BoundarySummary,
+  ComparisonDecisionReport,
   FixApplicationResult,
   FixMode,
   FixPlan,
@@ -239,14 +240,30 @@ export function runCli() {
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
 
-      const { scorePackage } = await import("./package-scorer.js");
-      const resultA = scorePackage(pkgA, { domain, noCache });
-      const resultB = scorePackage(pkgB, { domain, noCache });
+      const { comparePackages } = await import("./compare.js");
+      const compareResult = comparePackages(pkgA, pkgB, { domain, noCache });
 
       if (opts.json) {
-        console.log(JSON.stringify({ comparison: { first: resultA, second: resultB } }, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              comparison: { first: compareResult.resultA, second: compareResult.resultB },
+              decision: compareResult.decision,
+            },
+            null,
+            2,
+          ),
+        );
       } else {
-        console.log(renderComparison({ nameA: pkgA, nameB: pkgB, resultA, resultB }));
+        console.log(
+          renderComparison({
+            decision: compareResult.decision,
+            nameA: pkgA,
+            nameB: pkgB,
+            resultA: compareResult.resultA,
+            resultB: compareResult.resultB,
+          }),
+        );
       }
     });
 
@@ -431,10 +448,11 @@ interface ComparisonOpts {
   resultA: AnalysisResult;
   nameB: string;
   resultB: AnalysisResult;
+  decision?: ComparisonDecisionReport;
 }
 
 function renderComparison(opts: ComparisonOpts): string {
-  const { nameA, resultA, nameB, resultB } = opts;
+  const { nameA, resultA, nameB, resultB, decision } = opts;
   const lines: string[] = [
     "",
     pc.bold("  typegrade comparison"),
@@ -498,6 +516,50 @@ function renderComparison(opts: ComparisonOpts): string {
         22,
       );
     lines.push(`  ${domainLabel}${String(domA).padEnd(16)}${String(domB).padEnd(16)}`);
+  }
+
+  // Decision section
+  if (decision) {
+    lines.push("");
+    lines.push(`  ${"─".repeat(60)}`);
+
+    switch (decision.outcome) {
+      case "clear-winner": {
+        lines.push(pc.green(`  Winner: ${decision.winner} (clear)`));
+        break;
+      }
+      case "marginal-winner": {
+        lines.push(pc.yellow(`  Winner: ${decision.winner} (marginal — review recommended)`));
+        break;
+      }
+      case "equivalent": {
+        lines.push(pc.blue("  Equivalent — no significant differences"));
+        break;
+      }
+      case "incomparable": {
+        lines.push(pc.yellow("  Incomparable — cannot rank these results"));
+        for (const reason of decision.blockingReasons) {
+          lines.push(`    ${reason}`);
+        }
+        break;
+      }
+      case "abstained": {
+        lines.push(pc.red("  Abstained — insufficient evidence for comparison"));
+        for (const reason of decision.blockingReasons) {
+          lines.push(`    ${reason}`);
+        }
+        break;
+      }
+    }
+
+    if (decision.topReasons.length > 0) {
+      lines.push("  Key factors:");
+      for (const reason of decision.topReasons) {
+        lines.push(`    ${reason}`);
+      }
+    }
+
+    lines.push(`  Confidence: ${Math.round(decision.decisionConfidence * 100)}%`);
   }
 
   lines.push("");
