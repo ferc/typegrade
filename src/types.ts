@@ -1087,6 +1087,22 @@ export type ComparisonOutcome =
   | "incomparable"
   | "abstained";
 
+/** Why a comparison could not produce a decision */
+export type AbstentionKind =
+  | "degraded-analysis"
+  | "domain-mismatch"
+  | "both-directional"
+  | "low-evidence"
+  | "low-codebase-relevance"
+  | "both-require-human-review";
+
+/** Status of comparability between two results */
+export type ComparabilityStatus =
+  | "fully-comparable"
+  | "cross-domain-forced"
+  | "directional-only"
+  | "not-comparable";
+
 /** Provenance trace for a single metric used in the decision */
 export interface MetricProvenance {
   /** Which metric this traces */
@@ -1136,6 +1152,10 @@ export interface ComparisonDecisionReport {
   /** Trust summaries for both packages */
   trustA?: TrustSummary;
   trustB?: TrustSummary;
+  /** Why the comparison was abstained or blocked */
+  abstentionKind?: AbstentionKind;
+  /** Status of comparability between the two results */
+  comparabilityStatus?: ComparabilityStatus;
 }
 
 // --- Source Mode Confidence ---
@@ -1328,6 +1348,10 @@ export interface FitCompareDecision {
   blockingReasons: string[];
   /** Top reasons supporting the decision */
   topReasons: string[];
+  /** Why the comparison was abstained or blocked */
+  abstentionKind?: AbstentionKind;
+  /** Status of comparability between the two results */
+  comparabilityStatus?: ComparabilityStatus;
 }
 
 /** Result of a codebase-aware library fit comparison */

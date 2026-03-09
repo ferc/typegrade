@@ -1,5 +1,7 @@
 import type {
+  AbstentionKind,
   AnalysisResult,
+  ComparabilityStatus,
   ComparisonDecisionReport,
   ComparisonOutcome,
   MetricDelta,
@@ -27,6 +29,8 @@ const DIMENSION_DECISION_WEIGHTS: Record<string, number> = {
 export interface CompareOptions extends ScorePackageOptions {
   /** If true, include rendered text comparison in the result */
   render?: boolean;
+  /** If true, allow cross-domain comparisons that would otherwise be abstained */
+  forceCrossDomain?: boolean;
 }
 
 export interface CompareResult {
@@ -65,7 +69,13 @@ export function comparePackages(
   const resultA = scorePackage(pkgA, scoreOpts);
   const resultB = scorePackage(pkgB, scoreOpts);
 
-  const decision = computeDecisionReport({ nameA: pkgA, nameB: pkgB, resultA, resultB });
+  const decision = computeDecisionReport({
+    forceCrossDomain: options?.forceCrossDomain ?? false,
+    nameA: pkgA,
+    nameB: pkgB,
+    resultA,
+    resultB,
+  });
   const result: CompareResult = { decision, resultA, resultB };
 
   if (options?.render) {
@@ -75,18 +85,27 @@ export function comparePackages(
   return result;
 }
 
-interface DecisionInput {
+/** @internal Exported for testing */
+export interface DecisionInput {
   nameA: string;
   nameB: string;
   resultA: AnalysisResult;
   resultB: AnalysisResult;
+  forceCrossDomain?: boolean;
 }
+
+/** Domains that are considered compatible with any other domain */
+const CROSS_DOMAIN_COMPATIBLE = new Set(["general", "utility"]);
+
+/** Minimum evidence quality score to allow a comparison */
+const MIN_EVIDENCE_QUALITY = 65;
 
 /**
  * Compute a comparison decision report from two analysis results.
  */
-function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
-  const { nameA, nameB, resultA, resultB } = input;
+/** @internal Exported for testing */
+export function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
+  const { nameA, nameB, resultA, resultB, forceCrossDomain } = input;
   const trustA = resultA.trustSummary ?? buildFallbackTrust(resultA);
   const trustB = resultB.trustSummary ?? buildFallbackTrust(resultB);
 
@@ -100,7 +119,69 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
     blockingReasons.push(`${nameB} analysis abstained: ${trustB.reasons[0] ?? "unknown"}`);
   }
   if (blockingReasons.length > 0) {
-    return buildAbstainedReport(blockingReasons, trustA, trustB);
+    return buildAbstainedReport({
+      abstentionKind: "degraded-analysis",
+      blockingReasons,
+      trustA,
+      trustB,
+    });
+  }
+
+  // Abstention: both results are only directional
+  if (trustA.classification === "directional" && trustB.classification === "directional") {
+    blockingReasons.push(
+      `Both ${nameA} and ${nameB} have only directional trust — comparison unreliable`,
+    );
+    return buildAbstainedReport({
+      abstentionKind: "both-directional",
+      blockingReasons,
+      trustA,
+      trustB,
+    });
+  }
+
+  // Abstention: low evidence quality on either side
+  const evidenceA = computeEvidenceQuality(resultA, trustA);
+  const evidenceB = computeEvidenceQuality(resultB, trustB);
+  if (evidenceA < MIN_EVIDENCE_QUALITY || evidenceB < MIN_EVIDENCE_QUALITY) {
+    const low = evidenceA < MIN_EVIDENCE_QUALITY ? nameA : nameB;
+    const score = Math.min(evidenceA, evidenceB);
+    blockingReasons.push(`${low} evidence quality too low (${score} < ${MIN_EVIDENCE_QUALITY})`);
+    return buildAbstainedReport({
+      abstentionKind: "low-evidence",
+      blockingReasons,
+      trustA,
+      trustB,
+    });
+  }
+
+  // Domain mismatch: abstain unless forced or compatible
+  const domainA = resultA.domainInference?.domain;
+  const domainB = resultB.domainInference?.domain;
+  const domainsKnown = domainA && domainB;
+  const domainsMismatch = domainsKnown && domainA !== domainB;
+  const eitherCrossDomainCompatible =
+    CROSS_DOMAIN_COMPATIBLE.has(domainA ?? "") || CROSS_DOMAIN_COMPATIBLE.has(domainB ?? "");
+  let comparabilityStatus: ComparabilityStatus = "fully-comparable";
+
+  if (domainsMismatch && !eitherCrossDomainCompatible) {
+    if (!forceCrossDomain) {
+      blockingReasons.push(
+        `Domain mismatch: ${nameA} is "${domainA}", ${nameB} is "${domainB}" — use --force-cross-domain to compare anyway`,
+      );
+      return buildAbstainedReport({
+        abstentionKind: "domain-mismatch",
+        blockingReasons,
+        trustA,
+        trustB,
+      });
+    }
+    comparabilityStatus = "cross-domain-forced";
+  }
+
+  // Track directional-only status
+  if (trustA.classification === "directional" || trustB.classification === "directional") {
+    comparabilityStatus = "directional-only";
   }
 
   // Incomparability: either result not comparable
@@ -239,12 +320,24 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
 
   if (significantDeltas.length === 0 || scoreDelta < 3) {
     outcome = "equivalent";
-  } else if (favorA >= 2 && scoreDelta >= 8 && decisionConfidence >= 0.6) {
+  } else if (favorA >= 2 && scoreDelta >= 10 && decisionConfidence >= 0.8) {
     outcome = "clear-winner";
     winner = nameA;
-  } else if (favorB >= 2 && scoreDelta >= 8 && decisionConfidence >= 0.6) {
+  } else if (favorB >= 2 && scoreDelta >= 10 && decisionConfidence >= 0.8) {
     outcome = "clear-winner";
     winner = nameB;
+  } else if (scoreDelta >= 5 && decisionConfidence >= 0.65) {
+    // Marginal winner: score delta at least 5, confidence at least 0.65
+    if (favorA > favorB || (favorA === favorB && (decisionScoreA ?? 0) > (decisionScoreB ?? 0))) {
+      outcome = "marginal-winner";
+      winner = nameA;
+    } else if (
+      favorB > favorA ||
+      (favorA === favorB && (decisionScoreB ?? 0) > (decisionScoreA ?? 0))
+    ) {
+      outcome = "marginal-winner";
+      winner = nameB;
+    }
   } else if (
     favorA > favorB ||
     (favorA === favorB && (decisionScoreA ?? 0) > (decisionScoreB ?? 0))
@@ -270,6 +363,7 @@ function computeDecisionReport(input: DecisionInput): ComparisonDecisionReport {
 
   return {
     blockingReasons: [],
+    comparabilityStatus,
     decisionConfidence,
     decisionScoreA,
     decisionScoreB,
@@ -519,13 +613,41 @@ function buildFallbackTrust(result: AnalysisResult): TrustSummary {
   };
 }
 
-function buildAbstainedReport(
-  blockingReasons: string[],
-  trustA: TrustSummary,
-  trustB: TrustSummary,
-): ComparisonDecisionReport {
+/**
+ * Compute an evidence quality score (0-100) for a single result.
+ * Blends trust, coverage, scenario evidence, and domain clarity.
+ */
+function computeEvidenceQuality(result: AnalysisResult, trust: TrustSummary): number {
+  const trustMap: Record<string, number> = { abstained: 0, directional: 60, trusted: 100 };
+  const trustScore = trustMap[trust.classification] ?? 50;
+
+  const cs = result.confidenceSummary;
+  const coverageQuality = cs ? ((cs.sampleCoverage + cs.graphResolution) / 2) * 100 : 50;
+
+  const es = result.evidenceSummary;
+  const scenarioQuality = es ? es.scenarioEvidence * 100 : 50;
+
+  const domainClarity = result.domainInference?.confidence
+    ? result.domainInference.confidence * 100
+    : 50;
+
+  return Math.round(
+    trustScore * 0.4 + coverageQuality * 0.25 + scenarioQuality * 0.2 + domainClarity * 0.15,
+  );
+}
+
+interface AbstainedReportInput {
+  blockingReasons: string[];
+  trustA: TrustSummary;
+  trustB: TrustSummary;
+  abstentionKind: AbstentionKind;
+}
+
+function buildAbstainedReport(input: AbstainedReportInput): ComparisonDecisionReport {
   return {
-    blockingReasons,
+    abstentionKind: input.abstentionKind,
+    blockingReasons: input.blockingReasons,
+    comparabilityStatus: "not-comparable",
     decisionConfidence: 0,
     decisionScoreA: null,
     decisionScoreB: null,
@@ -533,8 +655,8 @@ function buildAbstainedReport(
     metricProvenance: [],
     outcome: "abstained",
     topReasons: [],
-    trustA,
-    trustB,
+    trustA: input.trustA,
+    trustB: input.trustB,
     winner: null,
   };
 }
@@ -546,6 +668,7 @@ function buildIncomparableReport(
 ): ComparisonDecisionReport {
   return {
     blockingReasons,
+    comparabilityStatus: "not-comparable" as ComparabilityStatus,
     decisionConfidence: 0,
     decisionScoreA: null,
     decisionScoreB: null,

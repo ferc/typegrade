@@ -1,7 +1,9 @@
 import {
   ANALYSIS_SCHEMA_VERSION,
+  type AbstentionKind,
   type AnalysisResult,
   type CandidateFitAssessment,
+  type ComparabilityStatus,
   type ComparisonOutcome,
   type FitCompareDecision,
   type FitCompareResult,
@@ -14,6 +16,8 @@ import { analyzeProject } from "./analyzer.js";
 export interface FitCompareOptions extends ScorePackageOptions {
   /** Path to the codebase to compare against */
   codebasePath: string;
+  /** If true, allow cross-domain comparisons that would otherwise be abstained */
+  forceCrossDomain?: boolean;
 }
 
 /**
@@ -58,7 +62,11 @@ export function fitCompare(
   const candidateB = computeFitAssessment(pkgB, resultB, codebase);
 
   // Compute adoption decision
-  const adoptionDecision = computeAdoptionDecision(candidateA, candidateB);
+  const adoptionDecision = computeAdoptionDecision(
+    candidateA,
+    candidateB,
+    options.forceCrossDomain,
+  );
 
   // Compute first migration batches for the winner
   const winnerAssessment = adoptionDecision.winner === pkgA ? candidateA : candidateB;
@@ -328,16 +336,44 @@ function determineFitOutcome(
   return { outcome: "marginal-winner", winner };
 }
 
+/** Minimum codebase relevance to allow a fit-compare recommendation */
+const MIN_CODEBASE_RELEVANCE = 60;
+
+/** Minimum fit score delta for a recommendation when confidence is below 0.70 */
+const MIN_FIT_DELTA_LOW_CONFIDENCE = 8;
+
+/** Domains that are considered compatible with any other domain */
+const CROSS_DOMAIN_COMPATIBLE = new Set(["general", "utility"]);
+
+/**
+ * Build an abstained fit-compare decision.
+ */
+function buildFitAbstention(
+  blockingReasons: string[],
+  abstentionKind: AbstentionKind,
+): FitCompareDecision {
+  return {
+    abstentionKind,
+    blockingReasons,
+    comparabilityStatus: "not-comparable",
+    decisionConfidence: 0,
+    outcome: "abstained",
+    topReasons: [],
+    winner: null,
+  };
+}
+
 /**
  * Compute the adoption decision from two fit assessments.
  */
 function computeAdoptionDecision(
   candidateA: CandidateFitAssessment,
   candidateB: CandidateFitAssessment,
+  forceCrossDomain?: boolean,
 ): FitCompareDecision {
   const blockingReasons: string[] = [];
 
-  // Check for abstention
+  // Check for abstention: degraded analysis
   const trustA = candidateA.result.trustSummary;
   const trustB = candidateB.result.trustSummary;
   if (trustA?.classification === "abstained") {
@@ -352,13 +388,64 @@ function computeAdoptionDecision(
   }
 
   if (blockingReasons.length > 0) {
-    return {
-      blockingReasons,
-      decisionConfidence: 0,
-      outcome: "abstained",
-      topReasons: [],
-      winner: null,
-    };
+    return buildFitAbstention(blockingReasons, "degraded-analysis");
+  }
+
+  // Domain mismatch: abstain unless forced or compatible
+  const domainA = candidateA.result.domainInference?.domain;
+  const domainB = candidateB.result.domainInference?.domain;
+  const domainsKnown = domainA && domainB;
+  const domainsMismatch = domainsKnown && domainA !== domainB;
+  const eitherCrossDomainCompatible =
+    CROSS_DOMAIN_COMPATIBLE.has(domainA ?? "") || CROSS_DOMAIN_COMPATIBLE.has(domainB ?? "");
+  let comparabilityStatus: ComparabilityStatus = "fully-comparable";
+
+  if (domainsMismatch && !eitherCrossDomainCompatible) {
+    if (!forceCrossDomain) {
+      return buildFitAbstention(
+        [
+          `Domain mismatch: ${candidateA.packageName} is "${domainA}", ${candidateB.packageName} is "${domainB}" — use --force-cross-domain to compare anyway`,
+        ],
+        "domain-mismatch",
+      );
+    }
+    comparabilityStatus = "cross-domain-forced";
+  }
+
+  // Codebase relevance: abstain when both candidates have low relevance
+  if (
+    candidateA.domainCompatibility < MIN_CODEBASE_RELEVANCE &&
+    candidateB.domainCompatibility < MIN_CODEBASE_RELEVANCE
+  ) {
+    return buildFitAbstention(
+      [
+        `Both candidates have low codebase relevance: ${candidateA.packageName} (${candidateA.domainCompatibility}) and ${candidateB.packageName} (${candidateB.domainCompatibility}) — neither fits the codebase well`,
+      ],
+      "low-codebase-relevance",
+    );
+  }
+
+  // Both require human review with high migration risk: abstain
+  if (
+    candidateA.migrationRisk.requiresHumanReview &&
+    candidateB.migrationRisk.requiresHumanReview
+  ) {
+    const riskA = migrationRiskLevel(candidateA.migrationRisk);
+    const riskB = migrationRiskLevel(candidateB.migrationRisk);
+    // Both high risk = abstain
+    if (riskA >= 7 && riskB >= 7) {
+      return buildFitAbstention(
+        [
+          `Both ${candidateA.packageName} and ${candidateB.packageName} require human review with high migration risk`,
+        ],
+        "both-require-human-review",
+      );
+    }
+  }
+
+  // Track directional-only status
+  if (trustA?.classification === "directional" || trustB?.classification === "directional") {
+    comparabilityStatus = "directional-only";
   }
 
   // Compare fit scores
@@ -382,13 +469,6 @@ function computeAdoptionDecision(
     topReasons.push(`Migration risk: ${lower} has lower migration risk`);
   }
 
-  // Determine outcome
-  const { outcome, winner } = determineFitOutcome(
-    fitDelta,
-    candidateA.packageName,
-    candidateB.packageName,
-  );
-
   // Confidence: blend of trust, fit delta clarity, and domain compatibility
   const trustConfA = trustClassificationToScore(trustA?.classification);
   const trustConfB = trustClassificationToScore(trustB?.classification);
@@ -398,8 +478,25 @@ function computeAdoptionDecision(
   const decisionConfidence =
     Math.round((0.4 * trustConfidence + 0.3 * deltaClarity + 0.3 * domainConf) * 100) / 100;
 
+  // Determine outcome with stricter thresholds
+  let outcome: ComparisonOutcome = "equivalent";
+  let winner: string | null = null;
+
+  if (Math.abs(fitDelta) >= 5) {
+    if (Math.abs(fitDelta) < MIN_FIT_DELTA_LOW_CONFIDENCE && decisionConfidence < 0.7) {
+      // Close delta with low confidence: stay equivalent
+    } else {
+      ({ outcome, winner } = determineFitOutcome(
+        fitDelta,
+        candidateA.packageName,
+        candidateB.packageName,
+      ));
+    }
+  }
+
   return {
     blockingReasons: [],
+    comparabilityStatus,
     decisionConfidence,
     outcome,
     topReasons: topReasons.slice(0, 5),

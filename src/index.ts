@@ -83,6 +83,8 @@ export type {
   BoundarySummary,
   BoundaryType,
   CentralityWeight,
+  AbstentionKind,
+  ComparabilityStatus,
   ComparisonDecisionReport,
   ComparisonOutcome,
   CompositeDiff,

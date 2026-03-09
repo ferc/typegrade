@@ -273,14 +273,16 @@ export function runCli() {
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--no-cache", "Disable package cache (always install fresh)")
+    .option("--force-cross-domain", "Allow cross-domain comparisons that would otherwise abstain")
     .action(async (pkgA: string, pkgB: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
+      const forceCrossDomain = Boolean(opts["forceCrossDomain"]);
 
       const { comparePackages } = await import("./compare.js");
-      const compareResult = comparePackages(pkgA, pkgB, { domain, noCache });
+      const compareResult = comparePackages(pkgA, pkgB, { domain, forceCrossDomain, noCache });
 
       if (opts.json) {
         console.log(
@@ -441,15 +443,17 @@ export function runCli() {
     .option("--against <path>", "Path to the codebase to compare against", ".")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--no-cache", "Disable package cache")
+    .option("--force-cross-domain", "Allow cross-domain comparisons that would otherwise abstain")
     .action(async (pkgA: string, pkgB: string, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
       const codebasePath = String(opts["against"] ?? ".");
+      const forceCrossDomain = Boolean(opts["forceCrossDomain"]);
 
       const { fitCompare } = await import("./fit-compare.js");
-      const result = fitCompare(pkgA, pkgB, { codebasePath, domain, noCache });
+      const result = fitCompare(pkgA, pkgB, { codebasePath, domain, forceCrossDomain, noCache });
 
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
