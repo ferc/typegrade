@@ -1,0 +1,3 @@
+# Mark generated/vendored JS so GitHub linguist ignores them
+bin/intent.js linguist-generated
+test/fixtures/**/node_modules/** linguist-vendored
