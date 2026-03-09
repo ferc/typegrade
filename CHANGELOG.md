@@ -1,3 +1,10 @@
+## [0.10.0](https://github.com/ferc/typegrade/compare/v0.9.0...v0.10.0) (2026-03-09)
+
+### Features
+
+* add boundary analysis, fix planning, monorepo support, diff, and config loader ([7d8222e](https://github.com/ferc/typegrade/commit/7d8222e5abb942dde14973d6488cc759d241e708))
+* add TanStack Intent skills for AI agent integration ([44bd0ab](https://github.com/ferc/typegrade/commit/44bd0abd9a22c19ace0a41b01346647effb2a9ed))
+
 ## [0.9.0](https://github.com/ferc/typegrade/compare/v0.8.0...v0.9.0) (2026-03-09)
 
 ### Features
