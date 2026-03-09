@@ -512,8 +512,23 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Collect top issues
   const allIssues: Issue[] = dimensions.flatMap((dim) => dim.issues);
   const severityOrder: Record<string, number> = { error: 0, info: 2, warning: 1 };
+  const fixabilityOrder: Record<string, number> = {
+    direct: 0,
+    external: 2,
+    indirect: 1,
+    not_actionable: 3,
+  };
   const topIssues = allIssues
-    .toSorted((lhs, rhs) => (severityOrder[lhs.severity] ?? 0) - (severityOrder[rhs.severity] ?? 0))
+    .toSorted((lhs, rhs) => {
+      const bySeverity = (severityOrder[lhs.severity] ?? 0) - (severityOrder[rhs.severity] ?? 0);
+      if (bySeverity !== 0) {
+        return bySeverity;
+      }
+      return (
+        (fixabilityOrder[lhs.fixability ?? "direct"] ?? 0) -
+        (fixabilityOrder[rhs.fixability ?? "direct"] ?? 0)
+      );
+    })
     .slice(0, 10);
 
   const timeMs = Math.round(performance.now() - startTime);
