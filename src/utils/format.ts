@@ -84,7 +84,7 @@ function compositeLabel(key: string): string {
  * ```
  */
 export function renderReport(result: AnalysisResult): string {
-  const lines: string[] = ["", pc.bold("  typegrade v0.7.1"), ""];
+  const lines: string[] = ["", pc.bold(`  typegrade v${__TYPEGRADE_VERSION__}`), ""];
 
   const modeLabel = result.mode === "package" ? "package analysis" : "source analysis";
   const profileLabel = result.profileInfo ? ` [${result.profileInfo.profile}]` : "";
