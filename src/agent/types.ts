@@ -2,12 +2,34 @@ import type { FixBatch, Issue } from "../types.js";
 
 export type { AutofixSummary, FixBatch, Issue } from "../types.js";
 
+/** Condition that signals the agent should stop iterating */
+export interface StopCondition {
+  kind:
+    | "no-actionable-issues"
+    | "all-batches-applied"
+    | "score-target-met"
+    | "diminishing-returns"
+    | "max-iterations";
+  met: boolean;
+  reason: string;
+}
+
+/** Enriched fix batch with agent-specific metadata */
+export interface EnrichedFixBatch extends FixBatch {
+  /** Estimated score delta from applying this batch */
+  expectedScoreDelta: number;
+  /** Commands to run after applying this batch */
+  verificationCommands: string[];
+}
+
 /** Agent report with actionable findings and fix batches */
 export interface AgentReport {
   /** Only high-confidence, actionable findings */
   actionableIssues: Issue[];
   /** Grouped fix batches for sequential execution */
   fixBatches: FixBatch[];
+  /** Enriched fix batches with score deltas and verification commands */
+  enrichedBatches: EnrichedFixBatch[];
   /** Count of issues suppressed */
   suppressedCount: number;
   /** Breakdown of suppression reasons */
@@ -16,4 +38,8 @@ export interface AgentReport {
   executionOrder: string[];
   /** Expected total score improvement */
   expectedScoreImprovement: number;
+  /** Stop conditions — when should the agent stop iterating */
+  stopConditions: StopCondition[];
+  /** Verification steps for the entire report */
+  verificationSteps: string[];
 }

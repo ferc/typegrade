@@ -8,7 +8,7 @@ description: >
   automation, dashboards, or agent workflows that ingest typegrade output.
 type: core
 library: typegrade
-library_version: "0.9.0"
+library_version: "0.10.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/types.ts"
@@ -42,47 +42,54 @@ The JSON output is an `AnalysisResult` object. Here are the stable fields:
 
 ```typescript
 interface AnalysisResult {
+  // --- Mandatory envelope fields (always present) ---
+  analysisSchemaVersion: string;   // e.g. "0.11.0"
+  status: AnalysisStatus;         // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
+  scoreValidity: ScoreValidity;   // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
+  degradedReason?: string;        // Present when status is 'degraded'
+
   mode: 'source' | 'package';
-  scoreProfile: string;
+  scoreProfile: 'source-project' | 'published-declarations';
   projectName: string;
   filesAnalyzed: number;
   timeMs: number;
 
-  // Three global composites (always present)
-  composites: CompositeScore[];
+  // --- Always-present structured fields ---
+  composites: CompositeScore[];      // Three global composites
+  globalScores: GlobalScores;        // Structured access to the same three composites
+  profileInfo: ProfileInfo;          // Detected/overridden profile with confidence
+  packageIdentity: PackageIdentity;  // Always present (both modes)
+  dimensions: DimensionResult[];     // Per-dimension scores
+  topIssues: Issue[];                // Top issues sorted by fixability then severity
 
-  // Domain score (present when domain detected or overridden)
-  domainScore?: DomainScore;
+  // --- Optional layer scores ---
+  domainScore?: DomainScore;       // Present when domain detected or overridden
+  scenarioScore?: ScenarioScore;   // Present when a scenario pack applies
 
-  // Scenario score (present when a scenario pack applies)
-  scenarioScore?: ScenarioScore;
-
-  // Confidence signals
-  confidenceSummary: ConfidenceSummary;
-
-  // Coverage info
-  coverageDiagnostics: CoverageDiagnostics;
-
-  // Per-dimension results
-  dimensions: DimensionResult[];
-
-  // Top issues sorted by severity
-  topIssues: Issue[];
-
-  // Package identity (package mode only)
-  packageIdentity?: PackageIdentity;
-
-  // Evidence summary
+  // --- Optional diagnostics ---
+  confidenceSummary?: ConfidenceSummary;   // Confidence signals
+  coverageDiagnostics?: CoverageDiagnostics; // Coverage and sampling info
   evidenceSummary?: EvidenceSummary;
 
-  // Boundary analysis (source mode only)
-  boundaryQuality?: BoundaryQualityScore;
-  boundarySummary?: BoundarySummary;
-
-  // Autofix summary (agent mode only)
-  autofixSummary?: AutofixSummary;
+  // --- Optional analysis extras ---
+  boundaryQuality?: BoundaryQualityScore;  // Source mode
+  boundarySummary?: BoundarySummary;        // Source mode
+  autofixSummary?: AutofixSummary;          // Agent mode
 }
 ```
+
+### Key envelope fields
+
+- **`status`**: `"complete"` means all dimensions scored normally. `"degraded"`
+  means some dimensions could not be scored (e.g. install failure, missing
+  types) — check `degradedReason` for details. Degraded results no longer
+  emit fake zero scores; instead, affected dimensions are marked as
+  inapplicable.
+- **`scoreValidity`**: Tells you how comparable this result is to others.
+  `"fully-comparable"` means all global composites are reliable.
+  `"not-comparable"` means scores should not be used for cross-package ranking.
+- **`analysisSchemaVersion`**: Use this to detect breaking output changes
+  across typegrade versions.
 
 ### CompositeScore
 
@@ -92,6 +99,29 @@ interface CompositeScore {
   score: number;       // 0-100
   grade: Grade;        // 'A+' | 'A' | 'B' | 'C' | 'D' | 'F'
   confidence: number;  // 0-1
+}
+```
+
+### GlobalScores
+
+```typescript
+interface GlobalScores {
+  consumerApi: CompositeScore;
+  agentReadiness: CompositeScore;
+  typeSafety: CompositeScore;
+}
+```
+
+Provides structured access to the three global composites without searching
+the `composites` array. Equivalent to finding each key in `composites[]`.
+
+### ProfileInfo
+
+```typescript
+interface ProfileInfo {
+  profile: 'library' | 'application' | 'autofix-agent';
+  profileConfidence: number;   // 0-1
+  profileReasons: string[];    // Signals that led to detection
 }
 ```
 
@@ -122,7 +152,18 @@ interface CoverageDiagnostics {
 ### Extract Agent Readiness score
 
 ```bash
+# Via globalScores (preferred — structured access)
+npx typegrade score zod --json | jq '.globalScores.agentReadiness.score'
+
+# Via composites array (also works)
 npx typegrade score zod --json | jq '.composites[] | select(.key=="agentReadiness") | .score'
+```
+
+### Check analysis status before acting on results
+
+```bash
+npx typegrade score some-lib --json | jq '{status: .status, validity: .scoreValidity}'
+# If status is "degraded", check .degradedReason before using scores
 ```
 
 ### Check if a package is undersampled
@@ -143,10 +184,17 @@ npx typegrade analyze . --json | jq '[.dimensions[] | {name: .key, score: .score
 import { analyzeProject, scorePackage, buildFixPlan, computeDiff } from 'typegrade';
 
 const result = analyzeProject('./src');
-const agentReadiness = result.composites.find(c => c.key === 'agentReadiness');
-console.log(`Agent Readiness: ${agentReadiness?.score} (${agentReadiness?.grade})`);
 
-if (result.coverageDiagnostics.undersampled) {
+// Check status before using scores
+if (result.status === 'degraded') {
+  console.warn(`Degraded result: ${result.degradedReason}`);
+}
+
+// Use globalScores for structured access
+const { agentReadiness } = result.globalScores;
+console.log(`Agent Readiness: ${agentReadiness.score} (${agentReadiness.grade})`);
+
+if (result.coverageDiagnostics?.undersampled) {
   console.warn('Result is undersampled — treat as indicative');
 }
 
@@ -160,19 +208,29 @@ const after = scorePackage('my-lib@2.0');
 const diff = computeDiff({ baseline: before, target: after });
 ```
 
-## Confidence-Aware Consumption
+## Status-Aware and Confidence-Aware Consumption
 
-Always check confidence before making decisions:
+Always check `status` and `scoreValidity` before making decisions:
 
 ```typescript
 import { scorePackage } from 'typegrade';
 
 const result = scorePackage('some-lib');
-const ar = result.composites.find(c => c.key === 'agentReadiness');
 
-if (!ar || ar.score === null) {
+// Step 1: Check status — degraded results no longer emit fake zeros
+if (result.status !== 'complete') {
+  console.warn(`Analysis ${result.status}: ${result.degradedReason}`);
+  if (result.scoreValidity === 'not-comparable') {
+    return; // Scores are not usable for ranking
+  }
+}
+
+// Step 2: Check confidence
+const ar = result.globalScores.agentReadiness;
+
+if (ar.score === null) {
   // No score available
-} else if (result.coverageDiagnostics.undersampled) {
+} else if (result.coverageDiagnostics?.undersampled) {
   // Undersampled: score capped at 65, unreliable
 } else if (ar.confidence < 0.5) {
   // Low confidence: treat as directional only
@@ -189,13 +247,13 @@ high scores from limited evidence.
 
 ## Common Mistakes
 
-### CRITICAL — Making blocking decisions on undersampled results
+### CRITICAL — Making blocking decisions on degraded or undersampled results
 
 Wrong:
 
 ```typescript
 const result = scorePackage('micro-util');
-if (result.composites[0].score < 60) {
+if (result.globalScores.consumerApi.score < 60) {
   throw new Error('Unacceptable type quality');
 }
 ```
@@ -204,12 +262,15 @@ Correct:
 
 ```typescript
 const result = scorePackage('micro-util');
-const score = result.composites[0];
-if (result.coverageDiagnostics.undersampled) {
-  console.warn(`Score ${score.score} is from an undersampled package — skipping gate`);
+if (result.status !== 'complete' || result.scoreValidity === 'not-comparable') {
+  console.warn(`Analysis ${result.status}, scores not reliable`);
   return;
 }
-if (score.score < 60) {
+if (result.coverageDiagnostics?.undersampled) {
+  console.warn('Undersampled package — skipping gate');
+  return;
+}
+if (result.globalScores.consumerApi.score < 60) {
   throw new Error('Unacceptable type quality');
 }
 ```

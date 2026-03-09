@@ -1,4 +1,5 @@
 import type { FixBatch, Issue } from "../types.js";
+import type { EnrichedFixBatch } from "./types.js";
 
 /**
  * Group related issues into fix batches for sequential agent execution.
@@ -103,4 +104,39 @@ function computeBatchRisk(issues: Issue[], hasPublicApiChange: boolean): "low" |
 export function computeExecutionOrder(batches: FixBatch[]): string[] {
   // Already sorted by impact/risk in groupFixBatches
   return batches.map((batch) => batch.id);
+}
+
+/**
+ * Enrich fix batches with estimated score deltas and verification commands.
+ */
+export function enrichFixBatches(batches: FixBatch[], issues: Issue[]): EnrichedFixBatch[] {
+  // Build a lookup from issue ID to issue for severity counting
+  const issueById = new Map<string, Issue>();
+  for (const issue of issues) {
+    const id = `${issue.file}:${issue.line}:${issue.column}`;
+    issueById.set(id, issue);
+  }
+
+  return batches.map((batch) => {
+    // Count error and warning issues in this batch
+    let errorCount = 0;
+    let warningCount = 0;
+    for (const issueId of batch.issueIds) {
+      const issue = issueById.get(issueId);
+      if (issue?.severity === "error") {
+        errorCount++;
+      } else if (issue?.severity === "warning") {
+        warningCount++;
+      }
+    }
+
+    // Estimate score delta: errors worth 2 points, warnings worth 1
+    const expectedScoreDelta = Math.min(errorCount * 2 + warningCount, 15);
+
+    return {
+      ...batch,
+      expectedScoreDelta,
+      verificationCommands: ["npx tsc --noEmit"],
+    };
+  });
 }

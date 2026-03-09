@@ -8,7 +8,7 @@ description: >
   Use when evaluating an npm dependency.
 type: core
 library: typegrade
-library_version: "0.9.0"
+library_version: "0.10.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -101,14 +101,16 @@ well-known packages, but override when needed. Valid domains: `validation`,
 | 40-54 | D |
 | 0-39 | F |
 
-### Coverage diagnostics
+### Status and coverage diagnostics
 
-Check `coverageDiagnostics` in JSON output:
+Check `status` and `coverageDiagnostics` in JSON output:
 
-- `undersampled: true` means very few public declarations were found.
-  Scores are capped at 65 and confidence is low.
-- `typesSource: "bundled"` means types ship with the package.
-  `"definitelyTyped"` means they come from `@types/`.
+- `status: "degraded"` means some dimensions could not be scored. Check
+  `degradedReason` for details. Degraded results no longer emit fake zeros.
+- `coverageDiagnostics.undersampled: true` means very few public declarations
+  were found. Scores are capped at 65 and confidence is low.
+- `packageIdentity.typesSource: "bundled"` means types ship with the package.
+  `"@types"` means they come from `@types/`.
 
 ## Common Mistakes
 
@@ -125,7 +127,10 @@ Correct:
 
 ```typescript
 const result = JSON.parse(execSync('npx typegrade score tiny-lib --json').toString());
-if (result.coverageDiagnostics.undersampled) {
+if (result.status === 'degraded') {
+  console.warn(`Degraded: ${result.degradedReason}`);
+}
+if (result.coverageDiagnostics?.undersampled) {
   // Score is capped at 65, confidence is low — treat as indicative only
   console.warn('Undersampled package, score is unreliable');
 }
@@ -163,7 +168,7 @@ Wrong:
 
 ```typescript
 const result = JSON.parse(execSync('npx typegrade score old-lib --json').toString());
-const score = result.composites.find((c: any) => c.key === 'agentReadiness').score;
+const score = result.globalScores.agentReadiness.score;
 // Use score directly in automated decisions
 ```
 
@@ -171,7 +176,7 @@ Correct:
 
 ```typescript
 const result = JSON.parse(execSync('npx typegrade score old-lib --json').toString());
-const ar = result.composites.find((c: any) => c.key === 'agentReadiness');
+const ar = result.globalScores.agentReadiness;
 if (ar.confidence < 0.5) {
   console.warn(`Agent readiness score ${ar.score} has low confidence (${ar.confidence})`);
 }

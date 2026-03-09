@@ -56,6 +56,18 @@ function outputResult(result: AnalysisResult, opts: OutputOptions) {
     pc.isColorSupported = false;
   }
 
+  // Warn about degraded or non-comparable results before main output
+  if (!opts.json) {
+    if (result.status === "degraded") {
+      console.log(
+        pc.yellow(`\u26A0 Analysis degraded: ${result.degradedReason ?? "unknown reason"}`),
+      );
+    }
+    if (result.scoreValidity === "not-comparable") {
+      console.log(pc.yellow("\u26A0 Scores are not comparable to other results"));
+    }
+  }
+
   // Agent mode: emit agent-specific JSON
   if (opts.agent && result.autofixSummary) {
     console.log(renderAgentJson(buildAgentReportFromResult(result)));
@@ -155,7 +167,7 @@ export function runCli() {
       const opts = { ...parentOpts, ...cmdOpts };
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
-      const result = scorePackage(pkg, { domain, noCache });
+      const result = tryScorePackage(pkg, { domain, noCache });
       outputResult(result, toOutputOptions(opts));
     });
 
@@ -295,11 +307,47 @@ export function runCli() {
       if (opts.json) {
         console.log(JSON.stringify(diff, null, 2));
       } else {
+        // Warn about degraded results in the diff
+        if (baselineResult.status === "degraded") {
+          console.log(
+            pc.yellow(
+              `\u26A0 Baseline "${baseline}" is degraded: ${baselineResult.degradedReason ?? "unknown reason"}`,
+            ),
+          );
+        }
+        if (targetResult.status === "degraded") {
+          console.log(
+            pc.yellow(
+              `\u26A0 Target "${target}" is degraded: ${targetResult.degradedReason ?? "unknown reason"}`,
+            ),
+          );
+        }
+        // Note scoreValidity mismatch
+        if (baselineResult.scoreValidity !== targetResult.scoreValidity) {
+          console.log(
+            pc.yellow(
+              `\u26A0 Score validity differs: baseline is ${baselineResult.scoreValidity}, target is ${targetResult.scoreValidity}`,
+            ),
+          );
+        }
         console.log(renderDiffReport(diff));
       }
     });
 
   program.parse();
+}
+
+function tryScorePackage(
+  pkg: string,
+  options: { domain: "auto" | "off" | DomainType; noCache: boolean },
+): AnalysisResult {
+  try {
+    return scorePackage(pkg, options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(pc.red(`Failed to score package "${pkg}": ${message}`));
+    process.exit(1);
+  }
 }
 
 function parseDomainOption(value: string): "auto" | "off" | DomainType {
@@ -397,9 +445,17 @@ function renderSelfAnalysis(
   report: AgentReport,
   applyMode: boolean,
 ): string {
+  const profileLabel = result.profileInfo.profile;
+  const identityLabel =
+    result.packageIdentity.displayName.startsWith(".") ||
+    result.packageIdentity.displayName.startsWith("/")
+      ? null
+      : result.packageIdentity.displayName;
+
   const lines: string[] = [
     "",
     pc.bold("  typegrade self-analyze"),
+    `  Profile: ${profileLabel}${identityLabel ? ` | Package: ${identityLabel}` : ""}`,
     "",
     pc.bold("  Current Scores:"),
   ];

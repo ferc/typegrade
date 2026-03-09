@@ -418,6 +418,111 @@ function runTrainGates(): GateResult[] {
     }),
   );
 
+  // Gate 19: Self-analysis — run typegrade on its own source and check minimum scores.
+  // This ensures the tool's own codebase meets a baseline quality bar. Failing here
+  // means the tool cannot credibly analyze other projects.
+  gates.push(
+    runGate("self-analysis-quality", () => {
+      const { success, output } = execCheck(
+        "node dist/bin.js analyze . --json --profile library",
+        projectRoot,
+        120_000,
+      );
+      if (!success) {
+        return { detail: `Self-analysis failed: ${output.slice(0, 200)}`, passed: false };
+      }
+      try {
+        const result = JSON.parse(output);
+        const status = result.status ?? "unknown";
+        if (status === "invalid-input" || status === "unsupported-package") {
+          return { detail: `Self-analysis status: ${status}`, passed: false };
+        }
+        const composites = result.composites as { key: string; score: number | null }[] | undefined;
+        if (!composites) {
+          return { detail: "No composites in self-analysis", passed: false };
+        }
+        const consumerApi = composites.find((comp) => comp.key === "consumerApi")?.score ?? 0;
+        const typeSafety = composites.find((comp) => comp.key === "typeSafety")?.score ?? 0;
+        const minScore = 40;
+        const details = `consumerApi=${consumerApi}, typeSafety=${typeSafety}`;
+        if (consumerApi < minScore || typeSafety < minScore) {
+          return { detail: `Below ${minScore}: ${details}`, passed: false };
+        }
+        return { detail: details, passed: true };
+      } catch {
+        return { detail: "Failed to parse self-analysis JSON", passed: false };
+      }
+    }),
+  );
+
+  // Gate 20: Agent-loop coherence — verify self-analyze produces a valid agent report
+  // with consistent stop conditions, fix batches, and no structural anomalies.
+  gates.push(
+    runGate("agent-loop-coherence", () => {
+      const { success, output } = execCheck(
+        "node dist/bin.js self-analyze . --json",
+        projectRoot,
+        120_000,
+      );
+      if (!success) {
+        return { detail: `Self-analyze failed: ${output.slice(0, 200)}`, passed: false };
+      }
+      try {
+        const report = JSON.parse(output);
+        const issues: string[] = [];
+
+        // Check required fields exist (JSON uses "issues" not "actionableIssues")
+        if (!Array.isArray(report.issues)) {
+          issues.push("missing issues");
+        }
+        if (!Array.isArray(report.fixBatches)) {
+          issues.push("missing fixBatches");
+        }
+        if (!Array.isArray(report.stopConditions)) {
+          issues.push("missing stopConditions");
+        }
+        if (!Array.isArray(report.verificationSteps)) {
+          issues.push("missing verificationSteps");
+        }
+
+        // Check stop conditions are well-formed
+        const stops = report.stopConditions as { kind: string; met: boolean; reason: string }[] | undefined;
+        if (stops && stops.length > 0) {
+          for (const sc of stops) {
+            if (!sc.kind || typeof sc.met !== "boolean" || !sc.reason) {
+              issues.push(`malformed stop condition: ${JSON.stringify(sc).slice(0, 80)}`);
+            }
+          }
+        }
+
+        // Check fix batch consistency: every batch should have a title and risk
+        const batches = report.fixBatches as { title: string; risk: string }[] | undefined;
+        if (batches) {
+          for (const batch of batches) {
+            if (!batch.title || !batch.risk) {
+              issues.push("fix batch missing title or risk");
+              break;
+            }
+          }
+        }
+
+        // Check suppression count is non-negative
+        if (typeof report.suppressedCount === "number" && report.suppressedCount < 0) {
+          issues.push("negative suppressedCount");
+        }
+
+        if (issues.length > 0) {
+          return { detail: issues.join("; "), passed: false };
+        }
+        const batchCount = batches?.length ?? 0;
+        const issueCount = (report.issues as unknown[])?.length ?? 0;
+        return { detail: `${issueCount} issues, ${batchCount} batches, coherent`, passed: true };
+      } catch {
+        return { detail: "Failed to parse agent report JSON", passed: false };
+      }
+    }),
+  );
+
   return gates;
 }
 

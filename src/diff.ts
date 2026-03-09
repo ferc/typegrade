@@ -102,6 +102,76 @@ function findResolvedIssues(opts: { baseline: AnalysisResult; target: AnalysisRe
   );
 }
 
+/** Find issues that exist in both but worsened (severity escalated) */
+function findWorsenedIssues(opts: { baseline: AnalysisResult; target: AnalysisResult }): Issue[] {
+  const severityRank: Record<string, number> = { error: 2, info: 0, warning: 1 };
+  const baselineByFingerprint = new Map<string, Issue>();
+  for (const issue of opts.baseline.topIssues) {
+    baselineByFingerprint.set(issueFingerprint(issue), issue);
+  }
+
+  const worsened: Issue[] = [];
+  for (const targetIssue of opts.target.topIssues) {
+    const fp = issueFingerprint(targetIssue);
+    const baselineIssue = baselineByFingerprint.get(fp);
+    if (
+      baselineIssue &&
+      (severityRank[targetIssue.severity] ?? 0) > (severityRank[baselineIssue.severity] ?? 0)
+    ) {
+      worsened.push(targetIssue);
+    }
+  }
+
+  return worsened;
+}
+
+/** Compute average confidence drift between baseline and target */
+function computeConfidenceDrift(opts: {
+  baseline: AnalysisResult;
+  target: AnalysisResult;
+}): number {
+  const baseConf = opts.baseline.confidenceSummary;
+  const targetConf = opts.target.confidenceSummary;
+  if (!baseConf || !targetConf) {
+    return 0;
+  }
+
+  const baseAvg =
+    (baseConf.graphResolution +
+      baseConf.domainInference +
+      baseConf.sampleCoverage +
+      baseConf.scenarioApplicability) /
+    4;
+  const targetAvg =
+    (targetConf.graphResolution +
+      targetConf.domainInference +
+      targetConf.sampleCoverage +
+      targetConf.scenarioApplicability) /
+    4;
+
+  return Math.round((targetAvg - baseAvg) * 100) / 100;
+}
+
+/** Compute boundary coverage delta between baseline and target */
+function computeBoundaryCoverageDelta(opts: {
+  baseline: AnalysisResult;
+  target: AnalysisResult;
+}): number {
+  const baseCoverage = opts.baseline.boundarySummary?.boundaryCoverage ?? 0;
+  const targetCoverage = opts.target.boundarySummary?.boundaryCoverage ?? 0;
+  return Math.round((targetCoverage - baseCoverage) * 100) / 100;
+}
+
+/** Check if degraded result rate increased */
+function checkDegradedRateIncrease(opts: {
+  baseline: AnalysisResult;
+  target: AnalysisResult;
+}): boolean {
+  const baselineDegraded = opts.baseline.status === "degraded";
+  const targetDegraded = opts.target.status === "degraded";
+  return !baselineDegraded && targetDegraded;
+}
+
 // --- Summary Generation ---
 
 /** Generate a human-readable summary of the diff */
@@ -185,9 +255,13 @@ export function computeDiff(opts: {
   const dimensionDiffs = diffDimensions(opts);
   const newIssues = findNewIssues(opts);
   const resolvedIssues = findResolvedIssues(opts);
+  const worsenedIssues = findWorsenedIssues(opts);
+  const confidenceDrift = computeConfidenceDrift(opts);
+  const boundaryCoverageDelta = computeBoundaryCoverageDelta(opts);
+  const degradedRateIncreased = checkDegradedRateIncrease(opts);
   const summary = buildSummary({ compositeDiffs, newIssues, resolvedIssues });
 
-  return {
+  const result: DiffResult = {
     baseline: opts.baseline,
     compositeDiffs,
     dimensionDiffs,
@@ -195,7 +269,20 @@ export function computeDiff(opts: {
     resolvedIssues,
     summary,
     target: opts.target,
+    worsenedIssues,
   };
+
+  if (confidenceDrift !== 0) {
+    result.confidenceDrift = confidenceDrift;
+  }
+  if (boundaryCoverageDelta !== 0) {
+    result.boundaryCoverageDelta = boundaryCoverageDelta;
+  }
+  if (degradedRateIncreased) {
+    result.degradedRateIncreased = true;
+  }
+
+  return result;
 }
 
 // --- Rendering ---
@@ -283,6 +370,35 @@ export function renderDiffReport(diff: DiffResult): string {
       lines.push(`    ${pc.dim(`... and ${diff.resolvedIssues.length - 10} more`)}`);
     }
     lines.push("");
+  }
+
+  // Worsened issues
+  if (diff.worsenedIssues.length > 0) {
+    lines.push(pc.bold(`  Worsened Issues (${diff.worsenedIssues.length}):`));
+    for (const issue of diff.worsenedIssues.slice(0, 5)) {
+      const loc = issue.file ? `${issue.file}:${issue.line}` : "";
+      lines.push(`    ${pc.yellow("\u26A0")}  ${pc.dim(loc)} \u2014 ${issue.message}`);
+    }
+    lines.push("");
+  }
+
+  // Confidence and boundary coverage
+  if (diff.confidenceDrift !== undefined && diff.confidenceDrift !== 0) {
+    const driftStr =
+      diff.confidenceDrift > 0
+        ? pc.green(`+${diff.confidenceDrift}`)
+        : pc.red(`${diff.confidenceDrift}`);
+    lines.push(`  Confidence drift: ${driftStr}`);
+  }
+  if (diff.boundaryCoverageDelta !== undefined && diff.boundaryCoverageDelta !== 0) {
+    const coverageStr =
+      diff.boundaryCoverageDelta > 0
+        ? pc.green(`+${diff.boundaryCoverageDelta}`)
+        : pc.red(`${diff.boundaryCoverageDelta}`);
+    lines.push(`  Boundary coverage: ${coverageStr}`);
+  }
+  if (diff.degradedRateIncreased) {
+    lines.push(`  ${pc.red("Analysis degraded in target result")}`);
   }
 
   // Summary

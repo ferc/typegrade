@@ -105,6 +105,28 @@ Some benchmark packages may be undersampled (few public declarations, fallback g
 - **Undersampled packages** get confidence caps and should not be used as strong ranking anchors.
 - **Fallback glob packages** have confidence capped at 0.55.
 
+## Self-referential gates
+
+Two additional gates validate typegrade's own output quality:
+
+### self-analysis-quality
+
+Runs typegrade on its own codebase and checks that minimum scores are met:
+- `consumerApi` >= 40
+- `typeSafety` >= 40
+
+This ensures the tool's own type quality does not regress below acceptable thresholds.
+
+### agent-loop-coherence
+
+Validates that the `self-analyze` agent report has a consistent structure. Checks that the report contains:
+- `issues` — detected type quality issues
+- `fixBatches` — grouped fix recommendations
+- `stopConditions` — criteria for halting the agent loop
+- `verificationSteps` — steps to verify applied fixes
+
+This gate prevents structural regressions in the agent-facing output format.
+
 ## Benchmark artifacts
 
 Each benchmark run saves per-package results to `benchmarks/results/`. Each result includes:

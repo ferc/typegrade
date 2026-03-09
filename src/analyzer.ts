@@ -3,6 +3,7 @@ import {
   type AnalysisMode,
   type AnalysisProfile,
   type AnalysisResult,
+  type AnalysisStatus,
   type CompositeScore,
   type ConfidenceSummary,
   type CoverageDiagnostics,
@@ -17,8 +18,10 @@ import {
   type Grade,
   type Issue,
   type PackageAnalysisContext,
+  type PackageIdentity,
   type ScenarioScore,
   type ScoreComparability,
+  type ScoreValidity,
   type SuppressionEntry,
 } from "./types.js";
 import { type DomainType, detectDomain } from "./domain.js";
@@ -269,25 +272,41 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
   const filesAnalyzed = sourceFiles.length;
 
-  // No source files -> score 0
+  // No source files -> degraded result
   if (filesAnalyzed === 0) {
     const timeMs = Math.round(performance.now() - startTime);
+    const emptyComposites: CompositeScore[] = [
+      { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: 0 },
+      { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: 0 },
+      { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: 0 },
+      { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
+    ];
     return {
+      analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
       caveats: [],
-      composites: [
-        { grade: "N/A", key: "agentReadiness", rationale: ["No files found"], score: 0 },
-        { grade: "N/A", key: "consumerApi", rationale: ["No files found"], score: 0 },
-        { grade: "N/A", key: "typeSafety", rationale: ["No files found"], score: 0 },
-        { grade: "N/A", key: "implementationQuality", rationale: ["No files found"], score: null },
-      ],
+      composites: emptyComposites,
       dedupStats: { filesRemoved: 0, groups: 0 },
+      degradedReason: "No source files found to analyze",
       dimensions: [],
       filesAnalyzed: 0,
+      globalScores: buildGlobalScores(emptyComposites),
       graphStats,
       mode,
+      packageIdentity: {
+        displayName: projectName,
+        resolvedSpec: absolutePath,
+        resolvedVersion: null,
+      },
+      profileInfo: {
+        profile: isPackageMode ? "package" : "library",
+        profileConfidence: 0,
+        profileReasons: ["No files analyzed"],
+      },
       projectName,
       scoreComparability: "global",
       scoreProfile: isPackageMode ? "published-declarations" : "source-project",
+      scoreValidity: "not-comparable",
+      status: "degraded",
       timeMs,
       topIssues: [
         {
@@ -637,6 +656,31 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // --- Fixability score ---
   const fixabilityScore = computeFixabilityScore(dimensions);
 
+  // --- Compute analysis status and score validity ---
+  const isUndersampled = coverageDiagnostics.undersampled;
+  const isFallbackGlob = usedFallbackGlob;
+  const analysisStatus: AnalysisStatus = isUndersampled ? "degraded" : "complete";
+  let scoreValidity: ScoreValidity = "fully-comparable";
+  if (isFallbackGlob || isUndersampled) {
+    scoreValidity = "partially-comparable";
+  }
+  const degradedReason: string | undefined = isUndersampled
+    ? `Undersampled: ${coverageDiagnostics.undersampledReasons.join("; ")}`
+    : undefined;
+
+  // --- Build package identity ---
+  const packageIdentity: PackageIdentity = options?.packageContext
+    ? {
+        displayName: options.packageContext.packageName,
+        resolvedSpec: options.packageContext.packageRoot,
+        resolvedVersion: null,
+      }
+    : {
+        displayName: projectName,
+        resolvedSpec: absolutePath,
+        resolvedVersion: null,
+      };
+
   const result: AnalysisResult = {
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     caveats,
@@ -653,15 +697,22 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     globalScores,
     graphStats,
     mode,
+    packageIdentity,
     profileInfo,
     projectName,
     roleBreakdown: computeRoleBreakdown(centralityWeights),
     scenarioScore,
     scoreComparability,
     scoreProfile: isPackageMode ? "published-declarations" : "source-project",
+    scoreValidity,
+    status: analysisStatus,
     timeMs,
     topIssues,
   };
+
+  if (degradedReason) {
+    result.degradedReason = degradedReason;
+  }
 
   if (boundarySummary) {
     result.boundarySummary = boundarySummary;

@@ -7,7 +7,7 @@ description: >
   and avoiding false failures. Use when adding typegrade to a CI pipeline.
 type: core
 library: typegrade
-library_version: "0.9.0"
+library_version: "0.10.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
@@ -51,7 +51,7 @@ jobs:
 - name: Score and gate
   run: |
     npx typegrade analyze . --json > typegrade-report.json
-    SCORE=$(jq -r '.composites[] | select(.key=="agentReadiness") | .score' typegrade-report.json)
+    SCORE=$(jq -r '.globalScores.agentReadiness.score' typegrade-report.json)
     if [ "$SCORE" -lt 70 ]; then
       echo "Agent Readiness score $SCORE is below threshold 70"
       exit 1
@@ -81,9 +81,15 @@ Scores the tarball as a consumer would see it (package mode, 8 dimensions).
 ```bash
 #!/bin/bash
 RESULT=$(npx typegrade analyze . --json)
-SCORE=$(echo "$RESULT" | jq -r '.composites[] | select(.key=="agentReadiness") | .score')
-COVERAGE=$(echo "$RESULT" | jq -r '.confidenceSummary.sampleCoverage')
-UNDERSAMPLED=$(echo "$RESULT" | jq -r '.coverageDiagnostics.undersampled')
+STATUS=$(echo "$RESULT" | jq -r '.status')
+SCORE=$(echo "$RESULT" | jq -r '.globalScores.agentReadiness.score')
+COVERAGE=$(echo "$RESULT" | jq -r '.confidenceSummary.sampleCoverage // 0')
+UNDERSAMPLED=$(echo "$RESULT" | jq -r '.coverageDiagnostics.undersampled // false')
+
+if [ "$STATUS" != "complete" ]; then
+  echo "Warning: analysis status is $STATUS, skipping gate"
+  exit 0
+fi
 
 if [ "$UNDERSAMPLED" = "true" ]; then
   echo "Warning: undersampled project, score $SCORE is unreliable"
@@ -126,12 +132,17 @@ Correct:
 ```yaml
 - run: |
     RESULT=$(npx typegrade analyze . --json)
-    UNDERSAMPLED=$(echo "$RESULT" | jq -r '.coverageDiagnostics.undersampled')
+    STATUS=$(echo "$RESULT" | jq -r '.status')
+    if [ "$STATUS" = "degraded" ]; then
+      echo "Degraded analysis — skipping gate"
+      exit 0
+    fi
+    UNDERSAMPLED=$(echo "$RESULT" | jq -r '.coverageDiagnostics.undersampled // false')
     if [ "$UNDERSAMPLED" = "true" ]; then
       echo "Undersampled — skipping gate"
       exit 0
     fi
-    SCORE=$(echo "$RESULT" | jq -r '.composites[] | select(.key=="agentReadiness") | .score')
+    SCORE=$(echo "$RESULT" | jq -r '.globalScores.agentReadiness.score')
     [ "$SCORE" -ge 70 ] || exit 1
 ```
 

@@ -1,5 +1,13 @@
 import type { GraphStats } from "./graph/types.js";
 
+// --- Analysis Status ---
+
+/** Status of the analysis result */
+export type AnalysisStatus = "complete" | "degraded" | "invalid-input" | "unsupported-package";
+
+/** How comparable the scores in this result are */
+export type ScoreValidity = "fully-comparable" | "partially-comparable" | "not-comparable";
+
 // --- Applicability ---
 
 /** Whether a dimension is meaningful for a given library */
@@ -102,7 +110,13 @@ export type SuppressionCategory =
   | "non-applicable-boundary"
   | "low-evidence"
   | "ambiguous-ownership"
-  | "expected-generic-density";
+  | "expected-generic-density"
+  | "self-referential-false-positive"
+  | "lexical-only-match"
+  | "non-applicable-dimension"
+  | "scenario-domain-ambiguity"
+  | "expected-domain-complexity"
+  | "internal-tooling-pattern";
 
 // --- Export Roles ---
 
@@ -149,6 +163,12 @@ export interface PackageIdentity {
   displayName: string;
   resolvedSpec: string;
   resolvedVersion: string | null;
+  /** How types are provided */
+  typesSource?: "bundled" | "@types" | "mixed" | "unknown";
+  /** Module system of the package */
+  moduleKind?: "esm" | "cjs" | "dual" | "unknown";
+  /** How entrypoints were resolved */
+  entrypointStrategy?: "exports-map" | "types-field" | "main-field" | "fallback-glob" | "unknown";
 }
 
 // --- Evidence Summary ---
@@ -424,6 +444,14 @@ export interface BenchmarkDiagnostics {
 }
 
 export interface AnalysisResult {
+  /** Analysis schema version — always present */
+  analysisSchemaVersion: string;
+  /** Status of the analysis */
+  status: AnalysisStatus;
+  /** How comparable these scores are to other results */
+  scoreValidity: ScoreValidity;
+  /** If degraded, why */
+  degradedReason?: string;
   mode: AnalysisMode;
   scoreProfile: "source-project" | "published-declarations";
   projectName: string;
@@ -433,8 +461,12 @@ export interface AnalysisResult {
   dimensions: DimensionResult[];
   caveats: string[];
   topIssues: Issue[];
-  /** Structured global scores for JSON output */
-  globalScores?: GlobalScores;
+  /** Structured global scores — always present */
+  globalScores: GlobalScores;
+  /** Analysis profile — always present */
+  profileInfo: ProfileInfo;
+  /** Resolved package identity — always present */
+  packageIdentity: PackageIdentity;
   /** Domain-adjusted score, only comparable within domain */
   domainScore?: DomainScore | undefined;
   /** Scenario-based score from benchmark apps */
@@ -459,8 +491,6 @@ export interface AnalysisResult {
   /** Coverage diagnostics — reachable files, positions, undersampling */
   coverageDiagnostics?: CoverageDiagnostics;
   explainability?: ExplainabilityReport;
-  /** Resolved package identity (name, version, spec) */
-  packageIdentity?: PackageIdentity;
   /** Summary of evidence quality across scoring layers */
   evidenceSummary?: EvidenceSummary;
   /** Role breakdown of exported declarations */
@@ -470,8 +500,6 @@ export interface AnalysisResult {
     scenarioPack: string;
     failures: { scenario: string; expected: string; actual: string }[];
   };
-  /** Analysis profile used for this run */
-  profileInfo?: ProfileInfo;
   /** Boundary analysis summary */
   boundarySummary?: BoundarySummary;
   /** Autofix-agent summary with actionable issues and fix batches */
@@ -488,8 +516,6 @@ export interface AnalysisResult {
   boundaryReport?: BoundaryReport;
   /** Verification plan for post-fix validation */
   verificationPlan?: VerificationPlan;
-  /** Analysis schema version */
-  analysisSchemaVersion?: string;
 }
 
 export interface PrecisionFeatures {
@@ -792,11 +818,21 @@ export interface LayerViolation {
   violationType: "forbidden-cross-layer" | "infra-bypass" | "unstable-leak" | "trust-zone-crossing";
 }
 
+/** Summary of monorepo health derived from violation analysis */
+export interface MonorepoHealthSummary {
+  totalPackages: number;
+  totalViolations: number;
+  violationsByType: Record<string, number>;
+  healthScore: number;
+  healthGrade: Grade;
+}
+
 /** Monorepo analysis report */
 export interface MonorepoReport {
   packages: MonorepoPackageInfo[];
   violations: LayerViolation[];
   layerGraph: Record<string, string[]>;
+  healthSummary?: MonorepoHealthSummary;
 }
 
 /** Package info within a monorepo */
@@ -817,6 +853,13 @@ export interface DiffResult {
   dimensionDiffs: DimensionDiff[];
   newIssues: Issue[];
   resolvedIssues: Issue[];
+  worsenedIssues: Issue[];
+  /** Confidence drift between baseline and target */
+  confidenceDrift?: number;
+  /** Boundary coverage change */
+  boundaryCoverageDelta?: number;
+  /** Whether degraded-result rate increased */
+  degradedRateIncreased?: boolean;
   summary: string;
 }
 
@@ -855,4 +898,4 @@ export interface VerificationCommand {
 // --- Analysis Schema ---
 
 /** Current schema version for analysis output */
-export const ANALYSIS_SCHEMA_VERSION = "0.9.0";
+export const ANALYSIS_SCHEMA_VERSION = "0.11.0";

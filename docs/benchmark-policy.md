@@ -50,7 +50,7 @@ Assertions that watch for specific regression patterns (e.g., a solid-tier libra
 
 ## Gate system
 
-Two gates run at different stages:
+Four gates run at different stages:
 
 ### Train gate (`pnpm gate:train`)
 
@@ -69,6 +69,20 @@ Runs against the eval corpus. Checks:
 - Score compression and domain/scenario overreach.
 
 **Runs on main branch only** — builder agents never see raw eval results.
+
+### Self-analysis-quality gate
+
+Runs typegrade on its own codebase and asserts minimum composite scores:
+- `consumerApi` >= 40
+- `typeSafety` >= 40
+
+Ensures the tool's own type quality does not regress.
+
+### Agent-loop-coherence gate
+
+Validates the `self-analyze` agent report structure. Checks that the report contains the required fields: `issues`, `fixBatches`, `stopConditions`, and `verificationSteps`.
+
+Prevents structural regressions in agent-facing output.
 
 ## Judge system (`pnpm benchmark:judge`)
 

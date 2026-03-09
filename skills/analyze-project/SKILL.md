@@ -8,7 +8,7 @@ description: >
   undersampled results. Use when running typegrade on a local codebase.
 type: core
 library: typegrade
-library_version: "0.9.0"
+library_version: "0.10.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -97,7 +97,10 @@ Override when the heuristic misclassifies. Valid domains: `validation`,
 npx typegrade analyze . --json
 ```
 
-Returns an `AnalysisResult` object. See the `consume-json` skill for field details.
+Returns an `AnalysisResult` object with mandatory envelope fields: `status`,
+`scoreValidity`, `analysisSchemaVersion`, `globalScores`, `profileInfo`, and
+`packageIdentity`. Degraded results use `status: "degraded"` instead of fake
+zero scores. See the `consume-json` skill for field details.
 
 ### Agent-optimized output
 
@@ -187,8 +190,11 @@ Correct:
 
 ```typescript
 const result = JSON.parse(execSync('npx typegrade analyze . --json').toString());
-const composite = result.composites[0];
-if (composite.score < 60 && result.confidenceSummary.sampleCoverage >= 0.5) {
+if (result.status !== 'complete') {
+  console.warn(`Analysis degraded: ${result.degradedReason}`);
+}
+const composite = result.globalScores.consumerApi;
+if (composite.score < 60 && (result.confidenceSummary?.sampleCoverage ?? 0) >= 0.5) {
   throw new Error('Type quality too low');
 }
 // If sampleCoverage < 0.5, the score is indicative only

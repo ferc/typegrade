@@ -1,5 +1,21 @@
 import type { AnalysisProfile, Issue, SuppressionCategory, SuppressionEntry } from "../types.js";
-import { PROFILE_SUPPRESSION_CONFIGS, type SuppressionConfig } from "./types.js";
+import {
+  PROFILE_SUPPRESSION_CONFIGS,
+  type SuppressionConfig,
+  type SuppressionContext,
+} from "./types.js";
+
+const LEXICAL_PATTERNS = [/naming convention/i, /inconsistent case/i];
+
+const INTERNAL_TOOLING_PATTERNS = [/[/\\]scripts[/\\]/, /[/\\]tools[/\\]/, /\.config\./];
+
+const EXPECTED_COMPLEXITY_DOMAINS = new Set(["schema", "stream"]);
+
+/** Options for the suppression engine */
+export interface ApplySuppressionOptions {
+  configOverride?: Partial<SuppressionConfig>;
+  context?: SuppressionContext;
+}
 
 /**
  * Apply suppressions to a list of issues based on the profile config.
@@ -10,19 +26,20 @@ import { PROFILE_SUPPRESSION_CONFIGS, type SuppressionConfig } from "./types.js"
 export function applySuppressions(
   issues: Issue[],
   profile: AnalysisProfile,
-  configOverride?: Partial<SuppressionConfig>,
+  options?: ApplySuppressionOptions,
 ): { filtered: Issue[]; suppressions: SuppressionEntry[] } {
   const baseConfig: SuppressionConfig = PROFILE_SUPPRESSION_CONFIGS[profile];
-  const config: SuppressionConfig = configOverride
-    ? { ...baseConfig, ...configOverride }
+  const config: SuppressionConfig = options?.configOverride
+    ? { ...baseConfig, ...options.configOverride }
     : baseConfig;
+  const context = options?.context;
 
   const filtered: Issue[] = [];
   const suppressions: SuppressionEntry[] = [];
 
   for (let idx = 0; idx < issues.length; idx++) {
     const issue = issues[idx]!;
-    const suppression = evaluateSuppression(issue, config);
+    const suppression = evaluateSuppression(issue, config, context);
 
     if (suppression) {
       suppressions.push({
@@ -47,6 +64,7 @@ export function applySuppressions(
 function evaluateSuppression(
   issue: Issue,
   config: SuppressionConfig,
+  context?: SuppressionContext,
 ): { category: SuppressionCategory; reason: string; confidence: number } | null {
   // Low confidence suppression
   if (
@@ -94,6 +112,75 @@ function evaluateSuppression(
       category: "non-applicable-boundary",
       confidence: 0.7,
       reason: "Config boundary warning — low risk in context",
+    };
+  }
+
+  // Self-referential false positive: issue file is the project's own declaration file
+  if (
+    config.suppressSelfReferential &&
+    context?.selfDeclarationFile &&
+    issue.file === context.selfDeclarationFile
+  ) {
+    return {
+      category: "self-referential-false-positive",
+      confidence: 0.9,
+      reason: "Issue in project's own declaration file — self-referential false positive",
+    };
+  }
+
+  // Lexical-only match: issue is purely about naming/style
+  if (config.suppressLexicalOnly) {
+    for (const pattern of LEXICAL_PATTERNS) {
+      if (pattern.test(issue.message)) {
+        return {
+          category: "lexical-only-match",
+          confidence: 0.85,
+          reason: `Lexical-only finding: ${issue.message.slice(0, 80)}`,
+        };
+      }
+    }
+  }
+
+  // Non-applicable dimension: issue comes from a dimension marked as not applicable
+  if (config.suppressNonApplicable && context?.dimensions) {
+    const dimEntry = context.dimensions.find((dd) => dd.key === issue.dimension);
+    if (
+      dimEntry &&
+      (dimEntry.applicability === "not_applicable" ||
+        dimEntry.applicability === "insufficient_evidence")
+    ) {
+      return {
+        category: "non-applicable-dimension",
+        confidence: 0.8,
+        reason: `Dimension "${issue.dimension}" is ${dimEntry.applicability}`,
+      };
+    }
+  }
+
+  // Internal tooling pattern: issue in scripts/, tools/, or .config. files
+  if (config.suppressInternalTooling) {
+    for (const pattern of INTERNAL_TOOLING_PATTERNS) {
+      if (pattern.test(issue.file)) {
+        return {
+          category: "internal-tooling-pattern",
+          confidence: 0.75,
+          reason: `Issue in internal tooling file: ${issue.file}`,
+        };
+      }
+    }
+  }
+
+  // Expected domain complexity: surface complexity in domains known for it
+  if (
+    config.suppressExpectedComplexity &&
+    context?.domain &&
+    EXPECTED_COMPLEXITY_DOMAINS.has(context.domain) &&
+    /surface complexity/i.test(issue.message)
+  ) {
+    return {
+      category: "expected-domain-complexity",
+      confidence: 0.7,
+      reason: `Expected complexity in ${context.domain} domain`,
     };
   }
 

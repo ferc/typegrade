@@ -183,7 +183,7 @@ For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 
 ## Benchmark proof
 
-`typegrade` is validated against a corpus of 24 npm packages (as of 2026-03-09) spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins. All 18 train gates pass at 100% must-pass, 100% domain accuracy, and 0% fallback glob rate.
+`typegrade` is validated against a corpus of 24 npm packages (as of 2026-03-09) spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins. All 20 train gates pass (as of 2026-03-09) at 100% must-pass, 100% domain accuracy, and 0% fallback glob rate.
 
 Run benchmarks yourself:
 
@@ -213,10 +213,25 @@ Returns an `AnalysisResult` with:
 
 ```jsonc
 {
-  "analysisSchemaVersion": "0.8.0",
+  "analysisSchemaVersion": "0.11.0",
+  "status": "complete",
+  "scoreValidity": "fully-comparable",
   "mode": "package",
   "scoreProfile": "published-declarations",
   "projectName": "zod",
+  "packageIdentity": {
+    "displayName": "zod",
+    "resolvedSpec": "zod@3.24.2",
+    "resolvedVersion": "3.24.2",
+    "typesSource": "bundled",
+    "moduleKind": "esm",
+    "entrypointStrategy": "exports-map"
+  },
+  "profileInfo": {
+    "profile": "package",
+    "profileConfidence": 1.0,
+    "profileReasons": ["explicit-score-command"]
+  },
   "filesAnalyzed": 12,
   "timeMs": 1800,
   "globalScores": {

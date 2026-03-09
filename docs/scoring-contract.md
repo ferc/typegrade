@@ -239,7 +239,7 @@ Scored rule engine with five rule categories:
 
 Output: `domain`, `confidence`, `falsePositiveRisk`, `matchedRules`, `adjustments`.
 
-Supported domains: validation, result, router, orm, schema, stream, frontend, utility, general.
+Supported domains (12): validation, result, utility, router, orm, schema, frontend, stream, state, testing, cli, general.
 
 ## Scenario packs
 
@@ -338,6 +338,29 @@ score = clamp(0, 100, score)
 | `rationale` | Human-readable explanation of the score components |
 
 When no boundaries are detected, the score is 0 with grade `N/A` — indicating the metric is not applicable rather than a failure.
+
+## Suppression Categories
+
+Issues can be suppressed using one of 13 categories. Suppressions are profile-aware — the applicable categories vary depending on the active profile (`library`, `package`, `application`, or `autofix-agent`).
+
+| Category | Description |
+|----------|-------------|
+| `trusted-local-tooling` | Issue originates in local tooling code that is not part of the public surface |
+| `dependency-owned-opaque` | Issue is caused by opaque types owned by a dependency |
+| `generated-artifact` | Issue occurs in generated code (codegen output, compiled assets) |
+| `benchmark-self-referential` | Issue is a false positive from the tool analyzing its own benchmark fixtures |
+| `non-applicable-boundary` | Boundary rule does not apply to the detected boundary type |
+| `low-evidence` | Issue is based on insufficient evidence to be actionable |
+| `ambiguous-ownership` | Ownership of the problematic code is unclear (shared between packages) |
+| `expected-generic-density` | High generic density is expected for this kind of library |
+| `self-referential-false-positive` | Self-analysis false positive (tool scoring itself) |
+| `lexical-only-match` | Issue triggered by lexical matching without structural confirmation |
+| `non-applicable-dimension` | Dimension is not meaningful for this profile or domain |
+| `scenario-domain-ambiguity` | Scenario pack matched ambiguously across domains |
+| `expected-domain-complexity` | Domain-inherent complexity that should not penalize the score |
+| `internal-tooling-pattern` | Pattern is idiomatic for internal tooling and should not be flagged |
+
+Suppressions are configured via `typegrade.config.ts` or applied programmatically through `applySuppressions()`.
 
 ## Zero-file behavior
 

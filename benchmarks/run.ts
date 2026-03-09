@@ -465,6 +465,46 @@ async function main() {
     }
   }
 
+  // === New Benchmark Gates (generalization plan) ===
+
+  // Degraded result rate
+  const degradedResults = entries.filter((en) => en.result.status === "degraded");
+  const degradedRate = entries.length > 0 ? degradedResults.length / entries.length : 0;
+  if (degradedResults.length > 0) {
+    console.log(`\n=== Degraded Results (${degradedResults.length}/${entries.length}) ===\n`);
+    for (const en of degradedResults) {
+      console.log(`  ${en.name}: ${en.result.degradedReason ?? "unknown reason"}`);
+    }
+  }
+
+  // Schema consistency check
+  const schemaVersions = new Set(entries.map((en) => en.result.analysisSchemaVersion));
+  const schemaConsistent = schemaVersions.size <= 1;
+  if (!schemaConsistent) {
+    console.log(`\nWARNING: Multiple schema versions detected: ${[...schemaVersions].join(", ")}`);
+  }
+
+  // Domain abstention rate (packages where domain was "general" despite expected domain)
+  let domainAbstentionRate = 0;
+  if (domainTotal > 0) {
+    domainAbstentionRate = domainAbstained / domainTotal;
+  }
+
+  // Issue noise rate (issues with low confidence or non-source ownership)
+  let totalIssues = 0;
+  let noisyIssues = 0;
+  for (const entry of entries) {
+    for (const issue of entry.result.topIssues) {
+      totalIssues++;
+      const isLowConfidence = issue.confidence !== undefined && issue.confidence < 0.5;
+      const isNonSourceOwned = issue.ownership !== undefined && issue.ownership !== "source-owned";
+      if (isLowConfidence || isNonSourceOwned) {
+        noisyIssues++;
+      }
+    }
+  }
+  const issueNoiseRate = totalIssues > 0 ? noisyIssues / totalIssues : 0;
+
   // Determine output directory based on split
   const isEvalSplit = corpusSplit === "eval-fixed" || corpusSplit === "eval-pool";
   const resultsBaseDir = isEvalSplit
@@ -525,6 +565,14 @@ async function main() {
       correct: domainCorrect,
       total: domainTotal,
       wrongSpecificRate: Math.round(wrongSpecificRate * 1000) / 1000,
+    },
+    qualityGates: {
+      degradedRate: Math.round(degradedRate * 1000) / 1000,
+      degradedResultCount: degradedResults.length,
+      domainAbstentionRate: Math.round(domainAbstentionRate * 1000) / 1000,
+      issueNoiseRate: Math.round(issueNoiseRate * 1000) / 1000,
+      schemaConsistent,
+      schemaVersions: [...schemaVersions],
     },
     installFailures: installFailures.length > 0 ? installFailures : undefined,
     manifestSource: manifestFilename,

@@ -1,1 +1,5 @@
-export { analyzeMonorepo, classifyPackageLayer } from "./analyzer.js";
+export {
+  analyzeMonorepo,
+  classifyPackageLayer,
+  detectCrossPackageBoundaryIssues,
+} from "./analyzer.js";

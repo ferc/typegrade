@@ -12,7 +12,8 @@ export { comparePackages } from "./compare.js";
 export type { CompareResult, CompareOptions } from "./compare.js";
 
 // Agent and profile APIs
-export { buildAgentReport, renderAgentJson } from "./agent/index.js";
+export { buildAgentReport, enrichFixBatches, renderAgentJson } from "./agent/index.js";
+export type { AgentReport, EnrichedFixBatch, StopCondition } from "./agent/index.js";
 export { detectProfile, gatherProfileSignals } from "./profiles/index.js";
 export { resolveFileOwnership } from "./ownership/index.js";
 export {
@@ -47,6 +48,7 @@ export type {
   AnalysisMode,
   AnalysisProfile,
   AnalysisResult,
+  AnalysisStatus,
   Applicability,
   AutofixSummary,
   BoundaryHotspot,
@@ -86,6 +88,7 @@ export type {
   Issue,
   LayerViolation,
   MonorepoConfig,
+  MonorepoHealthSummary,
   MonorepoPackageInfo,
   MonorepoReport,
   OwnershipClass,
@@ -98,6 +101,7 @@ export type {
   ScenarioScore,
   ScenarioVariant,
   ScoreComparability,
+  ScoreValidity,
   SuggestedFixKind,
   SuppressionCategory,
   SuppressionEntry,

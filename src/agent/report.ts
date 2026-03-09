@@ -1,6 +1,6 @@
+import type { AgentReport, StopCondition } from "./types.js";
 import type { AnalysisResult, AutofixSummary, Issue } from "../types.js";
-import { computeExecutionOrder, groupFixBatches } from "./fix-batch.js";
-import type { AgentReport } from "./types.js";
+import { computeExecutionOrder, enrichFixBatches, groupFixBatches } from "./fix-batch.js";
 
 /**
  * Build an agent-oriented report from an analysis result.
@@ -56,16 +56,28 @@ export function buildAgentReport(
   const fixBatches = groupFixBatches(actionableIssues);
   const executionOrder = computeExecutionOrder(fixBatches);
 
+  // Enrich batches with score deltas and verification commands
+  const enrichedBatches = enrichFixBatches(fixBatches, actionableIssues);
+
   // Estimate total score improvement
   const expectedScoreImprovement = estimateScoreImprovement(actionableIssues, allIssues.length);
 
+  // Compute stop conditions
+  const stopConditions = computeStopConditions(actionableIssues, expectedScoreImprovement);
+
+  // Default verification steps for the entire report
+  const verificationSteps = ["npx tsc --noEmit", "npx vitest run", "npx typegrade analyze --json"];
+
   return {
     actionableIssues,
+    enrichedBatches,
     executionOrder,
     expectedScoreImprovement,
     fixBatches,
+    stopConditions,
     suppressedCount,
     suppressionReasons,
+    verificationSteps,
   };
 }
 
@@ -112,6 +124,40 @@ function computeSuppressionBreakdown(
     .toSorted((lhs, rhs) => rhs.count - lhs.count);
 }
 
+function computeStopConditions(
+  actionableIssues: Issue[],
+  expectedScoreImprovement: number,
+): StopCondition[] {
+  return [
+    {
+      kind: "no-actionable-issues",
+      met: actionableIssues.length === 0,
+      reason:
+        actionableIssues.length === 0
+          ? "No actionable issues remain"
+          : `${actionableIssues.length} actionable issue(s) remain`,
+    },
+    {
+      kind: "diminishing-returns",
+      met: expectedScoreImprovement < 2,
+      reason:
+        expectedScoreImprovement < 2
+          ? `Expected improvement (${expectedScoreImprovement}) is below threshold of 2`
+          : `Expected improvement of ${expectedScoreImprovement} points`,
+    },
+    {
+      kind: "all-batches-applied",
+      met: false,
+      reason: "No batches have been applied yet",
+    },
+    {
+      kind: "score-target-met",
+      met: false,
+      reason: "No score target defined",
+    },
+  ];
+}
+
 function estimateScoreImprovement(actionableIssues: Issue[], totalIssueCount: number): number {
   if (totalIssueCount === 0) {
     return 0;
@@ -134,12 +180,15 @@ export function renderAgentJson(report: AgentReport): string {
   return JSON.stringify(
     {
       actionableIssueCount: report.actionableIssues.length,
+      enrichedBatches: report.enrichedBatches,
       executionOrder: report.executionOrder,
       expectedScoreImprovement: report.expectedScoreImprovement,
       fixBatches: report.fixBatches,
       issues: report.actionableIssues,
+      stopConditions: report.stopConditions,
       suppressedCount: report.suppressedCount,
       suppressionReasons: report.suppressionReasons,
+      verificationSteps: report.verificationSteps,
     },
     null,
     2,

@@ -1,5 +1,5 @@
-import type { OwnershipClass } from "../types.js";
-import type { OwnershipResolution } from "./types.js";
+import type { Issue, OwnershipClass } from "../types.js";
+import type { IssueOwnershipResolution, OwnershipResolution } from "./types.js";
 
 const GENERATED_FILE_PATTERNS = [
   /\.generated\./,
@@ -12,6 +12,19 @@ const GENERATED_FILE_PATTERNS = [
   /\.pb\.ts$/,
   /\.swagger\./,
   /openapi.*\.ts$/i,
+  /\.output\./,
+  /\.compiled\./,
+  /dist\//,
+  /build\//,
+  /__snapshots__/,
+  /\.trpc\./,
+];
+
+const WORKSPACE_PATTERNS = [
+  /[/\\]packages[/\\]([^/\\]+)[/\\]/,
+  /[/\\]apps[/\\]([^/\\]+)[/\\]/,
+  /[/\\]libs[/\\]([^/\\]+)[/\\]/,
+  /[/\\]modules[/\\]([^/\\]+)[/\\]/,
 ];
 
 const NODE_MODULES_PATTERN = /[/\\]node_modules[/\\]/;
@@ -53,8 +66,21 @@ export function resolveFileOwnership(filePath: string, projectRoot: string): Own
     }
   }
 
-  // Source-owned: file is under project root and not in node_modules
+  // Workspace-internal: file matches a workspace package pattern under the project root
   if (filePath.startsWith(projectRoot)) {
+    for (const pattern of WORKSPACE_PATTERNS) {
+      const match = pattern.exec(filePath);
+      if (match?.[1]) {
+        return {
+          confidence: 0.95,
+          ownershipClass: "source-owned",
+          reason: `Workspace package: ${match[1]}`,
+          workspacePackage: match[1],
+        };
+      }
+    }
+
+    // Source-owned: file is under project root and not in node_modules
     return {
       confidence: 0.9,
       ownershipClass: "source-owned",
@@ -135,6 +161,54 @@ export function classifyBulkOwnership(resolutions: OwnershipResolution[]): Owner
 
   // Mixed
   return "mixed";
+}
+
+/**
+ * Dependency type patterns that may appear in issue messages,
+ * indicating a dependency type is leaking into source-owned code.
+ */
+const DEPENDENCY_TYPE_LEAK_PATTERNS = [
+  { name: "express", pattern: /\bExpress\.(Request|Response|NextFunction|Router|Handler)\b/ },
+  { name: "react", pattern: /\bReact\.(ReactNode|ReactElement|FC|Component|Context)\b/ },
+  { name: "koa", pattern: /\bKoa\.(Context|Request|Response|Middleware)\b/ },
+  { name: "fastify", pattern: /\bFastify(Request|Reply|Instance|Plugin)\b/ },
+  { name: "prisma", pattern: /\bPrisma\.\w+/ },
+  { name: "zod", pattern: /\bZod(Type|Schema|Object|String|Number|Array)\b/ },
+  { name: "mongoose", pattern: /\bMongoose\.(Document|Model|Schema)\b/ },
+  { name: "typeorm", pattern: /\bTypeORM\.\w+/ },
+  { name: "trpc", pattern: /\bTRPC\w*\b/ },
+  { name: "next", pattern: /\bNext(Request|Response|ApiRequest|ApiResponse|Page)\b/ },
+];
+
+/**
+ * Resolve ownership for an issue, combining file ownership with content analysis.
+ *
+ * If the issue's message mentions a dependency type (like "Express.Request"),
+ * classify the issue as "dependency-owned" even if the file is source-owned.
+ * This handles the case where opaque dependency types leak into source-owned code.
+ */
+export function resolveIssueOwnership(issue: Issue, projectRoot: string): IssueOwnershipResolution {
+  const fileOwnership = resolveFileOwnership(issue.file, projectRoot);
+
+  // Only check for dependency type leaks in source-owned files
+  if (fileOwnership.ownershipClass === "source-owned") {
+    for (const dep of DEPENDENCY_TYPE_LEAK_PATTERNS) {
+      const match = dep.pattern.exec(issue.message);
+      if (match) {
+        return {
+          ...fileOwnership,
+          confidence: 0.7,
+          dependencyPackage: dep.name,
+          dependencyTypeLeak: true,
+          leakedTypeName: match[0],
+          ownershipClass: "dependency-owned",
+          reason: `Dependency type leak: ${match[0]} from ${dep.name}`,
+        };
+      }
+    }
+  }
+
+  return fileOwnership;
 }
 
 function extractDependencyName(filePath: string): string {

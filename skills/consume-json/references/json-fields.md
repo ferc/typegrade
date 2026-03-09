@@ -4,20 +4,26 @@
 
 | Field | Type | Presence | Description |
 |---|---|---|---|
+| `analysisSchemaVersion` | `string` | Always | Schema version (e.g. `"0.11.0"`) |
+| `status` | `AnalysisStatus` | Always | `'complete' \| 'degraded' \| 'invalid-input' \| 'unsupported-package'` |
+| `scoreValidity` | `ScoreValidity` | Always | `'fully-comparable' \| 'partially-comparable' \| 'not-comparable'` |
+| `degradedReason` | `string` | When degraded | Why the analysis is degraded |
 | `mode` | `'source' \| 'package'` | Always | Analysis mode |
-| `scoreProfile` | `string` | Always | Score profile used |
+| `scoreProfile` | `string` | Always | `'source-project' \| 'published-declarations'` |
 | `projectName` | `string` | Always | Project or package name |
 | `filesAnalyzed` | `number` | Always | Number of declaration files analyzed |
 | `timeMs` | `number` | Always | Analysis duration in milliseconds |
 | `composites` | `CompositeScore[]` | Always | Three global composite scores |
+| `globalScores` | `GlobalScores` | Always | Structured global scores (same data as composites) |
+| `profileInfo` | `ProfileInfo` | Always | Detected profile with confidence |
+| `packageIdentity` | `PackageIdentity` | Always | Package or project identity |
+| `dimensions` | `DimensionResult[]` | Always | Per-dimension scores |
+| `topIssues` | `Issue[]` | Always | Top issues sorted by fixability then severity |
 | `domainScore` | `DomainScore` | When detected | Domain-adjusted score |
 | `scenarioScore` | `ScenarioScore` | When applicable | Scenario benchmark score |
-| `confidenceSummary` | `ConfidenceSummary` | Always | Confidence signals |
-| `coverageDiagnostics` | `CoverageDiagnostics` | Always | Coverage and sampling info |
-| `dimensions` | `DimensionResult[]` | Always | Per-dimension scores |
-| `topIssues` | `Issue[]` | Always | Top issues by severity |
-| `packageIdentity` | `PackageIdentity` | Package mode | Package resolution details |
-| `evidenceSummary` | `EvidenceSummary` | Always | Evidence strength breakdown |
+| `confidenceSummary` | `ConfidenceSummary` | When available | Confidence signals |
+| `coverageDiagnostics` | `CoverageDiagnostics` | When available | Coverage and sampling info |
+| `evidenceSummary` | `EvidenceSummary` | When available | Evidence strength breakdown |
 | `graphStats` | `object` | Always | Declaration graph statistics |
 | `boundaryQuality` | `BoundaryQualityScore` | Source mode | Boundary trust score |
 | `boundarySummary` | `BoundarySummary` | Source mode | Boundary validation summary |
@@ -31,6 +37,22 @@
 | `score` | `number \| null` | Score 0-100, null if not computable |
 | `grade` | `Grade` | Letter grade (A+, A, B, C, D, F) |
 | `confidence` | `number` | Confidence 0-1 |
+
+## GlobalScores
+
+| Field | Type | Description |
+|---|---|---|
+| `consumerApi` | `CompositeScore` | Consumer API composite |
+| `agentReadiness` | `CompositeScore` | Agent Readiness composite |
+| `typeSafety` | `CompositeScore` | Type Safety composite |
+
+## ProfileInfo
+
+| Field | Type | Description |
+|---|---|---|
+| `profile` | `string` | `'library' \| 'application' \| 'autofix-agent'` |
+| `profileConfidence` | `number` | Detection confidence (0-1) |
+| `profileReasons` | `string[]` | Signals that led to profile detection |
 
 ## DimensionResult
 
@@ -95,7 +117,10 @@
 |---|---|---|
 | `displayName` | `string` | Human-readable package name |
 | `resolvedSpec` | `string` | Resolved npm specifier |
-| `resolvedVersion` | `string` | Resolved semver version |
+| `resolvedVersion` | `string \| null` | Resolved semver version (null for source mode) |
+| `typesSource` | `string` | `'bundled' \| '@types' \| 'mixed' \| 'unknown'` (optional) |
+| `moduleKind` | `string` | `'esm' \| 'cjs' \| 'dual' \| 'unknown'` (optional) |
+| `entrypointStrategy` | `string` | How entrypoints were resolved (optional) |
 
 ## Dimension Keys
 

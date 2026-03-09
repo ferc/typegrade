@@ -32,6 +32,15 @@ export interface DomainRule {
   score: number;
 }
 
+/** Signal counts broken down by evidence category */
+export interface DomainEvidenceBreakdown {
+  exportRoleSignals: number;
+  typeShapeSignals: number;
+  scenarioTriggerSignals: number;
+  builderPatternSignals: number;
+  packageMetadataSignals: number;
+}
+
 export interface DomainInference {
   domain: DomainType;
   confidence: number;
@@ -41,11 +50,15 @@ export interface DomainInference {
   suppressedIssues?: string[];
   adjustments?: DomainAdjustment[];
   ambiguityGap: number;
+  /** 0 = unambiguous, 1 = very ambiguous */
+  domainAmbiguity: number;
   runnerUpDomain: DomainType;
   /** Secondary domain candidates with scores */
-  secondaryDomains?: { domain: DomainType; score: number; confidence: number }[];
+  secondaryDomains: { domain: DomainType; score: number; confidence: number }[];
   /** Evidence classes that contributed to the inference */
-  evidenceClasses?: string[];
+  evidenceClasses: string[];
+  /** Breakdown of evidence quality by category */
+  domainEvidence?: DomainEvidenceBreakdown;
 }
 
 // ─── Internal rule emission ─────────────────────────────────────────────────
@@ -57,6 +70,49 @@ interface RuleEmission {
   reason: string;
   domain: string;
   category: DomainRule["category"];
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Count interfaces/classes where 3+ methods return `this` or the parent type */
+function countFluentBuilders(surface: PublicSurface): number {
+  let count = 0;
+  for (const decl of surface.declarations) {
+    if (decl.kind !== "interface" && decl.kind !== "class") {
+      continue;
+    }
+    const methods = decl.methods ?? [];
+    if (methods.length < 3) {
+      continue;
+    }
+    const parentName = decl.name.toLowerCase();
+    const fluentCount = countFluentMethods(methods, parentName);
+    if (fluentCount >= 3) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/** Count methods whose return type is `this` or the parent type name */
+function countFluentMethods(
+  methods: { positions: { role: string; type: { getText(): string } }[] }[],
+  parentName: string,
+): number {
+  let ct = 0;
+  for (const method of methods) {
+    const returnPos = method.positions.find((ps) => ps.role === "return");
+    if (!returnPos) {
+      continue;
+    }
+    const returnText = returnPos.type.getText().toLowerCase();
+    const isFluent =
+      returnText === "this" || returnText === parentName || returnText.startsWith(`${parentName}<`);
+    if (isFluent) {
+      ct++;
+    }
+  }
+  return ct;
 }
 
 // ─── Rule engine ────────────────────────────────────────────────────────────
@@ -380,6 +436,49 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       weight: cliSignal,
     });
     signals.push(`${cliMatchCount} declarations match CLI patterns`);
+  }
+
+  // 2i: Builder pattern — fluent builder detection (methods returning `this` or same type)
+  // Strengthens ORM, CLI, state, and query builder detection
+  {
+    const builderPatternCount = countFluentBuilders(surface);
+    if (builderPatternCount >= 1) {
+      // Emit for domains that commonly use fluent builder patterns
+      const builderDomains = ["orm", "cli", "state", "stream"];
+      for (const bd of builderDomains) {
+        const existing = scores[bd] ?? 0;
+        // Only boost domains that already have some evidence
+        if (existing > 0) {
+          const weight =
+            0.15 *
+            (packageNameMatchedDomain && packageNameMatchedDomain !== bd
+              ? competingDomainPenalty
+              : 1);
+          emit({
+            category: "declaration-role",
+            direction: "positive",
+            domain: bd,
+            reason: `${builderPatternCount} interfaces/classes with fluent builder pattern (3+ methods returning self)`,
+            ruleId: "builder-pattern-fluent",
+            weight,
+          });
+        }
+      }
+      // Always emit a general builder signal for detection tracking
+      if (!builderDomains.some((bd) => (scores[bd] ?? 0) > 0)) {
+        emit({
+          category: "declaration-role",
+          direction: "positive",
+          domain: "general",
+          reason: `${builderPatternCount} interfaces/classes with fluent builder pattern (3+ methods returning self)`,
+          ruleId: "builder-pattern-fluent",
+          weight: 0.05,
+        });
+      }
+      signals.push(
+        `${builderPatternCount} fluent builder patterns detected (3+ methods returning self)`,
+      );
+    }
   }
 
   // ── Category 3: Generic-structure rules ─────────────────────────────────
@@ -994,15 +1093,69 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
       score: Math.round(sc * 100) / 100,
     }));
 
+  // ── Compute domain ambiguity ──────────────────────────────────────────
+  // 0 = unambiguous (large gap), 1 = very ambiguous (no gap)
+
+  const domainAmbiguity = Math.max(0, Math.min(1, 1 - ambiguityGap));
+
+  // ── Compute domain evidence breakdown ─────────────────────────────────
+  // Count emissions by evidence category
+
+  let exportRoleSignals = 0;
+  let typeShapeSignals = 0;
+  let scenarioTriggerSignals = 0;
+  let builderPatternSignals = 0;
+  let packageMetadataSignals = 0;
+
+  for (const em of emissions) {
+    if (em.direction === "negative") {
+      continue;
+    }
+    switch (em.category) {
+      case "declaration-role": {
+        if (em.ruleId === "builder-pattern-fluent") {
+          builderPatternSignals++;
+        } else {
+          exportRoleSignals++;
+        }
+        break;
+      }
+      case "generic-structure": {
+        typeShapeSignals++;
+        break;
+      }
+      case "scenario-trigger": {
+        scenarioTriggerSignals++;
+        break;
+      }
+      case "package-name": {
+        packageMetadataSignals++;
+        break;
+      }
+    }
+  }
+
+  const domainEvidence: DomainEvidenceBreakdown = {
+    builderPatternSignals,
+    exportRoleSignals,
+    packageMetadataSignals,
+    scenarioTriggerSignals,
+    typeShapeSignals,
+  };
+
   // ── Build result ────────────────────────────────────────────────────────
 
   const result: DomainInference = {
     ambiguityGap,
     confidence,
     domain: bestDomain,
+    domainAmbiguity,
+    domainEvidence,
+    evidenceClasses,
     falsePositiveRisk,
     matchedRules,
     runnerUpDomain,
+    secondaryDomains,
     signals,
   };
 
@@ -1012,14 +1165,6 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
 
   if (adjustments.length > 0) {
     result.adjustments = adjustments;
-  }
-
-  if (secondaryDomains.length > 0) {
-    result.secondaryDomains = secondaryDomains;
-  }
-
-  if (evidenceClasses.length > 0) {
-    result.evidenceClasses = evidenceClasses;
   }
 
   return result;

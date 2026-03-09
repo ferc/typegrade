@@ -9,7 +9,7 @@ description: >
   in agent-driven refactoring or self-improvement loops.
 type: core
 library: typegrade
-library_version: "0.9.0"
+library_version: "0.10.0"
 sources:
   - "ferc/typegrade:src/cli.ts"
   - "ferc/typegrade:src/agent/report.ts"
@@ -71,12 +71,15 @@ Returns an `AgentReport` with:
 
 ```typescript
 interface AgentReport {
-  scores: CompositeScore[];
   actionableIssues: Issue[];
-  suppressedCount: number;
-  expectedScoreImprovement: number;
   fixBatches: FixBatch[];
-  suppressionReasons: SuppressionReason[];
+  enrichedBatches: EnrichedFixBatch[];  // Batches with score deltas and verification
+  suppressedCount: number;
+  suppressionReasons: { category: string; count: number }[];
+  executionOrder: string[];             // Suggested batch execution order (batch IDs)
+  expectedScoreImprovement: number;
+  stopConditions: StopCondition[];      // When the agent should stop iterating
+  verificationSteps: string[];          // Commands to verify the entire report
 }
 
 interface FixBatch {
@@ -86,6 +89,18 @@ interface FixBatch {
   requiresHumanReview: boolean;
   issues: Issue[];
 }
+
+interface EnrichedFixBatch extends FixBatch {
+  expectedScoreDelta: number;      // Estimated score delta from this batch
+  verificationCommands: string[];  // Commands to run after applying this batch
+}
+
+interface StopCondition {
+  kind: 'no-actionable-issues' | 'all-batches-applied' | 'score-target-met'
+      | 'diminishing-returns' | 'max-iterations';
+  met: boolean;
+  reason: string;
+}
 ```
 
 ### Iterative improvement workflow
@@ -94,13 +109,19 @@ interface FixBatch {
 # Step 1: Analyze and identify fix batches
 npx typegrade self-analyze . --json > report.json
 
-# Step 2: Apply low-risk fixes first
+# Step 2: Follow the suggested execution order
+jq '.executionOrder' report.json
+
+# Step 3: Apply low-risk fixes first
 jq '.fixBatches[] | select(.risk=="low")' report.json
 
-# Step 3: Re-analyze to verify improvement
+# Step 4: Check stop conditions before continuing
+jq '.stopConditions[] | select(.met==true)' report.json
+
+# Step 5: Re-analyze to verify improvement
 npx typegrade self-analyze .
 
-# Step 4: Move to medium-risk fixes with human review
+# Step 6: Move to medium-risk fixes with human review
 jq '.fixBatches[] | select(.risk=="medium")' report.json
 ```
 
@@ -147,13 +168,17 @@ runtime behavior.
 
 ## Understanding Suppressions
 
-Some issues are suppressed based on the analysis profile. The suppression
-breakdown shows why:
+Some issues are suppressed based on the analysis profile. There are 13
+suppression categories. Common ones in agent reports:
 
-- **false-positive** — The issue pattern is not actually a problem in context.
-- **profile-exempt** — The profile (autofix-agent) excludes this issue category.
-- **low-confidence** — Not enough evidence to be actionable.
-- **already-mitigated** — The codebase already handles this through other means.
+- **dependency-owned-opaque** — Issue in dependency-owned code, not fixable locally.
+- **generated-artifact** — Issue in generated code (e.g. `.generated.ts`).
+- **low-evidence** — Not enough evidence to be actionable.
+- **non-applicable-dimension** — Dimension does not apply to this codebase.
+- **trusted-local-tooling** — Issue in trusted local tooling code.
+- **ambiguous-ownership** — Ownership could not be determined.
+- **self-referential-false-positive** — Self-referential pattern, not a real issue.
+- **expected-domain-complexity** — Complexity expected for this domain.
 
 ## Common Mistakes
 

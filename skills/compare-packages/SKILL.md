@@ -8,7 +8,7 @@ description: >
   dependencies.
 type: core
 library: typegrade
-library_version: "0.9.0"
+library_version: "0.10.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
@@ -135,15 +135,17 @@ Correct:
 
 ```bash
 npx typegrade compare lib-a lib-b --json | jq '.comparison | {
-  first_confidence: .first.confidenceSummary.sampleCoverage,
-  second_confidence: .second.confidenceSummary.sampleCoverage
+  first_confidence: .first.confidenceSummary.sampleCoverage // 0,
+  second_confidence: .second.confidenceSummary.sampleCoverage // 0,
+  first_status: .first.status,
+  second_status: .second.status
 }'
-# If either has low confidence, a 2-point delta is noise
+# If either has low confidence or degraded status, a 2-point delta is noise
 ```
 
 Small deltas (under 5 points) are often within confidence margins. Check
-`confidenceSummary.sampleCoverage` for both packages before acting on
-narrow differences.
+`confidenceSummary.sampleCoverage` and `status` for both packages before
+acting on narrow differences.
 
 ### MEDIUM — Using compare for source-vs-package evaluation
 

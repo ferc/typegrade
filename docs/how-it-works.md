@@ -27,6 +27,51 @@ Package mode analyzes published `.d.ts` declarations — what consumers and AI a
 4. Run the 8 consumer-facing analyzers. The 4 implementation dimensions are disabled.
 5. Compute composites, domain scores, and scenario scores.
 
+## Result schema
+
+### Status and validity
+
+Every `AnalysisResult` carries two top-level discriminators:
+
+- **`AnalysisStatus`**: `complete | degraded | invalid-input | unsupported-package` — whether the analysis ran to completion.
+- **`ScoreValidity`**: `fully-comparable | partially-comparable | not-comparable` — whether the scores can be meaningfully compared to other results.
+
+### Mandatory fields
+
+The following fields are always present on every `AnalysisResult`, regardless of status:
+
+- `analysisSchemaVersion` — semver string identifying the result schema.
+- `status` — the `AnalysisStatus` value.
+- `scoreValidity` — the `ScoreValidity` value.
+- `globalScores` — structured global composite scores (Consumer API, Agent Readiness, Type Safety).
+- `profileInfo` — resolved analysis profile and its signals.
+- `packageIdentity` — resolved package name, version, and source metadata.
+
+### Degraded result semantics
+
+When analysis cannot complete normally (e.g., declaration emit fails catastrophically, the package has no usable type surface, or install fails), `typegrade` returns a **degraded result** instead of fabricating zero scores:
+
+- `status` is set to `"degraded"`.
+- `scoreValidity` is set to `"not-comparable"`.
+- `degradedReason` contains a human-readable explanation of why the analysis degraded.
+
+Consumers should check `status` before comparing scores. Degraded results are excluded from ranking and gating by default.
+
+### Ownership classification
+
+Every issue and dimension result can carry an `OwnershipClass` indicating who owns the code where the finding originates:
+
+| Value | Meaning |
+|-------|---------|
+| `source-owned` | Code written and maintained in this project |
+| `dependency-owned` | Code originating from an external dependency |
+| `generated` | Machine-generated code (codegen, build output) |
+| `standard-library-owned` | TypeScript or platform standard library types |
+| `mixed` | Finding spans both owned and external code |
+| `unresolved` | Ownership could not be determined |
+
+Ownership influences fix planning — `source-owned` issues are directly actionable, while `dependency-owned` issues are flagged as `external` fixability.
+
 ## Declaration graph engine
 
 In package mode, `typegrade` does not analyze every `.d.ts` file in a package. Instead, it builds a declaration import graph to score only what consumers can actually reach:
@@ -114,7 +159,7 @@ Domain-specific consumer benchmark tests that measure real downstream DX. Each s
 
 ## Domain inference
 
-`typegrade` detects 9 library domains using a scored rule engine with five rule categories:
+`typegrade` detects 12 library domains using a scored rule engine with five rule categories:
 
 1. **Package name**: direct match against known library names (+0.6).
 2. **Declaration shape**: pattern matching on exported names (route/handler/middleware for routers, model/schema/table for ORMs, etc.).
@@ -124,7 +169,7 @@ Domain-specific consumer benchmark tests that measure real downstream DX. Each s
 
 The winning domain must score >= 0.5. Otherwise, `typegrade` falls back to "utility" (if >50% type aliases) or "general".
 
-**Supported domains**: validation, result, router, orm, schema, stream, frontend, utility, general.
+**Supported domains**: validation, result, router, orm, schema, stream, frontend, state, testing, cli, utility, general.
 
 **Hard rule**: domain inference may suppress false-positive issues (e.g., `unknown` params in validation libraries) but may never directly increase a global score. Domain adjustments only affect the domain-fit score layer.
 
@@ -318,7 +363,12 @@ Violations are classified as:
 | `unstable-leak` | Stable layer depending on an unstable layer |
 | `trust-zone-crossing` | Data flow crossing trust zone boundaries |
 
-The monorepo report includes the package list with layers, all violations, and the layer dependency graph.
+The monorepo report includes the package list with layers, all violations, the layer dependency graph, and an optional `MonorepoHealthSummary` with:
+
+- `healthScore` — numeric score (0-100) reflecting overall monorepo layering health.
+- `healthGrade` — letter grade derived from the health score.
+- `totalViolations` — total count of layer violations across all packages.
+- `violationsByType` — breakdown of violations by type (`forbidden-cross-layer`, `infra-bypass`, `unstable-leak`, `trust-zone-crossing`).
 
 ## Diff command
 
@@ -332,4 +382,8 @@ The type system also supports a `DiffResult` for comparing two analysis runs of 
 - **Dimension diffs**: delta for each individual dimension score.
 - **New issues**: issues present in the target but not the baseline.
 - **Resolved issues**: issues present in the baseline but not the target.
+- **Worsened issues**: issues present in both runs but with increased severity or score impact.
+- **Confidence drift**: aggregate change in composite confidence between baseline and target.
+- **Boundary coverage delta**: change in boundary validation coverage between the two runs.
+- **Degraded rate increased**: flag indicating whether the target has more degraded dimensions than the baseline.
 - **Summary**: human-readable summary of the changes.

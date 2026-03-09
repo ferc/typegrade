@@ -1,12 +1,16 @@
 import type {
+  Grade,
   LayerViolation,
   MonorepoConfig,
+  MonorepoHealthSummary,
   MonorepoPackageInfo,
   MonorepoReport,
   PackageLayer,
 } from "../types.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+
+import { computeGrade } from "../scorer.js";
 
 /** Default allowed layer dependencies (source -> targets) */
 const DEFAULT_ALLOWED_DEPENDENCIES: Record<PackageLayer, PackageLayer[]> = {
@@ -68,6 +72,20 @@ export function analyzeMonorepo(opts: AnalyzeMonorepoOpts): MonorepoReport {
   // Load and classify each package
   const packageMap = new Map<string, MonorepoPackageInfo>();
 
+  // If no workspace packages found, treat root as single package
+  if (workspaceDirs.length === 0) {
+    const rootPackageJsonPath = join(absoluteRoot, "package.json");
+    if (existsSync(rootPackageJsonPath)) {
+      const rootPkg = readJsonFile(rootPackageJsonPath);
+      if (rootPkg) {
+        const name = typeof rootPkg["name"] === "string" ? rootPkg["name"] : absoluteRoot;
+        const layer = classifyPackageLayer({ config, name, packageJson: rootPkg });
+        const dependencies = extractWorkspaceDependencies(rootPkg);
+        packageMap.set(name, { dependencies, layer, name, path: absoluteRoot });
+      }
+    }
+  }
+
   for (const packageDir of workspaceDirs) {
     const packageJsonPath = join(packageDir, "package.json");
     if (!existsSync(packageJsonPath)) {
@@ -94,10 +112,23 @@ export function analyzeMonorepo(opts: AnalyzeMonorepoOpts): MonorepoReport {
   // Build layer graph (layer -> dependent layers)
   const layerGraph = buildLayerGraph(packageMap);
 
-  // Detect violations
-  const violations = detectViolations(packageMap, config);
+  // Detect layer violations
+  const layerViolations = detectViolations(packageMap, config);
+
+  // Detect cross-package boundary (trust-zone) violations
+  const crossPackageViolations = detectCrossPackageBoundaryIssues(packageMap, config);
+
+  // Merge all violations
+  const violations = [...layerViolations, ...crossPackageViolations];
+
+  // Compute health summary
+  const healthSummary = computeHealthSummary({
+    packages: packageMap,
+    violations,
+  });
 
   return {
+    healthSummary,
     layerGraph,
     packages: [...packageMap.values()],
     violations,
@@ -158,6 +189,8 @@ function discoverWorkspacePackages(rootPath: string): string[] {
     if (packageDirs.length > 0) {
       return packageDirs;
     }
+    // Fall through to package.json workspaces when pnpm-workspace.yaml
+    // Exists but yielded no packages
   }
 
   // Try package.json workspaces field (npm/yarn)
@@ -499,6 +532,103 @@ function categorizeViolation(opts: CategorizeViolationOpts): LayerViolation["vio
   }
 
   return "forbidden-cross-layer";
+}
+
+/**
+ * Trust level assigned to each package layer.
+ * Used to detect trust-zone-crossing violations when packages at different
+ * trust levels depend on each other in unsafe directions.
+ */
+const LAYER_TRUST_LEVELS: Record<PackageLayer, number> = {
+  app: 1,
+  data: 3,
+  domain: 4,
+  infra: 2,
+  shared: 5,
+  tooling: 2,
+  ui: 1,
+};
+
+/**
+ * Detect cross-package boundary issues where packages at different trust
+ * levels depend on each other.
+ *
+ * A trust-zone-crossing violation is raised when a higher-trust package
+ * depends on a lower-trust package (trust flows downward: higher number =
+ * more trusted internal code, lower number = closer to external boundaries).
+ */
+export function detectCrossPackageBoundaryIssues(
+  packageMap: Map<string, MonorepoPackageInfo>,
+  _config?: MonorepoConfig,
+): LayerViolation[] {
+  const violations: LayerViolation[] = [];
+  const packageNames = new Set(packageMap.keys());
+
+  for (const [, packageInfo] of packageMap) {
+    const sourceTrust = LAYER_TRUST_LEVELS[packageInfo.layer];
+
+    for (const depName of packageInfo.dependencies) {
+      // Only check workspace-internal dependencies
+      const depInfo = packageNames.has(depName) ? packageMap.get(depName) : undefined;
+      if (!depInfo) {
+        continue;
+      }
+
+      // Same layer — no trust boundary crossing
+      if (depInfo.layer === packageInfo.layer) {
+        continue;
+      }
+
+      const targetTrust = LAYER_TRUST_LEVELS[depInfo.layer];
+
+      // Higher-trust package depending on lower-trust package is a crossing
+      if (sourceTrust > targetTrust) {
+        violations.push({
+          importPath: depName,
+          sourceLayer: packageInfo.layer,
+          sourcePackage: packageInfo.name,
+          targetLayer: depInfo.layer,
+          targetPackage: depName,
+          violationType: "trust-zone-crossing",
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
+interface ComputeHealthSummaryOpts {
+  packages: Map<string, MonorepoPackageInfo>;
+  violations: LayerViolation[];
+}
+
+/**
+ * Compute a health summary for the monorepo based on violation counts.
+ *
+ * healthScore = 100 - (violations.length * 5), clamped to [0, 100].
+ * Grade is derived from healthScore using the standard grade curve.
+ */
+function computeHealthSummary(opts: ComputeHealthSummaryOpts): MonorepoHealthSummary {
+  const { packages, violations } = opts;
+
+  const violationsByType: Record<string, number> = {};
+  for (const violation of violations) {
+    const vt = violation.violationType;
+    violationsByType[vt] = (violationsByType[vt] ?? 0) + 1;
+  }
+
+  const rawScore = 100 - violations.length * 5;
+  const healthScore = Math.max(0, Math.min(100, rawScore));
+  const healthGrade: Grade = computeGrade(healthScore);
+
+  return {
+    healthGrade,
+    healthScore,
+    totalPackages: packages.size,
+    totalViolations: violations.length,
+    violationsByType,
+  };
 }
 
 /**

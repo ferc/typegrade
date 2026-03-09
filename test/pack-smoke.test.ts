@@ -23,6 +23,7 @@ describe("pack smoke test", () => {
       "computeBoundaryQuality",
       "computeDiff",
       "detectProfile",
+      "enrichFixBatches",
       "evaluateBoundaryPolicies",
       "gatherProfileSignals",
       "loadConfig",

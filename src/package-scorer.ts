@@ -1,4 +1,10 @@
-import type { AnalysisResult, PackageAnalysisContext, PackageIdentity } from "./types.js";
+import {
+  ANALYSIS_SCHEMA_VERSION,
+  type AnalysisResult,
+  type AnalysisStatus,
+  type PackageAnalysisContext,
+  type ScoreValidity,
+} from "./types.js";
 import { type AnalyzeOptions, analyzeProject } from "./analyzer.js";
 import { basename, join, resolve } from "node:path";
 import { buildDeclarationGraph, resolveEntrypoints } from "./graph/index.js";
@@ -27,6 +33,179 @@ function makeFallbackGraphStats(): GraphStats {
   };
 }
 
+/**
+ * Detect the module kind from a package.json object.
+ */
+function detectModuleKind(pkgJson: Record<string, unknown>): "esm" | "cjs" | "dual" | "unknown" {
+  const hasExports = Boolean(pkgJson["exports"]);
+  const typeField = pkgJson["type"] as string | undefined;
+  const hasMain = Boolean(pkgJson["main"]);
+  const hasModule = Boolean(pkgJson["module"]);
+
+  if (typeField === "module") {
+    // If it also has a main/require export, it could be dual
+    if (hasMain || (hasExports && hasRequireExport(pkgJson))) {
+      return "dual";
+    }
+    return "esm";
+  }
+  if (typeField === "commonjs" || (!typeField && hasMain && !hasModule)) {
+    return "cjs";
+  }
+  if (hasModule && hasMain) {
+    return "dual";
+  }
+  if (hasExports) {
+    // Exports map with both import and require conditions
+    if (hasImportExport(pkgJson) && hasRequireExport(pkgJson)) {
+      return "dual";
+    }
+    if (hasImportExport(pkgJson)) {
+      return "esm";
+    }
+    if (hasRequireExport(pkgJson)) {
+      return "cjs";
+    }
+  }
+  return "unknown";
+}
+
+function hasRequireExport(pkgJson: Record<string, unknown>): boolean {
+  const { exports } = pkgJson;
+  if (!exports || typeof exports !== "object") {
+    return false;
+  }
+  const str = JSON.stringify(exports);
+  return str.includes('"require"');
+}
+
+function hasImportExport(pkgJson: Record<string, unknown>): boolean {
+  const { exports } = pkgJson;
+  if (!exports || typeof exports !== "object") {
+    return false;
+  }
+  const str = JSON.stringify(exports);
+  return str.includes('"import"');
+}
+
+/**
+ * Detect the entrypoint strategy from resolved entrypoints and package.json.
+ */
+function detectEntrypointStrategy(
+  pkgJson: Record<string, unknown>,
+  entrypointCondition: string | undefined,
+): "exports-map" | "types-field" | "main-field" | "fallback-glob" | "unknown" {
+  if (!entrypointCondition) {
+    return "unknown";
+  }
+  // Conditions from resolveEntrypoints: "types", "typings", "import.types", "require.types", "main", "module", etc.
+  if (entrypointCondition.includes("types") && pkgJson["exports"]) {
+    return "exports-map";
+  }
+  if (entrypointCondition === "types" || entrypointCondition === "typings") {
+    return "types-field";
+  }
+  if (entrypointCondition === "main" || entrypointCondition === "module") {
+    return "main-field";
+  }
+  // Exports-map derived conditions
+  if (entrypointCondition.includes(".")) {
+    return "exports-map";
+  }
+  return "unknown";
+}
+
+/**
+ * Build a degraded AnalysisResult when the package cannot be fully analyzed.
+ * Populates all mandatory fields with safe defaults.
+ */
+function buildDegradedResult(opts: {
+  packageName: string;
+  spec: string;
+  version: string | null;
+  errorMessage: string;
+}): AnalysisResult {
+  const zeroComposite = (key: "consumerApi" | "agentReadiness" | "typeSafety") => ({
+    compositeConfidenceReasons: ["Degraded analysis — scores are not comparable"],
+    confidence: 0,
+    grade: "N/A" as const,
+    key,
+    rationale: [`Degraded: ${opts.errorMessage}`],
+    score: null,
+  });
+  const consumerApi = zeroComposite("consumerApi");
+  const agentReadiness = zeroComposite("agentReadiness");
+  const typeSafety = zeroComposite("typeSafety");
+
+  return {
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
+    caveats: [opts.errorMessage],
+    composites: [consumerApi, agentReadiness, typeSafety],
+    dedupStats: { filesRemoved: 0, groups: 0 },
+    degradedReason: opts.errorMessage,
+    dimensions: [],
+    filesAnalyzed: 0,
+    globalScores: { agentReadiness, consumerApi, typeSafety },
+    graphStats: makeFallbackGraphStats(),
+    mode: "package",
+    packageIdentity: {
+      displayName: opts.packageName,
+      resolvedSpec: opts.spec,
+      resolvedVersion: opts.version,
+    },
+    profileInfo: {
+      profile: "package",
+      profileConfidence: 0,
+      profileReasons: ["Degraded analysis"],
+    },
+    projectName: opts.packageName,
+    scoreComparability: "global",
+    scoreProfile: "published-declarations",
+    scoreValidity: "not-comparable",
+    status: "degraded",
+    timeMs: 0,
+    topIssues: [],
+  };
+}
+
+/**
+ * Check whether an analysis result has all-zero composites and degraded coverage,
+ * indicating a result that should be marked as degraded.
+ */
+function isEffectivelyDegraded(result: AnalysisResult): boolean {
+  const allZeroOrNull = result.composites.every((comp) => comp.score === null || comp.score === 0);
+  if (!allZeroOrNull) {
+    return false;
+  }
+  // Check coverage diagnostics
+  const coverage = result.coverageDiagnostics;
+  if (coverage && (coverage.undersampled || coverage.samplingClass === "undersampled")) {
+    return true;
+  }
+  // Also degrade if zero files were analyzed
+  if (result.filesAnalyzed === 0) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Stamp mandatory status fields on a successful result and enrich PackageIdentity.
+ */
+function stampResultStatus(result: AnalysisResult): void {
+  if (isEffectivelyDegraded(result)) {
+    result.status = "degraded";
+    result.scoreValidity = "not-comparable";
+    result.degradedReason =
+      result.degradedReason ?? "All composite scores are zero with degraded coverage";
+  } else {
+    result.status = result.status ?? ("complete" as AnalysisStatus);
+    result.scoreValidity = result.scoreValidity ?? ("fully-comparable" as ScoreValidity);
+  }
+  // Ensure analysisSchemaVersion is set
+  result.analysisSchemaVersion = result.analysisSchemaVersion ?? ANALYSIS_SCHEMA_VERSION;
+}
+
 function scoreLocalPackage(
   localPath: string,
   pkgJsonPath: string,
@@ -39,11 +218,7 @@ function scoreLocalPackage(
   const hasTypeEntries = Boolean(pkgJson.types || pkgJson.typings || pkgJson.exports);
 
   const resolvedVersion: string | null = pkgJson.version ?? null;
-  const packageIdentity: PackageIdentity = {
-    displayName: packageName,
-    resolvedSpec: localPath,
-    resolvedVersion,
-  };
+  const moduleKind = detectModuleKind(pkgJson);
 
   if (!hasTypeEntries) {
     // No type entrypoints — fall back to analyzing all files
@@ -60,7 +235,15 @@ function scoreLocalPackage(
       },
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },
     });
-    result.packageIdentity = packageIdentity;
+    result.packageIdentity = {
+      displayName: packageName,
+      entrypointStrategy: "fallback-glob",
+      moduleKind,
+      resolvedSpec: localPath,
+      resolvedVersion,
+      typesSource: "unknown",
+    };
+    stampResultStatus(result);
     return result;
   }
 
@@ -69,6 +252,8 @@ function scoreLocalPackage(
   const graph = buildDeclarationGraph(localPath, graphProject);
 
   const entrypoints = resolveEntrypoints(localPath);
+  const entrypointStrategy = detectEntrypointStrategy(pkgJson, entrypoints[0]?.condition);
+
   const packageContext: PackageAnalysisContext = {
     graphStats: graph.stats,
     packageJsonPath: pkgJsonPath,
@@ -91,7 +276,15 @@ function scoreLocalPackage(
   }
 
   const result = analyzeProject(localPath, opts);
-  result.packageIdentity = packageIdentity;
+  result.packageIdentity = {
+    displayName: packageName,
+    entrypointStrategy,
+    moduleKind,
+    resolvedSpec: localPath,
+    resolvedVersion,
+    typesSource: "bundled",
+  };
+  stampResultStatus(result);
   return result;
 }
 
@@ -302,29 +495,46 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     });
     result.packageIdentity = {
       displayName: basename(localPath),
+      entrypointStrategy: "fallback-glob",
+      moduleKind: "unknown",
       resolvedSpec: localPath,
       resolvedVersion: null,
+      typesSource: "unknown",
     };
+    stampResultStatus(result);
     return result;
   }
 
   // Parse name@version spec
   const { name: packageName, version: packageVersion } = parsePackageSpec(nameOrPath);
 
-  // Use cached install
-  const { installRoot, cleanup } = ensureCachedInstall(packageName, packageVersion, {
-    noCache: options?.noCache,
-    typesVersion: options?.typesVersion,
-  });
+  // Use cached install — catch install failures gracefully
+  let cached: { installRoot: string; cleanup: () => void } | undefined = undefined;
+  try {
+    cached = ensureCachedInstall(packageName, packageVersion, {
+      noCache: options?.noCache,
+      typesVersion: options?.typesVersion,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return buildDegradedResult({
+      errorMessage: `Package install failed: ${message}`,
+      packageName,
+      spec: nameOrPath,
+      version: packageVersion === "latest" ? null : packageVersion,
+    });
+  }
 
+  const { installRoot, cleanup } = cached;
   try {
     const pkgDir = join(installRoot, "node_modules", packageName);
 
     // Detect types package
     let typesPackageName: string | undefined = undefined;
+    let pkgJson: Record<string, unknown> = {};
     if (existsSync(pkgDir)) {
-      const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
-      if (!pkgJson.types && !pkgJson.typings && !pkgJson.exports) {
+      pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+      if (!pkgJson["types"] && !pkgJson["typings"] && !pkgJson["exports"]) {
         const candidate = packageName.startsWith("@")
           ? `@types/${packageName.slice(1).replace("/", "__")}`
           : `@types/${packageName}`;
@@ -347,6 +557,16 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
 
     // Resolve first entrypoint for context
     const entrypoints = resolveEntrypoints(effectivePkgDir);
+
+    // Detect module kind and entrypoint strategy from the source package
+    const moduleKind = detectModuleKind(pkgJson);
+    const effectivePkgJson = typesPackageName
+      ? JSON.parse(readFileSync(join(effectivePkgDir, "package.json"), "utf8"))
+      : pkgJson;
+    const entrypointStrategy = detectEntrypointStrategy(
+      effectivePkgJson,
+      entrypoints[0]?.condition,
+    );
 
     // Build package context — graphStats always present
     const targetPkgJsonPath = join(effectivePkgDir, "package.json");
@@ -383,10 +603,14 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     }
     result.packageIdentity = {
       displayName: packageName,
+      entrypointStrategy,
+      moduleKind,
       resolvedSpec: nameOrPath,
       resolvedVersion,
+      typesSource,
     };
 
+    stampResultStatus(result);
     return result;
   } finally {
     cleanup();
