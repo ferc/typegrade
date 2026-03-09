@@ -8,6 +8,7 @@ import {
   markPackageCached,
 } from "./cache.js";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { DomainType } from "./domain.js";
 import type { GraphStats } from "./graph/types.js";
 import { analyzeProject } from "./analyzer.js";
 import { execSync } from "node:child_process";
@@ -29,7 +30,7 @@ function makeFallbackGraphStats(): GraphStats {
 function scoreLocalPackage(
   localPath: string,
   pkgJsonPath: string,
-  domain?: "auto" | "off" | string,
+  domain?: "auto" | "off" | DomainType,
 ): AnalysisResult {
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
   const packageName = pkgJson.name ?? "local-package";
@@ -47,7 +48,7 @@ function scoreLocalPackage(
   if (!hasTypeEntries) {
     // No type entrypoints — fall back to analyzing all files
     const result = analyzeProject(localPath, {
-      domain: domain as any,
+      ...(domain !== undefined && { domain }),
       mode: "package",
       packageContext: {
         graphStats: makeFallbackGraphStats(),
@@ -80,7 +81,7 @@ function scoreLocalPackage(
   };
 
   const opts: Parameters<typeof analyzeProject>[1] = {
-    domain: domain as any,
+    ...(domain !== undefined && { domain }),
     mode: "package",
     packageContext,
     sourceFilesOptions: { includeDts: true, includeNodeModules: true },
@@ -128,7 +129,7 @@ function getTsVersion(): string {
 
 export interface ScorePackageOptions {
   typesVersion?: string;
-  domain?: "auto" | "off" | string;
+  domain?: "auto" | "off" | DomainType;
   /** Disable the package cache (always install fresh) */
   noCache?: boolean;
 }
@@ -277,7 +278,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     }
 
     const result = analyzeProject(localPath, {
-      domain: options?.domain as any,
+      ...(options?.domain !== undefined && { domain: options.domain }),
       mode: "package",
       packageContext: {
         graphStats: makeFallbackGraphStats(),
@@ -351,7 +352,7 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     };
 
     const opts: Parameters<typeof analyzeProject>[1] = {
-      domain: options?.domain as any,
+      ...(options?.domain !== undefined && { domain: options.domain }),
       mode: "package",
       packageContext,
       sourceFilesOptions: { includeDts: true, includeNodeModules: true },

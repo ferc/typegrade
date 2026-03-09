@@ -1,4 +1,4 @@
-import { ModuleKind, ModuleResolutionKind, Project, ScriptTarget } from "ts-morph";
+import { ModuleKind, ModuleResolutionKind, Project, ScriptTarget, type SourceFile } from "ts-morph";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -34,7 +34,7 @@ export interface GetSourceFilesOptions {
   includeNodeModules?: boolean;
 }
 
-export function getSourceFiles(project: Project, options?: GetSourceFilesOptions) {
+export function getSourceFiles(project: Project, options?: GetSourceFilesOptions): SourceFile[] {
   const { includeDts = false, includeNodeModules = false } = options ?? {};
 
   return project.getSourceFiles().filter((sf) => {

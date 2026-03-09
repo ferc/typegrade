@@ -6,6 +6,7 @@ import {
 } from "./utils/format.js";
 import type { AnalysisResult } from "./types.js";
 import { Command } from "commander";
+import type { DomainType } from "./domain.js";
 import { analyzeProject } from "./analyzer.js";
 import pc from "picocolors";
 import { scorePackage } from "./package-scorer.js";
@@ -134,9 +135,9 @@ export function runCli() {
   program.parse();
 }
 
-function parseDomainOption(value: string): "auto" | "off" | string {
+function parseDomainOption(value: string): "auto" | "off" | DomainType {
   if (VALID_DOMAINS.includes(value as (typeof VALID_DOMAINS)[number])) {
-    return value;
+    return value as "auto" | "off" | DomainType;
   }
   console.error(`Invalid domain: ${value}. Valid options: ${VALID_DOMAINS.join(", ")}`);
   process.exit(1);

@@ -16,7 +16,7 @@ export function resolveEntrypoints(pkgDir: string): ResolvedEntrypoint[] {
     return [];
   }
 
-  let pkg: Record<string, unknown> = undefined as unknown as Record<string, unknown>;
+  let pkg: Record<string, unknown> = {};
   try {
     pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
   } catch {

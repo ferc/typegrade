@@ -19,9 +19,8 @@ export function analyzePrecision(
     };
   }
 
-  // Cache by compiler type id
-  const { compilerType } = type as any;
-  const typeId: number | undefined = compilerType?.id;
+  // Cache by compiler type id (internal ts API, not in public ts.Type)
+  const typeId: number | undefined = (type.compilerType as { id?: number }).id;
   if (typeId !== undefined && visited.has(typeId)) {
     return visited.get(typeId)!;
   }
@@ -507,7 +506,7 @@ function analyzeObject(
     // Check for default type parameter via declaration nodes
     const tpDecls = tp.getSymbol()?.getDeclarations() ?? [];
     for (const tpDecl of tpDecls) {
-      if ((tpDecl as any).getDefault?.()) {
+      if (Node.isTypeParameterDeclaration(tpDecl) && tpDecl.getDefault()) {
         hasDefaultGeneric = true;
       }
     }
@@ -608,7 +607,7 @@ function detectAdvancedSyntaxInDecl(decl: Node): string[] {
     if (Node.isMappedTypeNode(node)) {
       features.push("mapped-type");
       // Key remapping: mapped type with `as` clause
-      if ((node as any).getNameTypeNode?.()) {
+      if (node.getNameTypeNode()) {
         features.push("key-remapping");
       }
     }
@@ -658,9 +657,9 @@ function getTypeDeclarations(type: Type): Node[] {
     nodes.push(...symDecls);
   }
   // For instantiated generics, check target type
-  const targetType = (type as any).getTargetType?.();
+  const targetType = type.getTargetType();
   if (targetType) {
-    const targetDecls = targetType.getSymbol?.()?.getDeclarations?.();
+    const targetDecls = targetType.getSymbol()?.getDeclarations();
     if (targetDecls) {
       nodes.push(...targetDecls);
     }

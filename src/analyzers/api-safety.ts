@@ -101,7 +101,7 @@ function pushAnyIssue(pos: SurfacePosition, issues: Issue[]): void {
     return;
   }
 
-  let message: string = undefined as unknown as string;
+  let message = "";
   if (pos.role === "param" && pos.declarationKind === "function") {
     message = `parameter '${pos.name}' in ${pos.declarationName}() leaks 'any'`;
   } else if (pos.role === "return") {

@@ -237,7 +237,8 @@ interface MakePositionOpts {
 function makePosition(opts: MakePositionOpts): SurfacePosition {
   const { node, role, name, declarationName, declarationKind, filePath, weight } = opts;
   const loc = nodeLocation(node);
-  const typed = node as unknown as { getType(): Type; getTypeNode?: () => TypeNode | undefined };
+  const hasType = "getType" in node && typeof node.getType === "function";
+  const hasTypeNode = "getTypeNode" in node && typeof node.getTypeNode === "function";
   return {
     column: loc.column,
     declarationKind,
@@ -247,8 +248,8 @@ function makePosition(opts: MakePositionOpts): SurfacePosition {
     name,
     node,
     role,
-    type: typed.getType(),
-    typeNode: typed.getTypeNode?.(),
+    type: hasType ? (node.getType as () => Type)() : node.getType(),
+    typeNode: hasTypeNode ? (node.getTypeNode as () => TypeNode | undefined)() : undefined,
     weight,
   };
 }
