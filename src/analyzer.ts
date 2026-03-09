@@ -346,11 +346,21 @@ function computeCoverageDiagnostics(opts: {
   surfacePositions: number;
   surfaceDeclarations: number;
   typesSource: "bundled" | "@types" | "mixed" | "unknown";
+  mode: AnalysisMode;
+  hasPackageContext?: boolean;
 }): CoverageDiagnostics {
-  const { graphStats, surfacePositions, surfaceDeclarations, typesSource } = opts;
+  const { graphStats, surfacePositions, surfaceDeclarations, typesSource, mode } = opts;
   const reasons: string[] = [];
 
-  if (graphStats.totalReachable < MIN_REACHABLE_FILES && !graphStats.usedFallbackGlob) {
+  // Graph-based undersampling checks only apply when real graph stats are available —
+  // Source mode and package mode without packageContext use dummy graph stats (WS6)
+  const hasRealGraphStats = mode === "package" && opts.hasPackageContext === true;
+
+  if (
+    hasRealGraphStats &&
+    graphStats.totalReachable < MIN_REACHABLE_FILES &&
+    !graphStats.usedFallbackGlob
+  ) {
     let sourceLabel = "";
     if (typesSource === "@types") {
       sourceLabel = " (@types package)";
@@ -371,10 +381,11 @@ function computeCoverageDiagnostics(opts: {
       `Only ${surfaceDeclarations} public declaration(s) (minimum: ${MIN_MEASURED_DECLARATIONS})`,
     );
   }
-  if (graphStats.usedFallbackGlob) {
+  if (hasRealGraphStats && graphStats.usedFallbackGlob) {
     reasons.push("Graph resolution used fallback glob — entrypoint traversal failed");
   }
   if (
+    hasRealGraphStats &&
     graphStats.totalAfterDedup < MIN_REACHABLE_FILES &&
     graphStats.totalReachable >= MIN_REACHABLE_FILES
   ) {
@@ -385,7 +396,7 @@ function computeCoverageDiagnostics(opts: {
 
   // High cross-package type refs with few reachable files may indicate missing @types traversal
   const xrefs = graphStats.crossPackageTypeRefs ?? 0;
-  if (xrefs > 5 && graphStats.totalReachable < 5 && typesSource === "@types") {
+  if (hasRealGraphStats && xrefs > 5 && graphStats.totalReachable < 5 && typesSource === "@types") {
     reasons.push(
       `${xrefs} cross-package type references with only ${graphStats.totalReachable} reachable files — @types package may have incomplete traversal`,
     );
@@ -393,12 +404,17 @@ function computeCoverageDiagnostics(opts: {
 
   // Determine specific coverage failure mode
   let coverageFailureMode: CoverageFailureMode | undefined = undefined;
-  if (graphStats.usedFallbackGlob) {
+  if (hasRealGraphStats && graphStats.usedFallbackGlob) {
     coverageFailureMode =
       graphStats.fallbackReason === "no-entrypoints-found"
         ? "entrypoint-resolution"
         : "fallback-glob";
-  } else if (typesSource === "@types" && xrefs > 5 && graphStats.totalReachable < 5) {
+  } else if (
+    hasRealGraphStats &&
+    typesSource === "@types" &&
+    xrefs > 5 &&
+    graphStats.totalReachable < 5
+  ) {
     coverageFailureMode = "@types-fragmentation";
   } else if (
     surfaceDeclarations < MIN_MEASURED_DECLARATIONS &&
@@ -412,13 +428,14 @@ function computeCoverageDiagnostics(opts: {
   // - "compact": few files but sufficient positions and declarations (small-by-design library)
   // - "undersampled": genuinely insufficient coverage
   const fewFilesOnly =
+    hasRealGraphStats &&
     reasons.length > 0 &&
     graphStats.totalReachable > 0 &&
     reasons.every((rr) => rr.startsWith("Only") && rr.includes("reachable file"));
   const hasSufficientSurface =
     surfacePositions >= MIN_MEASURED_POSITIONS &&
     surfaceDeclarations >= MIN_MEASURED_DECLARATIONS &&
-    !graphStats.usedFallbackGlob;
+    (!hasRealGraphStats || !graphStats.usedFallbackGlob);
 
   let samplingClass:
     | "complete"
@@ -547,7 +564,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         score: null,
       },
     ];
-    return {
+    return normalizeResult({
       analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
       caveats: [],
       composites: emptyComposites,
@@ -617,7 +634,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
           severity: "error",
         },
       ],
-    };
+    });
   }
 
   // Build consumer view
@@ -925,6 +942,8 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   );
   const coverageDiagnostics = computeCoverageDiagnostics({
     graphStats,
+    hasPackageContext: options?.packageContext !== undefined,
+    mode,
     surfaceDeclarations: consumerSurface.stats.totalDeclarations,
     surfacePositions: totalPositions,
     typesSource,
@@ -1003,10 +1022,15 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // --- Compute analysis status and score validity ---
   const isUndersampled = coverageDiagnostics.undersampled;
   const isFallbackGlob = usedFallbackGlob;
-  const analysisStatus: AnalysisStatus = isUndersampled ? "degraded" : "complete";
+  // Source mode: undersampling is informational only — don't degrade the result (WS6).
+  // Source analyses always have usable scores; only package analyses degrade on insufficient coverage.
+  const shouldDegradeForUndersampling = isUndersampled && mode === "package";
+  const analysisStatus: AnalysisStatus = shouldDegradeForUndersampling ? "degraded" : "complete";
   let scoreValidity: ScoreValidity = "fully-comparable";
-  if (isUndersampled) {
+  if (shouldDegradeForUndersampling) {
     scoreValidity = "not-comparable";
+  } else if (isUndersampled) {
+    scoreValidity = "partially-comparable";
   } else if (isFallbackGlob) {
     scoreValidity = "partially-comparable";
   }
@@ -1132,7 +1156,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     }
   }
 
-  return result;
+  // Final normalization pass — enforce degraded-result invariants, mandatory fields,
+  // Confidence gating, and stable issue IDs (WS3)
+  return normalizeResult(result);
 }
 
 /**

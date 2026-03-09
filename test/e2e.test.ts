@@ -322,11 +322,29 @@ describe("e2e: analyzeProject", () => {
     expect(result.coverageDiagnostics!.measuredDeclarations).toBeGreaterThan(0);
   });
 
-  it("detects undersampling for tiny fixtures", () => {
-    // The high-precision fixture has enough declarations to not be undersampled on those grounds
-    const result = analyzeProject(resolve(fixturesDir, "high-precision"));
+  it("detects undersampling for tiny fixtures in package mode", () => {
+    // Source-mode skips graph-based undersampling; test in package mode with fallback glob
+    const result = analyzeProject(resolve(fixturesDir, "high-precision"), {
+      mode: "package",
+      packageContext: {
+        graphStats: {
+          dedupByStrategy: {},
+          fallbackReason: "no-entrypoints-found",
+          filesDeduped: 0,
+          totalAfterDedup: 0,
+          totalEntrypoints: 0,
+          totalReachable: 0,
+          usedFallbackGlob: true,
+        },
+        packageJsonPath: "",
+        packageName: "high-precision",
+        packageRoot: resolve(fixturesDir, "high-precision"),
+        typesEntrypoint: null,
+        typesSource: "bundled",
+      },
+      sourceFilesOptions: { includeDts: false },
+    });
     expect(result.coverageDiagnostics).toBeDefined();
-    // Source-mode won't have reachable files (no package entrypoints), so it will be undersampled
     expect(result.coverageDiagnostics!.undersampled).toBeTruthy();
     expect(result.coverageDiagnostics!.undersampledReasons.length).toBeGreaterThan(0);
   });

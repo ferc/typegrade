@@ -67,30 +67,37 @@ function hasTypesInExports(pkgJson: Record<string, unknown>): boolean {
 }
 
 /**
- * Count .d.ts files in the package's top-level and common output directories.
- * Does not recurse deeply — only checks immediate children of each directory.
+ * Count .d.ts files in the package directory using a bounded recursive search.
+ * Recurses up to `maxDepth` levels to catch nested declaration layouts
+ * (e.g. `out/`, `dist/dts/`, `dist/esm/`).
  */
-function countDtsFiles(pkgDir: string): number {
+function countDtsFiles(pkgDir: string, maxDepth = 4): number {
   let count = 0;
-  const checkDirs = [pkgDir];
-  for (const subdir of ["dist", "lib", "build", "types", "typings"]) {
-    const full = join(pkgDir, subdir);
-    if (existsSync(full)) {
-      checkDirs.push(full);
+  const walk = (dir: string, depth: number): void => {
+    if (depth > maxDepth) {
+      return;
     }
-  }
-  for (const dir of checkDirs) {
     try {
-      const files = readdirSync(dir);
-      for (const fl of files) {
-        if (fl.endsWith(".d.ts") || fl.endsWith(".d.mts") || fl.endsWith(".d.cts")) {
-          count++;
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          const nm = entry.name;
+          if (nm.endsWith(".d.ts") || nm.endsWith(".d.mts") || nm.endsWith(".d.cts")) {
+            count++;
+          }
+        } else if (
+          entry.isDirectory() &&
+          !entry.name.startsWith(".") &&
+          entry.name !== "node_modules"
+        ) {
+          walk(join(dir, entry.name), depth + 1);
         }
       }
     } catch {
       // Ignore unreadable directories
     }
-  }
+  };
+  walk(pkgDir, 0);
   return count;
 }
 
@@ -335,19 +342,8 @@ function scoreLocalPackage(opts: {
   const resolvedVersion: string | null = pkgJson.version ?? null;
   const moduleKind = detectModuleKind(pkgJson);
 
-  // Classify the package layout before choosing an analysis strategy
+  // Classify the package layout (advisory — does not hard-gate scoring)
   const layout = classifyPackageLayout(localPath, pkgJson);
-
-  // No declaration files at all — return degraded result
-  if (layout === "no-declarations") {
-    return buildDegradedResult({
-      category: "missing-declarations",
-      errorMessage: `No .d.ts files found in ${packageName}`,
-      packageName,
-      spec: localPath,
-      version: resolvedVersion,
-    });
-  }
 
   // Compute result cache key for local packages
   const tsVersion = getTsVersion();
@@ -369,8 +365,26 @@ function scoreLocalPackage(opts: {
     }
   }
 
-  // Has .d.ts files but no package.json type entries — fall back to analyzing all files
-  if (layout === "no-types-entry") {
+  // Graph-first analysis: attempt entrypoint resolution and graph walk
+  // Before falling back to layout-based degradation (WS1+WS2)
+  const graphProject = loadProject(localPath);
+  const graph = buildDeclarationGraph(localPath, graphProject);
+  const entrypoints = resolveEntrypoints(localPath);
+  const graphResolved = graph.filesToAnalyze.length > 0;
+
+  // Only degrade for missing declarations after BOTH shallow check AND graph resolution fail
+  if (layout === "no-declarations" && !graphResolved) {
+    return buildDegradedResult({
+      category: "missing-declarations",
+      errorMessage: `No .d.ts files found in ${packageName}`,
+      packageName,
+      spec: localPath,
+      version: resolvedVersion,
+    });
+  }
+
+  // Has .d.ts files but no package.json type entries and graph found nothing — fallback glob
+  if (layout === "no-types-entry" && !graphResolved) {
     const result = analyzeProject(localPath, {
       ...(domain !== undefined && { domain }),
       mode: "package",
@@ -399,16 +413,6 @@ function scoreLocalPackage(opts: {
     return result;
   }
 
-  // Declaration-sparse packages: proceed but add a caveat for low confidence
-  if (layout === "declaration-sparse") {
-    // Continue with normal analysis but lower confidence expectations
-  }
-
-  // Build declaration graph using the package's own structure
-  const graphProject = loadProject(localPath);
-  const graph = buildDeclarationGraph(localPath, graphProject);
-
-  const entrypoints = resolveEntrypoints(localPath);
   const entrypointStrategy = detectEntrypointStrategy(pkgJson, entrypoints[0]?.condition);
 
   const packageContext: PackageAnalysisContext = {
@@ -428,7 +432,7 @@ function scoreLocalPackage(opts: {
     packageContext,
     sourceFilesOptions: { includeDts: true, includeNodeModules: true },
   };
-  if (graph.filesToAnalyze.length > 0) {
+  if (graphResolved) {
     analyzeOpts.fileFilter = new Set(graph.filesToAnalyze);
   }
 
@@ -778,13 +782,24 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
       });
     }
 
-    // Classify the package layout to detect unsupported configurations
+    // Classify the package layout (advisory — does not hard-gate scoring)
     const effectivePkgJsonForLayout = typesPackageName
       ? JSON.parse(readFileSync(join(effectivePkgDir, "package.json"), "utf8"))
       : pkgJson;
     const layout = classifyPackageLayout(effectivePkgDir, effectivePkgJsonForLayout);
 
-    if (layout === "no-declarations") {
+    const typesSource: "bundled" | "@types" = typesPackageName ? "@types" : "bundled";
+
+    // Graph-first: resolve entrypoints and walk the declaration graph
+    // Before falling back to layout-based degradation (WS1+WS2)
+    const graphProject = loadProject(installRoot);
+    const graph = buildDeclarationGraph(effectivePkgDir, graphProject, {
+      followSiblingTypes: true,
+    });
+    const graphResolved = graph.filesToAnalyze.length > 0;
+
+    // Only degrade after BOTH shallow check AND graph resolution fail
+    if (layout === "no-declarations" && !graphResolved) {
       return buildDegradedResult({
         category: "missing-declarations",
         errorMessage: `No .d.ts files found in ${packageName}`,
@@ -793,14 +808,6 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
         version: packageVersion === "latest" ? null : packageVersion,
       });
     }
-
-    const typesSource: "bundled" | "@types" = typesPackageName ? "@types" : "bundled";
-
-    // Build declaration graph: resolve entrypoints → walk imports → deduplicate
-    const graphProject = loadProject(installRoot);
-    const graph = buildDeclarationGraph(effectivePkgDir, graphProject, {
-      followSiblingTypes: true,
-    });
 
     // Resolve first entrypoint for context
     const entrypoints = resolveEntrypoints(effectivePkgDir);
