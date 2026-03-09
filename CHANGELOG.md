@@ -1,3 +1,10 @@
+## [0.11.0](https://github.com/ferc/typegrade/compare/v0.10.0...v0.11.0) (2026-03-09)
+
+### Features
+
+* add any-leak path tracking, dependency origin detection, and density-proportional penalties ([bb8552d](https://github.com/ferc/typegrade/commit/bb8552d192e4b66e172509a02255e80ac72cf3fa))
+* sort topIssues by fixability so actionable issues surface first ([eb4ee04](https://github.com/ferc/typegrade/commit/eb4ee049a7a072245c9aaa40173571c8b0409c17))
+
 ## [0.10.0](https://github.com/ferc/typegrade/compare/v0.9.0...v0.10.0) (2026-03-09)
 
 ### Features
