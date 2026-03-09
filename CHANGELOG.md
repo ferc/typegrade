@@ -1,3 +1,9 @@
+## [0.12.0](https://github.com/ferc/typegrade/compare/v0.11.0...v0.12.0) (2026-03-09)
+
+### Features
+
+* implement maximum-accuracy generalization plan (schema 0.11.0) ([088c2de](https://github.com/ferc/typegrade/commit/088c2dee0409b09b3f2fd45b5cf8e648630a0b86))
+
 ## [0.11.0](https://github.com/ferc/typegrade/compare/v0.10.0...v0.11.0) (2026-03-09)
 
 ### Features
