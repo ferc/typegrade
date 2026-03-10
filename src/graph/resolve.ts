@@ -142,7 +142,7 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
       resolveWildcardStringExport({ entrypoints, pattern: key, pkgDir, target: value });
     } else if (key.startsWith(".") && !key.includes("*") && typeof value === "string") {
       // Direct string subpath export (e.g., "./utils": "./dist/utils.d.ts")
-      const resolved = resolveDeclarationFile(pkgDir, value);
+      const resolved = resolveDeclarationOrCompanion(pkgDir, value);
       if (resolved) {
         entrypoints.push({
           condition: conditionLabel(currentSubpath, "direct"),
@@ -186,24 +186,13 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
       (key === "default" || key === "import" || key === "require")
     ) {
       // Resolve condition string value as declaration file (.d.ts or .js companion)
-      const resolved = resolveDeclarationFile(pkgDir, value);
+      const resolved = resolveDeclarationOrCompanion(pkgDir, value);
       if (resolved) {
         entrypoints.push({
           condition: conditionLabel(currentSubpath, key),
           filePath: resolved,
           subpath: currentSubpath,
         });
-      } else if (key === "default") {
-        // For "default" condition, also try finding a companion .d.ts via findDtsCompanion
-        // This catches cases where "default" points to a JS bundle with a separate .d.ts
-        const companion = findDtsCompanion(pkgDir, value);
-        if (companion) {
-          entrypoints.push({
-            condition: conditionLabel(currentSubpath, "default"),
-            filePath: companion,
-            subpath: currentSubpath,
-          });
-        }
       }
     } else if (
       !key.startsWith(".") &&
@@ -215,7 +204,7 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
         key === "deno")
     ) {
       // Platform-specific condition — try resolving companion .d.ts
-      const resolved = resolveDeclarationFile(pkgDir, value);
+      const resolved = resolveDeclarationOrCompanion(pkgDir, value);
       if (resolved) {
         entrypoints.push({
           condition: conditionLabel(currentSubpath, key),
@@ -713,6 +702,14 @@ function resolveDeclarationFile(pkgDir: string, relativePath: string): string | 
   }
 
   return null;
+}
+
+function resolveDeclarationOrCompanion(pkgDir: string, relativePath: string): string | null {
+  const resolved = resolveDeclarationFile(pkgDir, relativePath);
+  if (resolved) {
+    return resolved;
+  }
+  return findDtsCompanion(pkgDir, relativePath);
 }
 
 /**

@@ -131,6 +131,13 @@ describe("adversarial fixtures: @types sibling resolution", () => {
       const typesEntry = entrypoints.find((ep) => ep.condition.startsWith("@types/"));
       expect(typesEntry).toBeDefined();
     });
+
+    it("should resolve companion @types even when package exposes only exports", () => {
+      const fixturePath = resolve(fixturesDir, "types-sibling", "node_modules", "types-sibling");
+      const entrypoints = resolveEntrypoints(fixturePath);
+      expect(entrypoints.some((ep) => ep.condition.startsWith("@types/"))).toBeTruthy();
+      expect(entrypoints.some((ep) => ep.filePath.endsWith("index.d.ts"))).toBeTruthy();
+    });
   });
 });
 

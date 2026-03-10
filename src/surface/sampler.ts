@@ -1,6 +1,7 @@
 import {
   type ClassDeclaration,
   type EnumDeclaration,
+  type ExportAssignment,
   type ExportDeclaration,
   type FunctionDeclaration,
   type InterfaceDeclaration,
@@ -9,6 +10,7 @@ import {
   type ModuleDeclaration,
   Node,
   type SourceFile,
+  SyntaxKind,
   type Type,
   type TypeAliasDeclaration,
   type TypeNode,
@@ -25,6 +27,8 @@ import type {
   SurfaceStats,
   SurfaceTypeParam,
 } from "./types.js";
+import { dirname, resolve as resolvePath } from "node:path";
+import { existsSync } from "node:fs";
 
 export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
   const declarations: SurfaceDeclaration[] = [];
@@ -38,16 +42,22 @@ export function extractPublicSurface(sourceFiles: SourceFile[]): PublicSurface {
   for (const sf of sourceFiles) {
     extractFromSourceFile(sf, declarations);
 
-    // Handle `export *` re-exports — resolve target and merge declarations
+    // Handle re-exports that are not part of the file's direct exported declarations.
     for (const exportDecl of sf.getExportDeclarations()) {
-      if (
-        exportDecl.isNamespaceExport() ||
-        (exportDecl.getNamedExports().length === 0 && !exportDecl.getModuleSpecifier())
-      ) {
+      const namedExports = exportDecl.getNamedExports();
+      if (namedExports.length === 0 && exportDecl.getModuleSpecifier()) {
         const resolved = resolveReExportTarget(exportDecl);
         if (resolved && !visited.has(resolved.getFilePath())) {
           visited.add(resolved.getFilePath());
           extractFromSourceFile(resolved, declarations);
+        }
+        continue;
+      }
+
+      if (namedExports.length > 0 && exportDecl.getModuleSpecifier()) {
+        const resolved = resolveReExportTarget(exportDecl);
+        if (resolved) {
+          extractNamedReExports(exportDecl, resolved, declarations);
         }
       }
     }
@@ -116,15 +126,125 @@ function extractFromSourceFile(sf: SourceFile, declarations: SurfaceDeclaration[
       declarations.push(extractVariable(decl, varStmt, filePath));
     }
   }
+
+  for (const exportAssignment of sf.getExportAssignments()) {
+    extractExportAssignment(exportAssignment, filePath, declarations);
+  }
 }
 
 function resolveReExportTarget(exportDecl: ExportDeclaration): SourceFile | undefined {
   try {
     const moduleSpecifier = exportDecl.getModuleSpecifierSourceFile();
-    return moduleSpecifier ?? undefined;
+    if (moduleSpecifier) {
+      return moduleSpecifier;
+    }
+    const rawSpecifier = exportDecl.getModuleSpecifierValue();
+    if (!rawSpecifier) {
+      return undefined;
+    }
+    const containingDir = dirname(exportDecl.getSourceFile().getFilePath());
+    const candidates =
+      rawSpecifier.endsWith(".js") || rawSpecifier.endsWith(".mjs")
+        ? [
+            rawSpecifier.replace(/\.m?js$/, ".d.ts"),
+            rawSpecifier.replace(/\.m?js$/, ".d.mts"),
+            rawSpecifier.replace(/\.m?js$/, ".d.cts"),
+          ]
+        : [`${rawSpecifier}.d.ts`, `${rawSpecifier}.d.mts`, `${rawSpecifier}.d.cts`];
+    for (const candidate of candidates) {
+      const absolute = resolvePath(containingDir, candidate);
+      if (existsSync(absolute)) {
+        return exportDecl.getSourceFile().getProject().getSourceFile(absolute);
+      }
+    }
+    return undefined;
   } catch {
     return undefined;
   }
+}
+
+function extractNamedReExports(
+  exportDecl: ExportDeclaration,
+  resolved: SourceFile,
+  declarations: SurfaceDeclaration[],
+): void {
+  const exportedDeclarations = resolved.getExportedDeclarations();
+  for (const specifier of exportDecl.getNamedExports()) {
+    const sourceName = specifier.getNameNode().getText();
+    const publicName = specifier.getAliasNode()?.getText() ?? sourceName;
+    const targets = exportedDeclarations.get(sourceName) ?? [];
+    for (const target of targets) {
+      const extracted = extractReExportedDeclaration(target);
+      if (!extracted) {
+        continue;
+      }
+      declarations.push(renameDeclaration(extracted, publicName));
+    }
+  }
+}
+
+function extractReExportedDeclaration(node: Node): SurfaceDeclaration | undefined {
+  const filePath = node.getSourceFile().getFilePath();
+  if (Node.isFunctionDeclaration(node)) {
+    return extractFunction(node, filePath);
+  }
+  if (Node.isInterfaceDeclaration(node)) {
+    return extractInterface(node, filePath);
+  }
+  if (Node.isTypeAliasDeclaration(node)) {
+    return extractTypeAlias(node, filePath);
+  }
+  if (Node.isClassDeclaration(node)) {
+    return extractClass(node, filePath);
+  }
+  if (Node.isEnumDeclaration(node)) {
+    return extractEnum(node, filePath);
+  }
+  if (Node.isVariableDeclaration(node)) {
+    const stmt = node.getFirstAncestorByKind(SyntaxKind.VariableStatement);
+    if (stmt && Node.isVariableStatement(stmt)) {
+      return extractVariable(node, stmt, filePath);
+    }
+  }
+  return undefined;
+}
+
+function renameDeclaration(declaration: SurfaceDeclaration, nextName: string): SurfaceDeclaration {
+  const previousName = declaration.name;
+  declaration.name = nextName;
+  for (const position of declaration.positions) {
+    position.declarationName = renameQualifiedDeclaration(
+      previousName,
+      nextName,
+      position.declarationName,
+    );
+  }
+  for (const method of declaration.methods ?? []) {
+    for (const position of method.positions) {
+      position.declarationName = renameQualifiedDeclaration(
+        previousName,
+        nextName,
+        position.declarationName,
+      );
+    }
+  }
+  return declaration;
+}
+
+function renameQualifiedDeclaration(previousName: string, nextName: string, value: string): string {
+  if (value === previousName) {
+    return nextName;
+  }
+  if (value.startsWith(`${previousName}.`)) {
+    return `${nextName}${value.slice(previousName.length)}`;
+  }
+  if (value.startsWith(`${previousName}(`)) {
+    return `${nextName}${value.slice(previousName.length)}`;
+  }
+  if (value.startsWith(`new ${previousName}`)) {
+    return `new ${nextName}${value.slice(previousName.length + 4)}`;
+  }
+  return value;
 }
 
 function extractNamespaceExports(
@@ -747,6 +867,126 @@ function extractVariable(
     ],
     typeParameters: [],
   };
+}
+
+function extractExportAssignment(
+  exportAssignment: ExportAssignment,
+  filePath: string,
+  declarations: SurfaceDeclaration[],
+): void {
+  const expr = exportAssignment.getExpression();
+  const resolved = resolveExportAssignmentDeclarations(expr, filePath);
+  if (resolved.length > 0) {
+    declarations.push(...resolved);
+    return;
+  }
+
+  const name = exportAssignment.isExportEquals() ? expr.getText() || "export=" : "default";
+  declarations.push({
+    filePath,
+    hasJSDoc: exportAssignment.getJsDocs().length > 0,
+    kind: "variable",
+    line: exportAssignment.getStartLineNumber(),
+    name,
+    node: exportAssignment,
+    positions: [
+      makePosition({
+        declarationKind: "variable",
+        declarationName: name,
+        filePath,
+        name,
+        node: expr,
+        role: "variable",
+        weight: 1,
+      }),
+    ],
+    typeParameters: [],
+  });
+}
+
+function resolveExportAssignmentDeclarations(
+  expr: Node,
+  currentFilePath: string,
+): SurfaceDeclaration[] {
+  const declarations: SurfaceDeclaration[] = [];
+  const seen = new Set<string>();
+
+  const pushDeclaration = (decl: SurfaceDeclaration) => {
+    const key = `${decl.kind}:${decl.name}:${decl.filePath}:${decl.line}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    declarations.push(decl);
+  };
+
+  const collectFromDeclaration = (decl: Node) => {
+    if (decl.getSourceFile().getFilePath() !== currentFilePath) {
+      return;
+    }
+    if (Node.isFunctionDeclaration(decl)) {
+      pushDeclaration(extractFunction(decl, decl.getSourceFile().getFilePath()));
+      return;
+    }
+    if (Node.isInterfaceDeclaration(decl)) {
+      pushDeclaration(extractInterface(decl, decl.getSourceFile().getFilePath()));
+      return;
+    }
+    if (Node.isTypeAliasDeclaration(decl)) {
+      pushDeclaration(extractTypeAlias(decl, decl.getSourceFile().getFilePath()));
+      return;
+    }
+    if (Node.isClassDeclaration(decl)) {
+      pushDeclaration(extractClass(decl, decl.getSourceFile().getFilePath()));
+      return;
+    }
+    if (Node.isEnumDeclaration(decl)) {
+      pushDeclaration(extractEnum(decl, decl.getSourceFile().getFilePath()));
+      return;
+    }
+    if (Node.isVariableDeclaration(decl)) {
+      pushDeclaration({
+        filePath: decl.getSourceFile().getFilePath(),
+        hasJSDoc: false,
+        kind: "variable",
+        line: decl.getStartLineNumber(),
+        name: decl.getName(),
+        node: decl,
+        positions: [
+          makePosition({
+            declarationKind: "variable",
+            declarationName: decl.getName(),
+            filePath: decl.getSourceFile().getFilePath(),
+            name: decl.getName(),
+            node: decl,
+            role: "variable",
+            weight: 1,
+          }),
+        ],
+        typeParameters: [],
+      });
+    }
+  };
+
+  const maybeCollectDeclarations = (nodes: Node[] | undefined) => {
+    if (!nodes) {
+      return;
+    }
+    for (const node of nodes) {
+      collectFromDeclaration(node);
+    }
+  };
+
+  if ("getSymbol" in expr && typeof expr.getSymbol === "function") {
+    maybeCollectDeclarations(expr.getSymbol()?.getDeclarations());
+  }
+  if ("getType" in expr && typeof expr.getType === "function") {
+    const type = expr.getType();
+    maybeCollectDeclarations(type.getSymbol()?.getDeclarations());
+    maybeCollectDeclarations(type.getAliasSymbol()?.getDeclarations());
+  }
+
+  return declarations;
 }
 
 // --- Stats ---

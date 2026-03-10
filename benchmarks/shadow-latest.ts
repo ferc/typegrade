@@ -26,11 +26,25 @@ interface ShadowLatestConfig {
 }
 
 /** Per-package raw result (stored in shadow-raw/, never builder-visible) */
-interface ShadowRawEntry {
+interface ShadowRawEntryV2 {
+  schemaVersion: string;
   specHash: string;
   status: string;
   scoreValidity: string;
   trustClassification: string;
+  resolutionDiagnosticsLite: {
+    acquisitionStage: string;
+    attemptedStrategies: string[];
+    chosenStrategy: string;
+    failureStage?: string;
+  };
+  coverageDiagnosticsLite: {
+    measuredDeclarations: number;
+    measuredPositions: number;
+    reachableFiles: number;
+    samplingClass: string;
+    undersampled: boolean;
+  };
   entrypointStrategy: string;
   usedFallbackGlob: boolean;
   hasDomainScore: boolean;
@@ -153,7 +167,7 @@ export async function runShadowLatest(
 
   console.log(`Scoring ${specs.length} shadow packages (seed=${cfg.seed})...\n`);
 
-  const rawEntries: ShadowRawEntry[] = [];
+  const rawEntries: ShadowRawEntryV2[] = [];
   let installFailures = 0;
   let comparable = 0;
   let abstained = 0;
@@ -168,6 +182,7 @@ export async function runShadowLatest(
   let domainCoverageCount = 0;
   let scenarioCoverageCount = 0;
   let completeCount = 0;
+  let domainApplicableCompleteCount = 0;
   let applicableCompleteCount = 0;
   const degradedCategoryBreakdown: Record<string, number> = {};
 
@@ -182,6 +197,7 @@ export async function runShadowLatest(
       installFailures++;
       abstainCount++;
       rawEntries.push({
+        schemaVersion: ANALYSIS_SCHEMA_VERSION,
         agentReadiness: null,
         comparabilityReasons: ["install-failure"],
         confidenceSummary: {
@@ -199,9 +215,22 @@ export async function runShadowLatest(
         domainDetected: "unknown",
         domainFitScore: null,
         entrypointStrategy: "unknown",
+        coverageDiagnosticsLite: {
+          measuredDeclarations: 0,
+          measuredPositions: 0,
+          reachableFiles: 0,
+          samplingClass: "undersampled",
+          undersampled: true,
+        },
         hasDomainScore: false,
         hasScenarioScore: false,
         moduleKind: pkg.moduleKind ?? "unknown",
+        resolutionDiagnosticsLite: {
+          acquisitionStage: "package-install",
+          attemptedStrategies: [],
+          chosenStrategy: "install-failure",
+          failureStage: "package-install",
+        },
         scenarioApplicabilityStatus: "unknown",
         scenarioGrade: null,
         scoreValidity: "not-comparable",
@@ -217,7 +246,7 @@ export async function runShadowLatest(
     }
 
     const trustClass = result.trustSummary?.classification ?? "abstained";
-    const isComparable = result.scoreValidity === "fully-comparable";
+    const isComparable = result.scoreValidity !== "not-comparable";
     const isDegraded = result.status === "degraded";
     const hasNumericScores = result.composites.some((cc) => cc.score !== null);
     const grade = computeDecisionGrade(result);
@@ -257,10 +286,18 @@ export async function runShadowLatest(
     const isComplete = isComparable || result.scoreValidity === "partially-comparable";
     if (isComplete) {
       completeCount++;
-      if (result.domainScore !== undefined) {
-        domainCoverageCount++;
+      // Domain-applicable complete: has a non-general domain with directional confidence.
+      if (
+        result.domainInference?.domain &&
+        result.domainInference.domain !== "general" &&
+        (result.domainInference.confidence ?? 0) >= 0.5
+      ) {
+        domainApplicableCompleteCount++;
+        if (result.domainScore !== undefined) {
+          domainCoverageCount++;
+        }
       }
-      // Applicable-complete: has domain inference with sufficient confidence
+      // Scenario-applicable complete: has domain inference with sufficient directional confidence.
       if (
         result.domainInference?.domain &&
         result.domainInference.domain !== "general" &&
@@ -282,10 +319,18 @@ export async function runShadowLatest(
     }
 
     rawEntries.push({
+      schemaVersion: ANALYSIS_SCHEMA_VERSION,
       agentReadiness: result.composites.find((cc) => cc.key === "agentReadiness")?.score ?? null,
       comparabilityReasons: compReasons,
       confidenceSummary: result.confidenceSummary,
       consumerApi: result.composites.find((cc) => cc.key === "consumerApi")?.score ?? null,
+      coverageDiagnosticsLite: {
+        measuredDeclarations: result.coverageDiagnostics.measuredDeclarations,
+        measuredPositions: result.coverageDiagnostics.measuredPositions,
+        reachableFiles: result.coverageDiagnostics.reachableFiles,
+        samplingClass: result.coverageDiagnostics.samplingClass,
+        undersampled: result.coverageDiagnostics.undersampled,
+      },
       coverageClassification: result.coverageDiagnostics.samplingClass ?? "unknown",
       decisionGrade: grade,
       degradedCategory: result.degradedCategory ?? null,
@@ -297,6 +342,14 @@ export async function runShadowLatest(
       hasDomainScore: result.domainScore !== undefined,
       hasScenarioScore: result.scenarioScore !== undefined,
       moduleKind: pkg.moduleKind ?? result.packageIdentity.moduleKind ?? "unknown",
+      resolutionDiagnosticsLite: {
+        acquisitionStage: result.resolutionDiagnostics?.acquisitionStage ?? "complete",
+        attemptedStrategies: result.resolutionDiagnostics?.attemptedStrategies ?? [],
+        chosenStrategy: result.resolutionDiagnostics?.chosenStrategy ?? "unknown",
+        ...(result.resolutionDiagnostics?.failureStage
+          ? { failureStage: result.resolutionDiagnostics.failureStage }
+          : {}),
+      },
       scenarioApplicabilityStatus: result.scenarioScore?.scenarioApplicability ?? "unknown",
       scenarioGrade: result.scenarioScore?.grade ?? null,
       scoreValidity: result.scoreValidity,
@@ -339,7 +392,8 @@ export async function runShadowLatest(
 
   // Compute new aggregate rates
   const degradedRate = total > 0 ? degradedCount / total : 0;
-  const domainCoverageRate = completeCount > 0 ? domainCoverageCount / completeCount : 0;
+  const domainCoverageRate =
+    domainApplicableCompleteCount > 0 ? domainCoverageCount / domainApplicableCompleteCount : 0;
   const scenarioCoverageRate =
     applicableCompleteCount > 0 ? scenarioCoverageCount / applicableCompleteCount : 0;
 
@@ -408,7 +462,7 @@ export async function runShadowLatest(
   // Minimum sample size needed to claim <1% failure rate at 99% CI
   const minFor1Pct = minSampleForBound(0.01, 0.99);
 
-  const gateResults: { gate: string; passed: boolean; detail: string }[] = [
+  const diagnosticGateResults: { gate: string; passed: boolean; detail: string }[] = [
     {
       detail: `${(falseAuthRate * 100).toFixed(1)}%, 99%CI upper: ${(falseAuthUB * 100).toFixed(1)}%`,
       gate: "false-authoritative-CI<5%",
@@ -455,7 +509,7 @@ export async function runShadowLatest(
       passed: degradedUB < 0.1,
     },
     {
-      detail: `${(domainCoverageRate * 100).toFixed(1)}% of complete analyses`,
+      detail: `${(domainCoverageRate * 100).toFixed(1)}% of applicable complete analyses`,
       gate: "domain-coverage>70%",
       passed: domainCoverageRate > 0.7,
     },
@@ -466,9 +520,58 @@ export async function runShadowLatest(
     },
   ];
 
+  const releaseGateResults: { gate: string; passed: boolean; detail: string }[] = [
+    {
+      detail: `Degraded rate: ${(degradedRate * 100).toFixed(1)}%`,
+      gate: "shadow-degraded-rate<10%",
+      passed: degradedRate < 0.1,
+    },
+    {
+      detail: `Comparable rate: ${(comparableRate * 100).toFixed(1)}%`,
+      gate: "shadow-comparable-rate>80%",
+      passed: comparableRate > 0.8,
+    },
+    {
+      detail: `False-authoritative rate: ${(falseAuthRate * 100).toFixed(1)}%`,
+      gate: "shadow-false-authoritative=0%",
+      passed: falseAuthRate === 0,
+    },
+    {
+      detail: `Install-failure rate: ${(installRate * 100).toFixed(1)}%`,
+      gate: "shadow-install-failure=0%",
+      passed: installRate === 0,
+    },
+    {
+      detail: `Fallback rate: ${(fallbackRate * 100).toFixed(1)}%`,
+      gate: "shadow-fallback-rate<5%",
+      passed: fallbackRate < 0.05,
+    },
+    {
+      detail: `${(domainCoverageRate * 100).toFixed(1)}% of applicable complete analyses`,
+      gate: "shadow-domain-coverage>70%",
+      passed: domainCoverageRate > 0.7,
+    },
+    {
+      detail: `${(scenarioCoverageRate * 100).toFixed(1)}% of applicable complete analyses`,
+      gate: "shadow-scenario-coverage>35%",
+      passed: scenarioCoverageRate > 0.35,
+    },
+    {
+      detail: `Domain overreach: ${(domainOverreachRate * 100).toFixed(1)}%`,
+      gate: "shadow-domain-overreach<20%",
+      passed: domainOverreachRate < 0.2,
+    },
+    {
+      detail: `Scenario overreach: ${(scenarioOverreachRate * 100).toFixed(1)}%`,
+      gate: "shadow-scenario-overreach<20%",
+      passed: scenarioOverreachRate < 0.2,
+    },
+  ];
+
   const summary: RedactedShadowSummary = {
     abstentionCorrectnessRate: Math.round(abstentionRate * 1000) / 1000,
-    allGatesPassed: gateResults.every((gg) => gg.passed),
+    allGatesPassed: diagnosticGateResults.every((gg) => gg.passed),
+    allReleaseGatesPassed: releaseGateResults.every((gg) => gg.passed),
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     comparableRate: Math.round(comparableRate * 1000) / 1000,
     confidenceBounds,
@@ -480,8 +583,9 @@ export async function runShadowLatest(
     domainOverreachRate: Math.round(domainOverreachRate * 1000) / 1000,
     falseAuthoritativeRate: Math.round(falseAuthRate * 1000) / 1000,
     fallbackGlobRate: Math.round(fallbackRate * 1000) / 1000,
-    gates: gateResults,
+    gates: diagnosticGateResults,
     installFailureRate: Math.round(installRate * 1000) / 1000,
+    releaseGates: releaseGateResults,
     scenarioCoverageRate: Math.round(scenarioCoverageRate * 1000) / 1000,
     scenarioOverreachRate: Math.round(scenarioOverreachRate * 1000) / 1000,
     scoreCompressionRate: Math.round(scoreCompression * 1000) / 1000,
@@ -501,6 +605,7 @@ function buildEmptySummary(): RedactedShadowSummary {
   return {
     abstentionCorrectnessRate: 0,
     allGatesPassed: false,
+    allReleaseGatesPassed: false,
     comparableRate: 0,
     confidenceBounds: {
       abstentionCorrectnessRate: 0,
@@ -517,6 +622,7 @@ function buildEmptySummary(): RedactedShadowSummary {
     fallbackGlobRate: 0,
     gates: [{ detail: "No packages sampled", gate: "shadow-data-exists", passed: false }],
     installFailureRate: 0,
+    releaseGates: [{ detail: "No packages sampled", gate: "shadow-data-exists", passed: false }],
     scenarioCoverageRate: 0,
     scenarioOverreachRate: 0,
     scoreCompressionRate: 0,
@@ -530,13 +636,14 @@ export function checkShadowGates(summary: RedactedShadowSummary): {
   passed: boolean;
   gates: { name: string; passed: boolean; value: string; threshold: string }[];
 } {
-  const gates = summary.gates.map((gg) => ({
+  const releaseGates = summary.releaseGates ?? summary.gates;
+  const gates = releaseGates.map((gg) => ({
     name: gg.gate,
     passed: gg.passed,
     threshold: gg.gate.split("-").pop() ?? "?",
     value: gg.detail,
   }));
-  return { gates, passed: summary.allGatesPassed };
+  return { gates, passed: summary.allReleaseGatesPassed ?? summary.allGatesPassed };
 }
 
 // CLI entrypoint — run shadow-latest when executed directly

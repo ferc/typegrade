@@ -802,8 +802,13 @@ function ensureCachedInstall(
   let typesPackageName: string | undefined = undefined;
 
   if (existsSync(pkgDir)) {
-    const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
-    if (!pkgJson.types && !pkgJson.typings && !pkgJson.exports) {
+    const bundledEntrypoints = resolveEntrypoints(pkgDir).filter(
+      (ep) => !ep.condition.startsWith("@types/"),
+    );
+    const shouldTryCompanionTypes =
+      bundledEntrypoints.length === 0 && countDtsFiles(pkgDir, 5) === 0;
+
+    if (shouldTryCompanionTypes) {
       typesPackageName = packageName.startsWith("@")
         ? `@types/${packageName.slice(1).replace("/", "__")}`
         : `@types/${packageName}`;

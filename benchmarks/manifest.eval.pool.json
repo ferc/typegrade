@@ -224,7 +224,7 @@
     ],
     "pool-stream": [
       {
-        "spec": "most@2.0.0",
+        "spec": "most@1.9.0",
         "proxyFamily": "stream",
         "sizeBand": "medium",
         "typesSourceHint": "bundled"

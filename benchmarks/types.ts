@@ -309,7 +309,7 @@ export interface RedactedShadowSummary {
   };
   /** Rate of packages that degraded (not just install failure) */
   degradedRate: number;
-  /** Rate of domain detection on complete analyses */
+  /** Rate of domain detection on applicable complete analyses */
   domainCoverageRate: number;
   /** Rate of scenario detection on applicable complete analyses */
   scenarioCoverageRate: number;
@@ -317,9 +317,14 @@ export interface RedactedShadowSummary {
   decisionGradeBreakdown: { strong: number; directional: number; abstain: number };
   /** Degraded category breakdown */
   degradedCategoryBreakdown?: Record<string, number>;
-  /** Gate pass/fail results */
+  /** Diagnostic gate pass/fail results (statistical/non-release diagnostics) */
   gates: { gate: string; passed: boolean; detail: string }[];
+  /** Release-grade gate pass/fail results */
+  releaseGates?: { gate: string; passed: boolean; detail: string }[];
+  /** True when all diagnostic gates pass */
   allGatesPassed: boolean;
+  /** True when all release-grade gates pass */
+  allReleaseGatesPassed?: boolean;
 }
 
 // ─── Aggregate Assertions (holdout/shadow) ────────────────────────────────
@@ -329,8 +334,13 @@ export interface AggregateMetrics {
   degradedRate: number;
   fallbackGlobRate: number;
   comparableRate: number;
+  decisionGradeRate?: number;
   domainCoverageRate?: number;
   scenarioCoverageRate?: number;
+  strongDecisionRate?: number;
+  autofixCoherenceRate?: number;
+  healthCalibrationRate?: number;
+  workspaceCoverageRate?: number;
 }
 
 /** Aggregate assertion for holdout/shadow tracks (no package-specific logic) */
@@ -338,7 +348,7 @@ export interface AggregateAssertion {
   name: string;
   description: string;
   /** Track this applies to */
-  track: "holdout" | "shadow";
+  track: "holdout" | "shadow" | "source" | "monorepo";
   /** Check function returns pass/fail with detail */
   check: (metrics: AggregateMetrics) => { passed: boolean; detail: string };
 }
@@ -399,7 +409,7 @@ export const SHADOW_ASSERTIONS: AggregateAssertion[] = [
       detail: `Domain coverage: ${((mm.domainCoverageRate ?? 0) * 100).toFixed(1)}%`,
       passed: (mm.domainCoverageRate ?? 0) > 0.7,
     }),
-    description: "Domain detection coverage above 70% on complete analyses",
+    description: "Domain detection coverage above 70% on applicable complete analyses",
     name: "shadow-domain-coverage",
     track: "shadow",
   },
@@ -411,6 +421,130 @@ export const SHADOW_ASSERTIONS: AggregateAssertion[] = [
     description: "Scenario coverage above 35% on applicable analyses",
     name: "shadow-scenario-coverage",
     track: "shadow",
+  },
+];
+
+/** Source-mode aggregate summary emitted by benchmark/source-latest.ts */
+export interface RedactedSourceSummary {
+  timestamp: string;
+  analysisSchemaVersion?: string;
+  totalCases: number;
+  degradedRate: number;
+  comparableRate: number;
+  decisionGradeRate: number;
+  strongDecisionRate: number;
+  autofixCoherenceRate: number;
+  sourceOwnedIssueRate: number;
+  directFixBatchRate: number;
+  selfAnalysis: {
+    decisionGrade: string | null;
+    scoreValidity: string | null;
+    status: string | null;
+    withFixBatches: boolean;
+  };
+  gates: { gate: string; passed: boolean; detail: string }[];
+  allGatesPassed: boolean;
+}
+
+/** Monorepo-mode aggregate summary emitted by benchmark/monorepo-latest.ts */
+export interface RedactedMonorepoSummary {
+  timestamp: string;
+  analysisSchemaVersion?: string;
+  totalCases: number;
+  degradedRate: number;
+  comparableRate: number;
+  decisionGradeRate: number;
+  strongDecisionRate: number;
+  healthCalibrationRate: number;
+  workspaceCoverageRate: number;
+  gates: { gate: string; passed: boolean; detail: string }[];
+  allGatesPassed: boolean;
+}
+
+export const SOURCE_ASSERTIONS: AggregateAssertion[] = [
+  {
+    check: (mm) => ({
+      detail: `Degraded rate: ${(mm.degradedRate * 100).toFixed(1)}%`,
+      passed: mm.degradedRate < 0.25,
+    }),
+    description: "Source benchmark degraded rate below 25%",
+    name: "source-degraded-rate",
+    track: "source",
+  },
+  {
+    check: (mm) => ({
+      detail: `Comparable rate: ${(mm.comparableRate * 100).toFixed(1)}%`,
+      passed: mm.comparableRate >= 0.75,
+    }),
+    description: "Source benchmark comparable rate at least 75%",
+    name: "source-comparable-rate",
+    track: "source",
+  },
+  {
+    check: (mm) => ({
+      detail: `Decision-grade rate: ${((mm.decisionGradeRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.decisionGradeRate ?? 0) >= 0.75,
+    }),
+    description: "Source benchmark yields decision-grade results for at least 75% of the suite",
+    name: "source-decision-grade-rate",
+    track: "source",
+  },
+  {
+    check: (mm) => ({
+      detail: `Autofix coherence: ${((mm.autofixCoherenceRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.autofixCoherenceRate ?? 0) >= 0.95,
+    }),
+    description: "Source benchmark autofix reports are structurally coherent",
+    name: "source-autofix-coherence",
+    track: "source",
+  },
+];
+
+export const MONOREPO_ASSERTIONS: AggregateAssertion[] = [
+  {
+    check: (mm) => ({
+      detail: `Degraded rate: ${(mm.degradedRate * 100).toFixed(1)}%`,
+      passed: mm.degradedRate === 0,
+    }),
+    description: "Monorepo benchmark cases should all analyze successfully",
+    name: "monorepo-zero-degraded",
+    track: "monorepo",
+  },
+  {
+    check: (mm) => ({
+      detail: `Comparable rate: ${(mm.comparableRate * 100).toFixed(1)}%`,
+      passed: mm.comparableRate >= 0.66,
+    }),
+    description: "Monorepo benchmark should keep most cases comparable while allowing clean abstention",
+    name: "monorepo-comparable-rate",
+    track: "monorepo",
+  },
+  {
+    check: (mm) => ({
+      detail: `Decision-grade rate: ${((mm.decisionGradeRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.decisionGradeRate ?? 0) >= 0.66,
+    }),
+    description: "Monorepo benchmark should produce decision-grade output for most cases",
+    name: "monorepo-decision-grade-rate",
+    track: "monorepo",
+  },
+  {
+    check: (mm) => ({
+      detail: `Health calibration: ${((mm.healthCalibrationRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.healthCalibrationRate ?? 0) >= 0.66,
+    }),
+    description: "Monorepo benchmark should calibrate healthy vs unhealthy workspaces",
+    name: "monorepo-health-calibration",
+    track: "monorepo",
+  },
+  {
+    check: (mm) => ({
+      detail: `Workspace coverage: ${((mm.workspaceCoverageRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.workspaceCoverageRate ?? 0) >= 0.66,
+    }),
+    description: "Monorepo benchmark should maintain workspace confidence on most cases",
+    name: "monorepo-workspace-coverage",
+    track: "monorepo",
   },
 ];
 

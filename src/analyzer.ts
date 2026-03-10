@@ -83,10 +83,16 @@ import { resolveFileOwnership } from "./ownership/index.js";
 
 /** Minimum domain confidence to emit domainFitScore */
 const DOMAIN_CONFIDENCE_THRESHOLD = 0.7;
+/** Minimum domain confidence to emit a directional domainFitScore */
+const DOMAIN_DIRECTIONAL_CONFIDENCE_THRESHOLD = 0.5;
 /** Minimum gap between winner and runner-up for domain emission */
 const DOMAIN_AMBIGUITY_GAP = 0.15;
+/** Minimum ambiguity gap to emit a directional domainFitScore */
+const DOMAIN_DIRECTIONAL_AMBIGUITY_GAP = 0.08;
 /** Minimum domain confidence to run scenario packs */
 const SCENARIO_CONFIDENCE_THRESHOLD = 0.7;
+/** Minimum domain confidence to run a directional scenario pack */
+const SCENARIO_DIRECTIONAL_CONFIDENCE_THRESHOLD = 0.5;
 /** Confidence cap when graph resolution used fallback glob */
 const FALLBACK_CONFIDENCE_CAP = 0.55;
 /** Maximum composite score allowed for undersampled packages */
@@ -108,6 +114,10 @@ const MIN_REACHABLE_FILES = 3;
 const MIN_MEASURED_POSITIONS = 10;
 /** Minimum declarations to consider a package adequately sampled */
 const MIN_MEASURED_DECLARATIONS = 5;
+/** Minimum measured positions to keep an undersampled package directional */
+const MIN_DIRECTIONAL_MEASURED_POSITIONS = 4;
+/** Minimum measured declarations to keep an undersampled package directional */
+const MIN_DIRECTIONAL_MEASURED_DECLARATIONS = 2;
 
 function makeDefaultGraphStats(): GraphStats {
   return {
@@ -664,6 +674,20 @@ function computeCoverageDiagnostics(opts: {
     surfacePositions >= MIN_MEASURED_POSITIONS &&
     surfaceDeclarations >= MIN_MEASURED_DECLARATIONS &&
     (!hasRealGraphStats || !graphStats.usedFallbackGlob);
+  const fallbackButWellObserved =
+    hasRealGraphStats &&
+    graphStats.usedFallbackGlob &&
+    surfacePositions >= MIN_MEASURED_POSITIONS * 2 &&
+    surfaceDeclarations >= MIN_MEASURED_DECLARATIONS * 2;
+  const isCompactSingleSurface =
+    hasRealGraphStats &&
+    !graphStats.usedFallbackGlob &&
+    graphStats.totalReachable > 0 &&
+    graphStats.totalReachable <= 2 &&
+    surfaceDeclarations >= 1 &&
+    surfaceDeclarations < MIN_MEASURED_DECLARATIONS &&
+    surfacePositions >= Math.max(MIN_DIRECTIONAL_MEASURED_POSITIONS * 2, 8) &&
+    coverageFailureMode !== "@types-fragmentation";
 
   let samplingClass:
     | "complete"
@@ -675,6 +699,10 @@ function computeCoverageDiagnostics(opts: {
 
   if (reasons.length === 0) {
     samplingClass = "complete";
+  } else if (fallbackButWellObserved) {
+    // Traversal may have failed, but the measured declaration surface is
+    // Large enough to keep the package directional rather than abstaining.
+    samplingClass = "complete";
   } else if (fewFilesOnly && hasSufficientSurface) {
     // Distinguish compact-complete (enough surface for accurate scoring) from compact-partial
     const isFullySufficient =
@@ -682,6 +710,9 @@ function computeCoverageDiagnostics(opts: {
       surfaceDeclarations >= MIN_MEASURED_DECLARATIONS * 2;
     samplingClass = isFullySufficient ? "compact-complete" : "compact-partial";
     compactReason = `${graphStats.totalReachable} file(s) but ${surfacePositions} positions and ${surfaceDeclarations} declarations — small-by-design library`;
+  } else if (isCompactSingleSurface) {
+    samplingClass = "compact-partial";
+    compactReason = `${graphStats.totalReachable} file(s) and ${surfaceDeclarations} declaration(s), but ${surfacePositions} positions — compact single-surface library`;
   } else {
     samplingClass = "undersampled";
   }
@@ -709,6 +740,49 @@ function computeCoverageDiagnostics(opts: {
   }
 
   return result;
+}
+
+/**
+ * Some package surfaces are small by design: they have too little data to be
+ * fully comparable, but enough coherent evidence to remain directional instead
+ * of fully degraded. This keeps off-corpus tiny packages from collapsing into
+ * abstentions while still capping confidence and comparability.
+ */
+function canKeepUndersampledPackageDirectional(
+  diagnostics: CoverageDiagnostics,
+  graphStats: GraphStats,
+): boolean {
+  if (!diagnostics.undersampled) {
+    return false;
+  }
+  if (graphStats.usedFallbackGlob) {
+    return false;
+  }
+  if (
+    diagnostics.measuredDeclarations < MIN_DIRECTIONAL_MEASURED_DECLARATIONS ||
+    diagnostics.measuredPositions < MIN_DIRECTIONAL_MEASURED_POSITIONS
+  ) {
+    const tinySingleSurface =
+      diagnostics.reachableFiles <= 1 &&
+      diagnostics.measuredDeclarations >= 1 &&
+      diagnostics.measuredPositions >= 1 &&
+      diagnostics.coverageFailureMode !== "@types-fragmentation";
+    const denseSingleDeclaration =
+      diagnostics.measuredDeclarations === 1 &&
+      diagnostics.measuredPositions >= Math.max(MIN_DIRECTIONAL_MEASURED_POSITIONS * 2, 8) &&
+      diagnostics.reachableFiles <= 2;
+    if (!denseSingleDeclaration && !tinySingleSurface) {
+      return false;
+    }
+  }
+
+  // Fragmented @types packages need a little more evidence before they can be
+  // Treated as directional rather than degraded.
+  if (diagnostics.coverageFailureMode === "@types-fragmentation") {
+    return diagnostics.measuredDeclarations >= 4 && diagnostics.measuredPositions >= 8;
+  }
+
+  return true;
 }
 
 export interface AnalyzeOptions {
@@ -1093,6 +1167,11 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     domainInference.confidence >= DOMAIN_CONFIDENCE_THRESHOLD &&
     (domainInference.ambiguityGap ?? 1) >= DOMAIN_AMBIGUITY_GAP &&
     domainOpt !== "off";
+  const domainDirectionalConfidenceMet =
+    domainInference.domain !== "general" &&
+    domainInference.confidence >= DOMAIN_DIRECTIONAL_CONFIDENCE_THRESHOLD &&
+    (domainInference.ambiguityGap ?? 1) >= DOMAIN_DIRECTIONAL_AMBIGUITY_GAP &&
+    domainOpt !== "off";
 
   // Allow domain scoring even with fallback glob, but only if not auto-disabled
   if (domainConfidenceMet && !usedFallbackGlob) {
@@ -1100,6 +1179,15 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       dimensions,
       domainInference.domain as DomainType,
       domainInference.confidence,
+    );
+  } else if (domainDirectionalConfidenceMet && !usedFallbackGlob) {
+    domainScore = computeDomainScore(
+      dimensions,
+      domainInference.domain as DomainType,
+      domainInference.confidence,
+    );
+    caveats.push(
+      `Domain score emitted directionally (${domainInference.domain}, confidence=${domainInference.confidence.toFixed(2)})`,
     );
   }
 
@@ -1125,16 +1213,16 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         ? "Domain scoring disabled"
         : `Domain confidence too low (${domainInference.confidence.toFixed(2)}) — scenario not applicable`;
     scenarioApplicabilityReasons.push(scenarioAbstentionReason);
-  } else if (!domainConfidenceMet) {
+  } else if (!domainDirectionalConfidenceMet) {
     scenarioAbstentionReason = `Domain confidence too low (${domainInference.confidence.toFixed(2)})`;
     scenarioApplicabilityReasons.push(scenarioAbstentionReason);
   } else if (usedFallbackGlob) {
     scenarioAbstentionReason = "Graph used fallback glob — scenario evaluation skipped";
     scenarioApplicabilityReasons.push(scenarioAbstentionReason);
-  } else if (domainInference.confidence < SCENARIO_CONFIDENCE_THRESHOLD) {
-    scenarioAbstentionReason = `Domain confidence ${domainInference.confidence.toFixed(2)} below scenario threshold`;
-    scenarioApplicabilityReasons.push(scenarioAbstentionReason);
   } else {
+    const directionalScenario =
+      domainInference.confidence < SCENARIO_CONFIDENCE_THRESHOLD &&
+      domainInference.confidence >= SCENARIO_DIRECTIONAL_CONFIDENCE_THRESHOLD;
     const pack = getScenarioPackWithVariant(
       domainInference.domain as DomainKey,
       consumerSurface,
@@ -1145,10 +1233,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       if (applicabilityCheck.applicable) {
         scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
         // Attach applicability status to the scenario score
-        scenarioScore.scenarioApplicability = scenarioApplicabilityStatus;
+        scenarioScore.scenarioApplicability = directionalScenario
+          ? "applicable_but_weak"
+          : scenarioApplicabilityStatus;
         scenarioApplicabilityReasons.push(
           `Scenario pack '${pack.name}' applicable for domain '${domainInference.domain}'`,
         );
+        if (directionalScenario) {
+          caveats.push(
+            `Scenario score emitted directionally (${domainInference.domain}, confidence=${domainInference.confidence.toFixed(2)})`,
+          );
+        }
       } else {
         scenarioAbstentionReason = `Scenario pack '${pack.name}' not applicable: ${applicabilityCheck.reason}`;
         scenarioApplicabilityReasons.push(scenarioAbstentionReason);
@@ -1295,9 +1390,12 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // --- Compute analysis status and score validity ---
   const isUndersampled = coverageDiagnostics.undersampled;
   const isFallbackGlob = usedFallbackGlob;
+  const keepUndersampledPackageDirectional =
+    mode === "package" && canKeepUndersampledPackageDirectional(coverageDiagnostics, graphStats);
   // Source mode: undersampling is informational only — don't degrade the result (WS6).
   // Source analyses always have usable scores; only package analyses degrade on insufficient coverage.
-  const shouldDegradeForUndersampling = isUndersampled && mode === "package";
+  const shouldDegradeForUndersampling =
+    isUndersampled && mode === "package" && !keepUndersampledPackageDirectional;
   const analysisStatus: AnalysisStatus = shouldDegradeForUndersampling ? "degraded" : "complete";
   let scoreValidity: ScoreValidity = "fully-comparable";
   if (shouldDegradeForUndersampling) {
@@ -1313,6 +1411,11 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   const degradedReason: string | undefined = isUndersampled
     ? `Undersampled: ${coverageDiagnostics.undersampledReasons.join("; ")}`
     : undefined;
+  if (keepUndersampledPackageDirectional) {
+    caveats.push(
+      `Undersampled package accepted as directional: ${coverageDiagnostics.undersampledReasons.join("; ")}`,
+    );
+  }
 
   // --- Build package identity ---
   const packageIdentity: PackageIdentity = options?.packageContext

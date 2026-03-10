@@ -1,6 +1,6 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { analyzeProject } from "../src/analyzer.js";
-import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const fixturesDir = resolve(import.meta.dirname, "fixtures");
@@ -181,6 +181,46 @@ describe("e2e: analyzeProject", () => {
     expect(ca!.score).toBeLessThan(50);
     const safety = getDimension(result, "apiSafety");
     expect(safety!.score).toBeLessThan(50);
+  });
+
+  it("keeps tiny declaration packages directional instead of degraded", () => {
+    const pkgDir = resolve(tmpdir(), `typegrade-tiny-dts-${Date.now()}`);
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, "package.json"),
+      JSON.stringify({ name: "tiny-dts-fixture", version: "1.0.0" }),
+    );
+    writeFileSync(
+      join(pkgDir, "index.d.ts"),
+      "export declare function ping(input: string): number;",
+    );
+
+    try {
+      const result = analyzeProject(pkgDir, {
+        mode: "package",
+        packageContext: {
+          graphStats: {
+            dedupByStrategy: {},
+            filesDeduped: 0,
+            totalAfterDedup: 1,
+            totalEntrypoints: 1,
+            totalReachable: 1,
+            usedFallbackGlob: false,
+          },
+          packageJsonPath: join(pkgDir, "package.json"),
+          packageName: "tiny-dts-fixture",
+          packageRoot: pkgDir,
+          typesEntrypoint: "index.d.ts",
+          typesSource: "bundled",
+        },
+        sourceFilesOptions: { includeDts: true },
+      });
+      expect(result.status).toBe("complete");
+      expect(result.scoreValidity).toBe("partially-comparable");
+      expect(result.coverageDiagnostics?.undersampled).toBeTruthy();
+    } finally {
+      rmSync(pkgDir, { force: true, recursive: true });
+    }
   });
 
   it("high-precision beats low-precision on consumer API", () => {
@@ -373,6 +413,162 @@ describe("e2e: analyzeProject", () => {
     expect(result.coverageDiagnostics!.typesSource).toBe("bundled");
     // With 10 reachable files and enough declarations, should not be undersampled
     expect(result.coverageDiagnostics!.undersampled).toBeFalsy();
+  });
+
+  it("keeps fallback-glob package analyses with rich measured surfaces directional", () => {
+    const fixtureDir = resolve(tmpdir(), `typegrade-fallback-rich-surface-${Date.now()}`);
+    mkdirSync(join(fixtureDir, "src"), { recursive: true });
+    try {
+      writeFileSync(
+        join(fixtureDir, "package.json"),
+        JSON.stringify({
+          name: "fallback-rich-surface",
+          private: true,
+          types: "src/index.ts",
+        }),
+      );
+      writeFileSync(
+        join(fixtureDir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            declaration: true,
+            module: "ESNext",
+            strict: true,
+            target: "ES2020",
+          },
+          include: ["src/**/*.ts"],
+        }),
+      );
+      writeFileSync(
+        join(fixtureDir, "src/index.ts"),
+        `
+          export interface Alpha { id: string; count: number; active: boolean }
+          export interface Beta { createdAt: Date; tags: string[]; nested: { ok: true } }
+          export interface Gamma { run(input: string): Promise<number>; status: "open" | "closed" }
+          export type Delta = { path: string; retries: 0 | 1 | 2; headers: Record<string, string> }
+          export type Epsilon = { user: Alpha; meta: Beta; combine(value: number): string }
+          export type Zeta = readonly [string, number, boolean]
+          export type Eta = Promise<{ ok: true; value: string }>
+          export type Theta = Record<"start" | "stop", (value: string) => number>
+          export const alphaValue: Alpha = { id: "a", count: 1, active: true };
+          export const betaValue: Beta = { createdAt: new Date(), tags: ["x"], nested: { ok: true } };
+          export function makeGamma(input: Alpha, flag: boolean): Gamma {
+            return { run: async () => input.count, status: flag ? "open" : "closed" };
+          }
+          export function toDelta(path: string, retries: 0 | 1 | 2): Delta {
+            return { path, retries, headers: { accept: "json" } };
+          }
+          export function useTheta(theta: Theta, key: "start" | "stop", value: string): number {
+            return theta[key](value);
+          }
+        `,
+      );
+
+      const result = analyzeProject(fixtureDir, {
+        mode: "package",
+        packageContext: {
+          graphStats: {
+            dedupByStrategy: {},
+            fallbackReason: "no-entrypoints-found",
+            filesDeduped: 0,
+            totalAfterDedup: 159,
+            totalEntrypoints: 0,
+            totalReachable: 159,
+            usedFallbackGlob: true,
+          },
+          packageJsonPath: join(fixtureDir, "package.json"),
+          packageName: "fallback-rich-surface",
+          packageRoot: fixtureDir,
+          typesEntrypoint: null,
+          typesSource: "bundled",
+        },
+        sourceFilesOptions: { includeDts: false },
+      });
+
+      expect(result.status).toBe("complete");
+      expect(result.scoreValidity).toBe("partially-comparable");
+      expect(result.coverageDiagnostics).toBeDefined();
+      expect(result.coverageDiagnostics!.undersampled).toBeFalsy();
+      expect(result.coverageDiagnostics!.coverageFailureMode).toBe("entrypoint-resolution");
+      expect(result.coverageDiagnostics!.measuredDeclarations).toBeGreaterThanOrEqual(10);
+      expect(result.coverageDiagnostics!.measuredPositions).toBeGreaterThanOrEqual(20);
+    } finally {
+      rmSync(fixtureDir, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a compact single-surface package directional instead of degrading it", () => {
+    const fixtureDir = resolve(tmpdir(), `typegrade-compact-surface-${Date.now()}`);
+    mkdirSync(join(fixtureDir, "src"), { recursive: true });
+    try {
+      writeFileSync(
+        join(fixtureDir, "package.json"),
+        JSON.stringify({
+          name: "compact-surface-fixture",
+          private: true,
+          types: "src/index.ts",
+        }),
+      );
+      writeFileSync(
+        join(fixtureDir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            declaration: true,
+            module: "ESNext",
+            strict: true,
+            target: "ES2020",
+          },
+          include: ["src/**/*.ts"],
+        }),
+      );
+      writeFileSync(
+        join(fixtureDir, "src/index.ts"),
+        `
+          export interface CompactContract {
+            alpha: string;
+            beta: number;
+            gamma: boolean;
+            delta: Date;
+            epsilon: string[];
+            zeta: Record<string, number>;
+            eta: Promise<string>;
+            theta: "open" | "closed";
+            iota(input: string): number;
+            kappa(input: number): string;
+          }
+        `,
+      );
+
+      const result = analyzeProject(fixtureDir, {
+        mode: "package",
+        packageContext: {
+          graphStats: {
+            dedupByStrategy: {},
+            filesDeduped: 0,
+            totalAfterDedup: 1,
+            totalEntrypoints: 1,
+            totalReachable: 1,
+            usedFallbackGlob: false,
+          },
+          packageJsonPath: join(fixtureDir, "package.json"),
+          packageName: "compact-surface-fixture",
+          packageRoot: fixtureDir,
+          typesEntrypoint: join(fixtureDir, "src/index.ts"),
+          typesSource: "bundled",
+        },
+        sourceFilesOptions: { includeDts: false },
+      });
+
+      expect(result.status).toBe("complete");
+      expect(result.scoreValidity).toBe("fully-comparable");
+      expect(result.coverageDiagnostics).toBeDefined();
+      expect(result.coverageDiagnostics!.samplingClass).toBe("compact-partial");
+      expect(result.coverageDiagnostics!.undersampled).toBeFalsy();
+      expect(result.coverageDiagnostics!.measuredDeclarations).toBe(1);
+      expect(result.coverageDiagnostics!.measuredPositions).toBeGreaterThanOrEqual(10);
+    } finally {
+      rmSync(fixtureDir, { force: true, recursive: true });
+    }
   });
 
   describe("schema consistency invariants", () => {

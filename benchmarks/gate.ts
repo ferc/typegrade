@@ -10,20 +10,38 @@ import {
   wilsonLowerBound,
   wilsonUpperBound,
 } from "./stats.js";
-import type { RedactedShadowSummary } from "./types.js";
-import { HOLDOUT_ASSERTIONS, SHADOW_ASSERTIONS } from "./types.js";
+import type {
+  RedactedMonorepoSummary,
+  RedactedShadowSummary,
+  RedactedSourceSummary,
+} from "./types.js";
+import {
+  HOLDOUT_ASSERTIONS,
+  MONOREPO_ASSERTIONS,
+  SHADOW_ASSERTIONS,
+  SOURCE_ASSERTIONS,
+} from "./types.js";
 
 const args = process.argv.slice(2);
 const evalMode = args.includes("--eval");
 const holdoutMode = args.includes("--holdout");
 const shadowMode = args.includes("--shadow");
-const gateMode: "train" | "holdout" | "eval" | "shadow" = evalMode
+const sourceMode = args.includes("--source");
+const monorepoMode = args.includes("--monorepo");
+const releaseMode = args.includes("--release");
+const gateMode: "train" | "holdout" | "eval" | "shadow" | "source" | "monorepo" | "release" = evalMode
   ? "eval"
   : holdoutMode
     ? "holdout"
     : shadowMode
       ? "shadow"
-      : "train";
+      : sourceMode
+        ? "source"
+        : monorepoMode
+          ? "monorepo"
+          : releaseMode
+            ? "release"
+            : "train";
 
 interface GateResult {
   gate: string;
@@ -96,6 +114,32 @@ function findLatestShadowSummary(): { summary: RedactedShadowSummary; ageMs: num
     const stat = statSync(summaryPath);
     const ageMs = Date.now() - stat.mtimeMs;
     const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as RedactedShadowSummary;
+    return { ageMs, summary };
+  } catch {
+    return null;
+  }
+}
+
+function findLatestSourceSummary(): { summary: RedactedSourceSummary; ageMs: number } | null {
+  const summaryPath = join(import.meta.dirname, "..", "benchmarks-output", "source-summary.json");
+  if (!existsSync(summaryPath)) return null;
+  try {
+    const stat = statSync(summaryPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as RedactedSourceSummary;
+    return { ageMs, summary };
+  } catch {
+    return null;
+  }
+}
+
+function findLatestMonorepoSummary(): { summary: RedactedMonorepoSummary; ageMs: number } | null {
+  const summaryPath = join(import.meta.dirname, "..", "benchmarks-output", "monorepo-summary.json");
+  if (!existsSync(summaryPath)) return null;
+  try {
+    const stat = statSync(summaryPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as RedactedMonorepoSummary;
     return { ageMs, summary };
   } catch {
     return null;
@@ -858,9 +902,10 @@ function runShadowSummaryGates(): GateResult[] {
   // Gate S1: Overall shadow gate pass/fail from the saved summary
   gates.push(
     runGate("shadow-all-gates-passed", () => {
-      const failedGates = summary.gates.filter((gg) => !gg.passed);
+      const releaseGates = summary.releaseGates ?? summary.gates;
+      const failedGates = releaseGates.filter((gg) => !gg.passed);
       if (failedGates.length === 0) {
-        return { detail: `${summary.gates.length} gates passed`, passed: true };
+        return { detail: `${releaseGates.length} gates passed`, passed: true };
       }
       const failedNames = failedGates.map((gg) => gg.gate).join(", ");
       return {
@@ -889,6 +934,130 @@ function runShadowSummaryGates(): GateResult[] {
   return gates;
 }
 
+function runSourceSummaryGates(): GateResult[] {
+  const gates: GateResult[] = [];
+  const sourceData = findLatestSourceSummary();
+
+  if (!sourceData) {
+    console.log("WARNING: No source summary found. Run 'pnpm benchmark:source' first.\n");
+    return [
+      {
+        detail: "No source summary file",
+        durationMs: 0,
+        gate: "source-summary-exists",
+        passed: false,
+      },
+    ];
+  }
+
+  const { ageMs, summary } = sourceData;
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+
+  gates.push(
+    runGate("source-summary-fresh", () => {
+      const ageHours = Math.round((ageMs / (60 * 60 * 1000)) * 10) / 10;
+      return { detail: `${ageHours}h old (max 24h)`, passed: ageMs < maxAgeMs };
+    }),
+  );
+  gates.push(
+    runGate("source-all-gates-passed", () => {
+      const failedGates = summary.gates.filter((gg) => !gg.passed);
+      if (failedGates.length === 0) {
+        return { detail: `${summary.gates.length} gates passed`, passed: true };
+      }
+      return {
+        detail: `${failedGates.length} failed: ${failedGates.map((gg) => gg.gate).join(", ")}`,
+        passed: false,
+      };
+    }),
+  );
+
+  const metrics = {
+    autofixCoherenceRate: summary.autofixCoherenceRate,
+    comparableRate: summary.comparableRate,
+    decisionGradeRate: summary.decisionGradeRate,
+    degradedRate: summary.degradedRate,
+    strongDecisionRate: summary.strongDecisionRate,
+  };
+
+  for (const assertion of SOURCE_ASSERTIONS) {
+    gates.push(runGate(`agg:${assertion.name}`, () => assertion.check(metrics)));
+  }
+
+  return gates;
+}
+
+function runMonorepoSummaryGates(): GateResult[] {
+  const gates: GateResult[] = [];
+  const monorepoData = findLatestMonorepoSummary();
+
+  if (!monorepoData) {
+    console.log("WARNING: No monorepo summary found. Run 'pnpm benchmark:monorepo' first.\n");
+    return [
+      {
+        detail: "No monorepo summary file",
+        durationMs: 0,
+        gate: "monorepo-summary-exists",
+        passed: false,
+      },
+    ];
+  }
+
+  const { ageMs, summary } = monorepoData;
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+
+  gates.push(
+    runGate("monorepo-summary-fresh", () => {
+      const ageHours = Math.round((ageMs / (60 * 60 * 1000)) * 10) / 10;
+      return { detail: `${ageHours}h old (max 24h)`, passed: ageMs < maxAgeMs };
+    }),
+  );
+  gates.push(
+    runGate("monorepo-all-gates-passed", () => {
+      const failedGates = summary.gates.filter((gg) => !gg.passed);
+      if (failedGates.length === 0) {
+        return { detail: `${summary.gates.length} gates passed`, passed: true };
+      }
+      return {
+        detail: `${failedGates.length} failed: ${failedGates.map((gg) => gg.gate).join(", ")}`,
+        passed: false,
+      };
+    }),
+  );
+
+  const metrics = {
+    comparableRate: summary.comparableRate,
+    decisionGradeRate: summary.decisionGradeRate,
+    degradedRate: summary.degradedRate,
+    healthCalibrationRate: summary.healthCalibrationRate,
+    strongDecisionRate: summary.strongDecisionRate,
+    workspaceCoverageRate: summary.workspaceCoverageRate,
+  };
+
+  for (const assertion of MONOREPO_ASSERTIONS) {
+    gates.push(runGate(`agg:${assertion.name}`, () => assertion.check(metrics)));
+  }
+
+  return gates;
+}
+
+function prefixGates(prefix: string, gates: GateResult[]): GateResult[] {
+  return gates.map((gate) => ({
+    ...gate,
+    gate: `${prefix}:${gate.gate}`,
+  }));
+}
+
+function runReleaseGates(): GateResult[] {
+  return [
+    ...prefixGates("train", runTrainGates()),
+    ...prefixGates("holdout", runHoldoutGates()),
+    ...prefixGates("shadow", runShadowSummaryGates()),
+    ...prefixGates("source", runSourceSummaryGates()),
+    ...prefixGates("monorepo", runMonorepoSummaryGates()),
+  ];
+}
+
 function main() {
   console.log(`=== typegrade Gate Check (${gateMode}) ===\n`);
 
@@ -899,7 +1068,13 @@ function main() {
         ? runHoldoutGates()
         : gateMode === "shadow"
           ? runShadowSummaryGates()
-          : runTrainGates();
+          : gateMode === "source"
+            ? runSourceSummaryGates()
+            : gateMode === "monorepo"
+              ? runMonorepoSummaryGates()
+              : gateMode === "release"
+                ? runReleaseGates()
+                : runTrainGates();
 
   // Print results
   console.log("=== Gate Results ===\n");
@@ -925,7 +1100,13 @@ function main() {
         ? "gate-holdout-report.json"
         : gateMode === "shadow"
           ? "gate-shadow-report.json"
-          : "gate-report.json";
+          : gateMode === "source"
+            ? "gate-source-report.json"
+            : gateMode === "monorepo"
+              ? "gate-monorepo-report.json"
+              : gateMode === "release"
+                ? "gate-release-report.json"
+                : "gate-report.json";
   const reportPath = join(outputDir, reportFilename);
   writeFileSync(
     reportPath,
@@ -944,8 +1125,15 @@ function main() {
   );
   console.log(`\nGate report saved to benchmarks-output/${reportFilename}`);
 
-  // Train and holdout gates are strict — eval and shadow gates are report-only (non-blocking)
-  if (!allPassed && (gateMode === "train" || gateMode === "holdout")) {
+  // Train, holdout, source, monorepo, and release gates are strict.
+  if (
+    !allPassed &&
+    (gateMode === "train" ||
+      gateMode === "holdout" ||
+      gateMode === "source" ||
+      gateMode === "monorepo" ||
+      gateMode === "release")
+  ) {
     process.exit(1);
   }
   if (!allPassed && gateMode === "eval") {

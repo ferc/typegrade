@@ -123,6 +123,76 @@ describe(extractPublicSurface, () => {
     });
   });
 
+  describe("export assignments", () => {
+    it("extracts the underlying public surface for export-equals functions", () => {
+      const surface = getSurfaceFromCode(`
+        declare function Builder(input: string, options?: { dryRun: boolean }): number;
+        export = Builder;
+      `);
+      const builderDecl = surface.declarations.find((decl) => decl.name === "Builder");
+      expect(builderDecl).toBeDefined();
+      expect(builderDecl!.kind).toBe("function");
+      expect(builderDecl!.positions.some((pos) => pos.role === "return")).toBeTruthy();
+      expect(builderDecl!.positions.filter((pos) => pos.role === "param")).toHaveLength(2);
+    });
+
+    it("falls back to a variable surface when export assignment target is opaque", () => {
+      const surface = getSurfaceFromCode(`
+        const runtimeValue = { enabled: true } as const;
+        export default runtimeValue;
+      `);
+      expect(surface.declarations.some((decl) => decl.kind === "variable")).toBeTruthy();
+      expect(surface.positions.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("re-exports", () => {
+    it("extracts export-star surfaces from JS-specifier entrypoints", () => {
+      const project = new Project({
+        compilerOptions: { module: 99, strict: true, target: 2 },
+        useInMemoryFileSystem: true,
+      });
+      project.createSourceFile(
+        "core.ts",
+        `
+        export interface Shared { id: string; }
+        export function create(input: string): Shared {
+          throw new Error("runtime");
+        }
+      `,
+      );
+      const entry = project.createSourceFile("index.ts", `export * from "./core.js";`);
+
+      const surface = extractPublicSurface([entry]);
+      expect(surface.declarations.some((decl) => decl.name === "create")).toBeTruthy();
+      expect(surface.declarations.some((decl) => decl.name === "Shared")).toBeTruthy();
+    });
+
+    it("extracts named re-export aliases from JS-specifier entrypoints", () => {
+      const project = new Project({
+        compilerOptions: { module: 99, strict: true, target: 2 },
+        useInMemoryFileSystem: true,
+      });
+      project.createSourceFile(
+        "core.ts",
+        `
+        export interface Shared { id: string; }
+        export function create(input: string): Shared {
+          throw new Error("runtime");
+        }
+      `,
+      );
+      const entry = project.createSourceFile(
+        "index.ts",
+        `export { create as make, Shared as MakeResult } from "./core.js";`,
+      );
+
+      const surface = extractPublicSurface([entry]);
+      expect(surface.declarations.some((decl) => decl.name === "make")).toBeTruthy();
+      expect(surface.declarations.some((decl) => decl.name === "MakeResult")).toBeTruthy();
+    });
+  });
+
   describe("merged declarations", () => {
     it("deduplicates identical declarations from multiple sources", () => {
       const project = new Project({
