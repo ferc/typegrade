@@ -1,3 +1,4 @@
+import type { AgentReport } from "./agent/types.js";
 import type { GraphStats } from "./graph/types.js";
 
 // --- Analysis Status ---
@@ -1569,7 +1570,7 @@ export interface SmartNextAction {
 /** Optional supplements attached to a smart result */
 export interface SmartSupplements {
   /** Agent report (when --improve is used or --agent) */
-  agentReport?: unknown;
+  agentReport?: AgentReport;
   /** Boundary summary (when available on a repo audit) */
   boundaries?: {
     quality: BoundaryQualityScore | null;

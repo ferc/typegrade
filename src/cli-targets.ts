@@ -48,6 +48,12 @@ export function classifyTarget(raw: string): ClassifiedTarget {
     return { kind: "workspace", raw, resolvedPath: absPath };
   }
 
+  // Paths inside node_modules are always packages, never source projects
+  // (tsconfig.json / src/ inside node_modules are false positives for repo detection)
+  if (absPath.includes("/node_modules/")) {
+    return { kind: "package-path", raw, resolvedPath: absPath };
+  }
+
   // Check for source project indicators
   if (isSourceProject(absPath)) {
     return { kind: "repo", raw, resolvedPath: absPath };

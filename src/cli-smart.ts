@@ -289,7 +289,11 @@ async function runPackageCompare(ctx: PairRunContext): Promise<SmartDispatchResu
     resultB: compareResult.resultB,
   };
 
-  const trust = buildCompareTrust(compareResult.resultA, compareResult.resultB);
+  const trust = buildCompareTrust(
+    compareResult.resultA,
+    compareResult.resultB,
+    compareResult.decision,
+  );
   const summary = buildCompareSummary({
     decision: compareResult.decision,
     nameA: ctx.targetA.raw,
@@ -327,17 +331,7 @@ async function runFitCompare(ctx: PairRunContext): Promise<SmartDispatchResult> 
   }
   const result = fitCompare(ctx.targetA.raw, ctx.targetB.raw, fitOpts);
 
-  const trust: TrustSummary = {
-    canCompare: true,
-    canGate: true,
-    classification: "trusted",
-    reasons: [],
-  };
-
-  if (result.codebase.status === "degraded") {
-    trust.classification = "directional";
-    trust.reasons.push("Codebase analysis was degraded");
-  }
+  const trust = buildFitCompareTrust(result);
 
   const decision = result.adoptionDecision;
   const summary = buildFitSummary(ctx.targetA.raw, ctx.targetB.raw, result);
@@ -673,18 +667,56 @@ function buildDefaultTrust(result: AnalysisResult): TrustSummary {
   return { canCompare: true, canGate: true, classification: "trusted", reasons: [] };
 }
 
-function buildCompareTrust(resultA: AnalysisResult, resultB: AnalysisResult): TrustSummary {
+function buildCompareTrust(
+  resultA: AnalysisResult,
+  resultB: AnalysisResult,
+  decision?: SmartComparePayload["decision"],
+): TrustSummary {
   const reasons: string[] = [];
-  if (resultA.status === "degraded") {
+
+  // Check per-result trust summaries first
+  if (resultA.trustSummary?.classification === "abstained") {
+    reasons.push(`${resultA.projectName}: ${resultA.trustSummary.reasons[0] ?? "abstained"}`);
+  } else if (resultA.status === "degraded") {
     reasons.push(`${resultA.projectName} is degraded`);
   }
-  if (resultB.status === "degraded") {
+  if (resultB.trustSummary?.classification === "abstained") {
+    reasons.push(`${resultB.projectName}: ${resultB.trustSummary.reasons[0] ?? "abstained"}`);
+  } else if (resultB.status === "degraded") {
     reasons.push(`${resultB.projectName} is degraded`);
   }
   if (reasons.length > 0) {
     return { canCompare: false, canGate: false, classification: "abstained", reasons };
   }
+
+  // Check if decision itself abstained or is incomparable
+  if (decision && (decision.outcome === "abstained" || decision.outcome === "incomparable")) {
+    const decisionReasons =
+      decision.blockingReasons.length > 0
+        ? decision.blockingReasons
+        : [`Decision outcome: ${decision.outcome}`];
+    return {
+      canCompare: false,
+      canGate: false,
+      classification: decision.outcome === "abstained" ? "abstained" : "directional",
+      reasons: decisionReasons,
+    };
+  }
+
+  // Check per-result trust for directional downgrades
+  const directionalReasons: string[] = [];
+  if (resultA.trustSummary?.classification === "directional") {
+    directionalReasons.push(
+      `${resultA.projectName}: ${resultA.trustSummary.reasons[0] ?? "directional"}`,
+    );
+  }
+  if (resultB.trustSummary?.classification === "directional") {
+    directionalReasons.push(
+      `${resultB.projectName}: ${resultB.trustSummary.reasons[0] ?? "directional"}`,
+    );
+  }
   if (
+    directionalReasons.length > 0 ||
     resultA.scoreValidity !== "fully-comparable" ||
     resultB.scoreValidity !== "fully-comparable"
   ) {
@@ -692,9 +724,69 @@ function buildCompareTrust(resultA: AnalysisResult, resultB: AnalysisResult): Tr
       canCompare: true,
       canGate: false,
       classification: "directional",
-      reasons: ["Reduced comparability"],
+      reasons: directionalReasons.length > 0 ? directionalReasons : ["Reduced comparability"],
     };
   }
+
+  return { canCompare: true, canGate: true, classification: "trusted", reasons: [] };
+}
+
+function buildFitCompareTrust(result: FitCompareResult): TrustSummary {
+  const reasons: string[] = [];
+
+  // Check candidate trust summaries
+  const trustA = result.candidateA.result.trustSummary;
+  const trustB = result.candidateB.result.trustSummary;
+
+  if (trustA?.classification === "abstained") {
+    reasons.push(`${result.candidateA.packageName}: ${trustA.reasons[0] ?? "abstained"}`);
+  }
+  if (trustB?.classification === "abstained") {
+    reasons.push(`${result.candidateB.packageName}: ${trustB.reasons[0] ?? "abstained"}`);
+  }
+  if (reasons.length > 0) {
+    return { canCompare: false, canGate: false, classification: "abstained", reasons };
+  }
+
+  // Check decision outcome
+  const decision = result.adoptionDecision;
+  if (decision.outcome === "abstained" || decision.outcome === "incomparable") {
+    const decisionReasons =
+      decision.blockingReasons.length > 0
+        ? decision.blockingReasons
+        : [`Decision outcome: ${decision.outcome}`];
+    return {
+      canCompare: false,
+      canGate: false,
+      classification: decision.outcome === "abstained" ? "abstained" : "directional",
+      reasons: decisionReasons,
+    };
+  }
+
+  // Check for directional downgrades
+  const directionalReasons: string[] = [];
+  if (trustA?.classification === "directional") {
+    directionalReasons.push(
+      `${result.candidateA.packageName}: ${trustA.reasons[0] ?? "directional"}`,
+    );
+  }
+  if (trustB?.classification === "directional") {
+    directionalReasons.push(
+      `${result.candidateB.packageName}: ${trustB.reasons[0] ?? "directional"}`,
+    );
+  }
+  if (result.codebase.status === "degraded") {
+    directionalReasons.push("Codebase analysis was degraded");
+  }
+  if (directionalReasons.length > 0) {
+    return {
+      canCompare: true,
+      canGate: false,
+      classification: "directional",
+      reasons: directionalReasons,
+    };
+  }
+
   return { canCompare: true, canGate: true, classification: "trusted", reasons: [] };
 }
 

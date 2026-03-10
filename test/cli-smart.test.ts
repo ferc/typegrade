@@ -39,6 +39,17 @@ describe("target classification", () => {
     const result = classifyTarget("$$$invalid!!!");
     expect(result.kind).toBe("invalid");
   });
+
+  it("classifies node_modules path as package-path, not repo", () => {
+    // Installed packages may contain tsconfig.json or src/ but should never be classified as repos
+    const result = classifyTarget("node_modules/typescript");
+    expect(result.kind).toBe("package-path");
+  });
+
+  it("classifies scoped node_modules path as package-path", () => {
+    const result = classifyTarget("node_modules/@types/node");
+    expect(result.kind).toBe("package-path");
+  });
 });
 
 describe("local target check", () => {
