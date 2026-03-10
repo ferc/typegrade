@@ -11,7 +11,7 @@ import { scorePackage } from "../src/package-scorer.js";
 import type { AnalysisResult } from "../src/types.js";
 import type { RedactedShadowSummary } from "./types.js";
 import { loadManifest, samplePool } from "./split-loader.js";
-import { minSampleForBound, wilsonUpperBound } from "./stats.js";
+import { minSampleForBound, wilsonLowerBound, wilsonUpperBound } from "./stats.js";
 
 interface ShadowLatestConfig {
   /** Number of packages to sample */
