@@ -107,7 +107,7 @@ When using `--min-score` directly, abstained results are rejected
 automatically. For custom JSON-based gates, check `trustSummary.canGate`
 to decide whether the result is reliable enough to gate on.
 
-In 0.14.0, trust classification is stricter: source-mode fallback resolution
+In 0.15.0, trust classification is stricter: source-mode fallback resolution
 now produces `"directional"` (not `"trusted"`), and composite confidence is
 checked — if any global composite has confidence below 0.5, the result is
 classified as `"directional"` regardless of other signals.

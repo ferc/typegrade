@@ -141,7 +141,7 @@ npx typegrade lib-a lib-b --json | jq '.primary.decision.decisionConfidence'
 
 Small deltas (under 5 points) are often within confidence margins. Check
 `confidenceSummary.sampleCoverage` and `status` for both packages before
-acting on narrow differences. In 0.14.0, also check `evidenceQualityA` and
+acting on narrow differences. In 0.15.0, also check `evidenceQualityA` and
 `evidenceQualityB` on the comparison object — low evidence quality on either
 side weakens the comparison.
 

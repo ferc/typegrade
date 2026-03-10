@@ -133,11 +133,11 @@ function computeCodebaseRelevance(
 ): { relevance: number; evidence: string[] } {
   const evidence: string[] = [];
   let relevanceScore = 0;
-  let signalCount = 0;
+  let totalWeight = 0;
 
   // Domain compatibility (40% weight)
   relevanceScore += domainCompatibility * 0.4;
-  signalCount++;
+  totalWeight += 0.4;
   if (domainCompatibility >= 70) {
     evidence.push(`Domain match: compatible (${domainCompatibility})`);
   } else if (domainCompatibility >= 50) {
@@ -158,7 +158,7 @@ function computeCodebaseRelevance(
     const gap = Math.abs(candidateTs - codebaseTs);
     const alignScore = Math.max(0, 100 - gap * 2);
     relevanceScore += alignScore * 0.3;
-    signalCount++;
+    totalWeight += 0.3;
     if (gap < 10) {
       evidence.push(`Type safety aligned (gap: ${gap})`);
     } else {
@@ -178,7 +178,7 @@ function computeCodebaseRelevance(
     const bdGap = Math.abs(candidateBd - codebaseBd);
     const bdAlign = Math.max(0, 100 - bdGap * 1.5);
     relevanceScore += bdAlign * 0.3;
-    signalCount++;
+    totalWeight += 0.3;
     if (bdGap < 15) {
       evidence.push(`Boundary discipline aligned (gap: ${bdGap})`);
     } else {
@@ -186,8 +186,7 @@ function computeCodebaseRelevance(
     }
   }
 
-  const relevance =
-    signalCount > 0 ? Math.round((relevanceScore / (signalCount * 0.01)) * 0.01) : 50;
+  const relevance = totalWeight > 0 ? Math.round(relevanceScore / totalWeight) : 50;
   return { evidence, relevance: Math.min(100, Math.max(0, relevance)) };
 }
 
@@ -290,8 +289,8 @@ function computeDomainCompatibility(candidate: AnalysisResult, codebase: Analysi
     return Math.round(70 + confidence * 30);
   }
 
-  // General-purpose libraries are moderately compatible with any domain
-  if (candidateDomain === "general" || candidateDomain === "utility") {
+  // Cross-cutting libraries are moderately compatible with any domain
+  if (BROADLY_APPLICABLE_DOMAINS.has(candidateDomain)) {
     return 60;
   }
 
@@ -465,13 +464,22 @@ function determineFitOutcome(
 }
 
 /** Minimum codebase relevance to allow a fit-compare recommendation */
-const MIN_CODEBASE_RELEVANCE = 60;
+const MIN_CODEBASE_RELEVANCE = 40;
 
 /** Minimum fit score delta for a recommendation when confidence is below 0.70 */
 const MIN_FIT_DELTA_LOW_CONFIDENCE = 8;
 
-/** Domains that are considered compatible with any other domain */
-const CROSS_DOMAIN_COMPATIBLE = new Set(["general", "utility"]);
+/** Domains whose libraries are commonly used across all project types */
+const BROADLY_APPLICABLE_DOMAINS = new Set([
+  "general",
+  "utility",
+  "validation",
+  "schema",
+  "testing",
+]);
+
+/** Domains that are considered compatible with any other domain (for candidate-vs-candidate check) */
+const CROSS_DOMAIN_COMPATIBLE = new Set(["general", "utility", "validation", "schema", "testing"]);
 
 /**
  * Build an abstained fit-compare decision.
@@ -542,12 +550,12 @@ function computeAdoptionDecision(
 
   // Codebase relevance: abstain when both candidates have low relevance
   if (
-    candidateA.domainCompatibility < MIN_CODEBASE_RELEVANCE &&
-    candidateB.domainCompatibility < MIN_CODEBASE_RELEVANCE
+    (candidateA.codebaseRelevance ?? 0) < MIN_CODEBASE_RELEVANCE &&
+    (candidateB.codebaseRelevance ?? 0) < MIN_CODEBASE_RELEVANCE
   ) {
     return buildFitAbstention(
       [
-        `Both candidates have low codebase relevance: ${candidateA.packageName} (${candidateA.domainCompatibility}) and ${candidateB.packageName} (${candidateB.domainCompatibility}) — neither fits the codebase well`,
+        `Both candidates have low codebase relevance: ${candidateA.packageName} (${candidateA.codebaseRelevance ?? 0}) and ${candidateB.packageName} (${candidateB.codebaseRelevance ?? 0}) — neither fits the codebase well`,
       ],
       "low-codebase-relevance",
     );

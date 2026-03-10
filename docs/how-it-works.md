@@ -70,7 +70,7 @@ Every `AnalysisResult` carries two top-level discriminators:
 
 The following fields are always present on every `AnalysisResult`, regardless of status:
 
-- `analysisSchemaVersion` — semver string identifying the result schema (currently `0.14.0` as of 2026-03-10).
+- `analysisSchemaVersion` — semver string identifying the result schema (currently `0.15.0` as of 2026-03-10).
 - `status` — the `AnalysisStatus` value.
 - `scoreValidity` — the `ScoreValidity` value.
 - `globalScores` — structured global composite scores (Consumer API, Agent Readiness, Type Safety).
@@ -286,7 +286,7 @@ The `chosenStrategy` field records which strategy produced the final result (e.g
 
 ## Execution diagnostics
 
-Every `AnalysisResult` includes an `executionDiagnostics` field (as of schema 0.14.0) that provides observability into the analysis pipeline execution.
+Every `AnalysisResult` includes an `executionDiagnostics` field (as of schema 0.15.0) that provides observability into the analysis pipeline execution.
 
 ### ExecutionDiagnostics fields
 
@@ -470,7 +470,7 @@ Each recommendation includes an `action`, `reason`, `impact` level (high/medium/
 
 ## Fix planning pipeline
 
-Boundary analysis is enabled by default for `self-analyze`, `fix-plan`, and `apply-fixes` commands (as of schema 0.14.0). Boundary hotspots flow into the issue and fix-plan pipelines alongside other dimension issues.
+Boundary analysis is enabled by default for `self-analyze`, `fix-plan`, and `apply-fixes` commands (as of schema 0.15.0). Boundary hotspots flow into the issue and fix-plan pipelines alongside other dimension issues.
 
 The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption. Actionable issues are capped at 50 (the agent issue budget, or 25 in strict/source mode), sorted by `agentPriority` descending with source-owned issues prioritized first. Degraded results with all-null composite scores emit an empty report with no fix batches.
 

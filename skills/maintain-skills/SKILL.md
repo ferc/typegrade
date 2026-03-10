@@ -152,14 +152,14 @@ commit as the code change that affects them.
 Wrong:
 
 ```yaml
-# In SKILL.md frontmatter after a 0.13.0 -> 0.14.0 release
-library_version: "0.13.0"
+# In SKILL.md frontmatter after a 0.14.0 -> 0.15.0 release
+library_version: "0.14.0"
 ```
 
 Correct:
 
 ```yaml
-library_version: "0.14.0"
+library_version: "0.15.0"
 ```
 
 The `stale` check compares `library_version` against the published npm version.

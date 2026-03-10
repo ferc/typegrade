@@ -85,7 +85,7 @@ The JSON output is an `AnalysisResult` object. Here are the stable fields:
 ```typescript
 interface AnalysisResult {
   // --- Mandatory envelope fields (always present) ---
-  analysisSchemaVersion: string; // e.g. "0.14.0"
+  analysisSchemaVersion: string; // e.g. "0.15.0"
   status: AnalysisStatus; // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
   scoreValidity: ScoreValidity; // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
   degradedReason?: string; // Present when status is 'degraded'
@@ -127,7 +127,7 @@ interface AnalysisResult {
   noiseSummary?: NoiseSummary; // Signal hygiene breakdown (always present)
   autofixSummary?: AutofixSummary; // Agent mode
 
-  // --- New in 0.14.0 ---
+  // --- New in 0.15.0 ---
   executionDiagnostics?: ExecutionDiagnostics; // Pipeline path, phase timings, resource warnings
   monorepoHealth?: MonorepoHealthSummary; // Workspace health (source mode, workspace root)
 }
@@ -237,7 +237,7 @@ interface ResolutionDiagnostics {
 `"graph-build"`. Use `resolutionDiagnostics` to trace exactly where in
 the acquisition pipeline the analysis succeeded or failed.
 
-### ExecutionDiagnostics (new in 0.14.0)
+### ExecutionDiagnostics (new in 0.15.0)
 
 ```typescript
 interface ExecutionDiagnostics {

@@ -210,7 +210,7 @@ Fix batches group related issues and are ordered by impact (highest first):
 Each batch shows `requiresHumanReview: true` when the fix might change
 runtime behavior. Batches now include `agentInstructions` (step-by-step
 guidance for applying the fix), `rollbackFiles` (files to revert on failure),
-and `rollbackHint` (structured rollback command). In 0.14.0, boundary
+and `rollbackHint` (structured rollback command). In 0.15.0, boundary
 hotspots are promoted to first-class Issues, so they appear in fix batches
 and agent reports alongside other issues.
 

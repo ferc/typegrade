@@ -164,7 +164,7 @@ Checks for runtime validation at I/O boundaries: `JSON.parse()`, `fetch()`, file
 
 When boundary flow analysis is enabled, this dimension also incorporates the **boundary quality score** — a composite of validation coverage, untrusted-boundary penalties, and trust-model accuracy. See [How It Works: Boundary flow analysis](how-it-works.md#boundary-flow-analysis) for the full scoring formula.
 
-As of schema 0.14.0, boundary hotspots are converted to first-class `Issue` records with `rootCauseCategory` and `suggestedFixKind` mapped from the boundary type. These issues appear in `topIssues` and flow into the fix-plan pipeline, enabling agent-driven boundary remediation through the standard batching system. See [How It Works: Boundary-to-issue pipeline](how-it-works.md#boundary-to-issue-pipeline).
+As of schema 0.15.0, boundary hotspots are converted to first-class `Issue` records with `rootCauseCategory` and `suggestedFixKind` mapped from the boundary type. These issues appear in `topIssues` and flow into the fix-plan pipeline, enabling agent-driven boundary remediation through the standard batching system. See [How It Works: Boundary-to-issue pipeline](how-it-works.md#boundary-to-issue-pipeline).
 
 ### configDiscipline (source only)
 
