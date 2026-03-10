@@ -5,6 +5,7 @@ dist/
 .DS_Store
 
 .claude/plans/
+.typegrade/
 benchmarks/results/
 benchmarks-output/
 benchmarks-output/eval-raw/
