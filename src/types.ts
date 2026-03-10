@@ -1504,6 +1504,99 @@ export type ScenarioResultOutcome =
   | "not_applicable"
   | "insufficient_evidence";
 
+// --- Smart CLI Result ---
+
+/** Mode of the smart root command */
+export type SmartMode = "repo-audit" | "package-score" | "package-compare" | "fit-compare";
+
+/** Target kind resolved by smart dispatch */
+export type SmartTargetKind = "repo" | "workspace" | "package" | "pair";
+
+/** Normalized scorecard entry for smart CLI output */
+export interface ScorecardEntry {
+  /** Composite key (e.g. "consumerApi") */
+  key: string;
+  /** Human label */
+  label: string;
+  /** Score 0-100 or null if degraded */
+  score: number | null;
+  /** Letter grade or null */
+  grade: string | null;
+}
+
+/** Normalized summary for smart CLI output */
+export interface SmartSummary {
+  /** One-line headline verdict */
+  headline: string;
+  /** Short verdict: "good", "needs-work", "poor", "degraded", "abstained" */
+  verdict: "good" | "needs-work" | "poor" | "degraded" | "abstained";
+  /** Normalized scorecard */
+  scorecard: ScorecardEntry[];
+  /** Top positive reasons (max 3) */
+  topReasons: string[];
+  /** Top risks or concerns (max 3) */
+  topRisks: string[];
+}
+
+/** Next best action for the user/agent */
+export interface SmartNextAction {
+  /** Action kind */
+  kind: "fix" | "investigate" | "compare" | "adopt" | "none";
+  /** Short action title */
+  title: string;
+  /** Why this action matters */
+  why: string;
+  /** Files to touch (empty if not applicable) */
+  files: string[];
+  /** How to verify the action succeeded */
+  verification: string;
+}
+
+/** Optional supplements attached to a smart result */
+export interface SmartSupplements {
+  /** Agent report (when --improve is used or --agent) */
+  agentReport?: unknown;
+  /** Boundary summary (when available on a repo audit) */
+  boundaries?: {
+    quality: BoundaryQualityScore | null;
+    summary: BoundarySummary | null;
+    hotspots: BoundaryHotspot[];
+  };
+  /** Monorepo health (when workspace root detected) */
+  monorepo?: MonorepoHealthSummary;
+}
+
+/** Smart CLI result — returned by the root command with --json */
+export interface SmartCliResult {
+  /** Analysis schema version */
+  analysisSchemaVersion: string;
+  /** Result kind discriminator */
+  resultKind: "smart-cli";
+  /** Detected smart mode */
+  mode: SmartMode;
+  /** Target kind */
+  targetKind: SmartTargetKind;
+  /** Normalized summary */
+  summary: SmartSummary;
+  /** Trust summary */
+  trust: TrustSummary;
+  /** Mode-specific primary payload */
+  primary: AnalysisResult | SmartComparePayload | FitCompareResult;
+  /** Optional supplementary data */
+  supplements: SmartSupplements;
+  /** Recommended next action */
+  nextAction: SmartNextAction;
+  /** Execution diagnostics */
+  executionDiagnostics: ExecutionDiagnostics;
+}
+
+/** Compare payload shape in smart mode */
+export interface SmartComparePayload {
+  resultA: AnalysisResult;
+  resultB: AnalysisResult;
+  decision: ComparisonDecisionReport;
+}
+
 // --- Analysis Schema ---
 
 /** Current schema version for analysis output */

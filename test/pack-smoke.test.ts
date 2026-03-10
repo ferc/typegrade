@@ -9,6 +9,7 @@ describe("pack smoke test", () => {
     const exportedNames = Object.keys(indexExports).toSorted();
     expect(exportedNames).toStrictEqual([
       "ANALYSIS_SCHEMA_VERSION",
+      "SmartUsageError",
       "analyzeBoundariesOnly",
       "analyzeMonorepo",
       "analyzeProject",
@@ -20,6 +21,7 @@ describe("pack smoke test", () => {
       "buildFixPlan",
       "buildTaintFlowChains",
       "classifyFileOrigin",
+      "classifyTarget",
       "comparePackages",
       "computeBoundaryHotspots",
       "computeBoundaryQuality",
@@ -30,6 +32,8 @@ describe("pack smoke test", () => {
       "filterIssues",
       "fitCompare",
       "gatherProfileSignals",
+      "isLocalTarget",
+      "isPackageTarget",
       "loadConfig",
       "normalizeResult",
       "renderAgentJson",
@@ -39,6 +43,7 @@ describe("pack smoke test", () => {
       "renderJson",
       "renderReport",
       "resolveFileOwnership",
+      "runSmart",
       "scorePackage",
     ]);
   });

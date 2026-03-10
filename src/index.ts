@@ -57,6 +57,12 @@ export { loadConfig } from "./config.js";
 // Constants
 export { ANALYSIS_SCHEMA_VERSION } from "./types.js";
 
+// Smart CLI
+export { classifyTarget, isLocalTarget, isPackageTarget } from "./cli-targets.js";
+export type { ClassifiedTarget, TargetKind } from "./cli-targets.js";
+export { runSmart, SmartUsageError } from "./cli-smart.js";
+export type { SmartDispatchResult, SmartOptions } from "./cli-smart.js";
+
 // Stable public types
 export type {
   AbortCondition,
@@ -153,7 +159,15 @@ export type {
   ScenarioVariant,
   ScoreComparability,
   ScoreValidity,
+  ScorecardEntry,
   ShadowLatestResult,
+  SmartCliResult,
+  SmartComparePayload,
+  SmartMode,
+  SmartNextAction,
+  SmartSummary,
+  SmartSupplements,
+  SmartTargetKind,
   SourceModeConfidence,
   SuggestedFixKind,
   SuppressionCategory,

@@ -10,6 +10,7 @@ import type {
   FixPlan,
   MonorepoReport,
 } from "./types.js";
+import { SmartUsageError, runSmart } from "./cli-smart.js";
 import {
   renderDimensionTable,
   renderExplainability,
@@ -20,6 +21,7 @@ import type { AgentReport } from "./agent/types.js";
 import { Command } from "commander";
 import type { DomainType } from "./domain.js";
 import pc from "picocolors";
+import { renderSmartResult } from "./cli-smart-render.js";
 
 function getAgentReadinessScore(result: AnalysisResult): number {
   const ar = result.composites.find((comp) => comp.key === "agentReadiness");
@@ -155,11 +157,69 @@ export function runCli() {
     .option("--no-color", "Disable colors")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
     .option("--profile <profile>", `Analysis profile: ${VALID_PROFILES.join("|")}`)
-    .option("--agent", "Agent-optimized output (precision-first, fix batches)");
+    .option("--agent", "Agent-optimized output (precision-first, fix batches)")
+    .option("--improve", "Improvement mode: analyze and suggest next fixes")
+    .option("--against <path>", "Codebase to compare packages against (with two targets)")
+    .option("--no-cache", "Disable package cache (always install fresh)")
+    .argument("[targets...]", "Target(s): path, package name, or two packages to compare")
+    .action(async (targets: string[], cmdOpts: Record<string, unknown>) => {
+      const parentOpts = program.opts();
+      const opts = { ...parentOpts, ...cmdOpts };
+
+      // If --agent without --improve, fall through to analyze for backwards compat
+      if (opts.agent && !opts.improve) {
+        return runAnalyzeAction(program, targets[0], opts);
+      }
+
+      try {
+        const smartOpts = {
+          against: typeof opts.against === "string" ? opts.against : undefined,
+          color: typeof opts.color === "boolean" ? opts.color : undefined,
+          domain: parseDomainOption(String(opts.domain ?? "auto")),
+          explain: Boolean(opts.explain),
+          improve: Boolean(opts.improve),
+          json: Boolean(opts.json),
+          minScore: typeof opts.minScore === "number" ? opts.minScore : undefined,
+          noCache: opts.cache === false,
+          verbose: Boolean(opts.verbose),
+        };
+
+        if (smartOpts.color === false) {
+          pc.isColorSupported = false;
+        }
+
+        const { result, exitCode } = await runSmart(targets, smartOpts);
+
+        if (smartOpts.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(renderSmartResult(result));
+        }
+
+        if (exitCode !== 0) {
+          process.exit(exitCode);
+        }
+      } catch (error) {
+        if (error instanceof SmartUsageError) {
+          console.error(pc.red(`Error: ${error.message}`));
+          console.error("");
+          console.error("Usage:");
+          console.error("  typegrade .                        Audit a local project");
+          console.error("  typegrade zod                      Score a package");
+          console.error("  typegrade zod valibot              Compare two packages");
+          console.error("  typegrade zod valibot --against .  Choose the best fit");
+          console.error("  typegrade . --improve              Get improvement suggestions");
+          process.exit(1);
+        }
+        throw error;
+      }
+    });
+
+  // --- Advanced commands (hidden from primary help) ---
 
   program
-    .command("analyze [path]", { isDefault: true })
-    .description("Analyze a local TypeScript project (default: .)")
+    .command("analyze [path]", { hidden: true })
+    .description("Analyze a local TypeScript project")
     .option("--json", "Output as JSON")
     .option("--min-score <n>", "Exit code 1 if score < n (CI gate)", parseInt)
     .option("--verbose", "Show per-dimension breakdown")
@@ -171,41 +231,14 @@ export function runCli() {
     .option("--include-indirect", "Include indirectly fixable issues")
     .option("--budget <n>", "Maximum actionable issues to include", parseInt)
     .option("--strict-agent", "Enforce most conservative filter mode (with --agent)")
-    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
-      const projectPath = path ?? ".";
-      const domain = parseDomainOption(String(opts.domain ?? "auto"));
-      const profile = opts.profile ? parseProfileOption(String(opts.profile)) : undefined;
-      const agent = Boolean(opts.agent);
-      const { analyzeProject } = await import("./analyzer.js");
-      const result = analyzeProject(projectPath, {
-        agent,
-        budget: typeof opts["budget"] === "number" ? opts["budget"] : undefined,
-        domain,
-        explain: Boolean(opts.explain),
-        includeGenerated: Boolean(opts["includeGenerated"]),
-        includeIndirect: Boolean(opts["includeIndirect"]),
-        profile,
-      });
-
-      // If --agent + --strict-agent, rebuild agent report with strict settings
-      if (agent && opts["strictAgent"]) {
-        const { buildAgentReport, renderAgentJson } = await import("./agent/index.js");
-        const agentReport = buildAgentReport(result, { minConfidence: 0.8 });
-        if (opts["json"]) {
-          console.log(renderAgentJson(agentReport));
-        } else {
-          await outputResult(result, toOutputOptions(opts));
-        }
-        return;
-      }
-
-      await outputResult(result, toOutputOptions(opts));
+      return runAnalyzeAction(program, path, opts);
     });
 
   program
-    .command("score <package>")
+    .command("score <package>", { hidden: true })
     .description("Score an npm package or local package path")
     .option("--json", "Output as JSON")
     .option("--verbose", "Show per-dimension breakdown")
@@ -222,7 +255,7 @@ export function runCli() {
     });
 
   program
-    .command("self-analyze [path]")
+    .command("self-analyze [path]", { hidden: true })
     .description("Analyze and suggest improvements (closed-loop self-improvement)")
     .option("--json", "Output as JSON")
     .option("--apply", "Apply safe fixes automatically (dry-run by default)")
@@ -267,7 +300,7 @@ export function runCli() {
     });
 
   program
-    .command("compare <pkgA> <pkgB>")
+    .command("compare <pkgA> <pkgB>", { hidden: true })
     .description("Compare two packages side-by-side")
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
@@ -308,7 +341,7 @@ export function runCli() {
     });
 
   program
-    .command("boundaries [path]")
+    .command("boundaries [path]", { hidden: true })
     .description("Analyze boundary trust and validation coverage")
     .option("--json", "Output as JSON")
     .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
@@ -336,7 +369,7 @@ export function runCli() {
     });
 
   program
-    .command("fix-plan [path]")
+    .command("fix-plan [path]", { hidden: true })
     .description("Generate a fix plan for improving type quality")
     .option("--json", "Output as JSON")
     .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
@@ -360,7 +393,7 @@ export function runCli() {
     });
 
   program
-    .command("apply-fixes [path]")
+    .command("apply-fixes [path]", { hidden: true })
     .description("Apply safe fixes from a fix plan")
     .option("--mode <mode>", "Fix mode: safe|review", "safe")
     .option("--json", "Output as JSON")
@@ -388,7 +421,7 @@ export function runCli() {
     });
 
   program
-    .command("diff <baseline> <target>")
+    .command("diff <baseline> <target>", { hidden: true })
     .description("Compare two analysis snapshots or packages")
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
@@ -434,7 +467,7 @@ export function runCli() {
     });
 
   program
-    .command("fit-compare <pkgA> <pkgB>")
+    .command("fit-compare <pkgA> <pkgB>", { hidden: true })
     .description("Compare two packages for fit against a codebase")
     .option("--json", "Output as JSON")
     .option("--against <path>", "Path to the codebase to compare against", ".")
@@ -460,7 +493,7 @@ export function runCli() {
     });
 
   program
-    .command("monorepo [path]")
+    .command("monorepo [path]", { hidden: true })
     .description("Analyze monorepo workspace health and layer violations")
     .option("--json", "Output as JSON")
     .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
@@ -476,7 +509,73 @@ export function runCli() {
       }
     });
 
+  // Custom help: show smart examples first, advanced commands at bottom
+  program.addHelpText(
+    "beforeAll",
+    `
+  Smart command — one tool, many modes:
+
+    typegrade .                        Audit a local project
+    typegrade zod                      Score a package
+    typegrade zod valibot              Compare two packages
+    typegrade zod valibot --against .  Choose the best fit for your codebase
+    typegrade . --improve --json       Get improvement suggestions (agent-ready)
+`,
+  );
+
+  program.addHelpText(
+    "after",
+    `
+  Advanced Commands:
+    analyze [path]           Source analysis (legacy default)
+    score <package>          Score an npm package
+    compare <pkgA> <pkgB>   Compare two packages
+    fit-compare <a> <b>     Codebase-aware fit comparison
+    boundaries [path]        Boundary trust analysis
+    monorepo [path]          Workspace health
+    self-analyze [path]      Closed-loop self-improvement
+    fix-plan [path]          Generate fix plan
+    apply-fixes [path]       Apply safe fixes
+    diff <base> <target>     Compare two snapshots
+`,
+  );
+
   program.parse();
+}
+
+async function runAnalyzeAction(
+  program: Command,
+  path: string | undefined,
+  opts: Record<string, unknown>,
+) {
+  const projectPath = (path as string | undefined) ?? ".";
+  const domain = parseDomainOption(String(opts.domain ?? "auto"));
+  const profile = opts.profile ? parseProfileOption(String(opts.profile)) : undefined;
+  const agent = Boolean(opts.agent);
+  const { analyzeProject } = await import("./analyzer.js");
+  const result = analyzeProject(projectPath, {
+    agent,
+    budget: typeof opts["budget"] === "number" ? opts["budget"] : undefined,
+    domain,
+    explain: Boolean(opts.explain),
+    includeGenerated: Boolean(opts["includeGenerated"]),
+    includeIndirect: Boolean(opts["includeIndirect"]),
+    profile,
+  });
+
+  // If --agent + --strict-agent, rebuild agent report with strict settings
+  if (agent && opts["strictAgent"]) {
+    const { buildAgentReport, renderAgentJson } = await import("./agent/index.js");
+    const agentReport = buildAgentReport(result, { minConfidence: 0.8 });
+    if (opts["json"]) {
+      console.log(renderAgentJson(agentReport));
+    } else {
+      await outputResult(result, toOutputOptions(opts));
+    }
+    return;
+  }
+
+  await outputResult(result, toOutputOptions(opts));
 }
 
 async function tryScorePackage(
