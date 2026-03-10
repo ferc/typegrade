@@ -1,3 +1,9 @@
+## [0.14.1](https://github.com/ferc/typegrade/compare/v0.14.0...v0.14.1) (2026-03-10)
+
+### Bug Fixes
+
+* docs/skills schema version freshness (0.14.0 → 0.15.0) and fit-compare relevance formula ([3d537bd](https://github.com/ferc/typegrade/commit/3d537bd6d4f6b9b522f69777d96acd6d9e7344d0))
+
 ## [0.14.0](https://github.com/ferc/typegrade/compare/v0.13.0...v0.14.0) (2026-03-10)
 
 ### Features
