@@ -25,7 +25,7 @@ as **abstained** (via the trust contract) are rejected automatically --
 ```yaml
 # GitHub Actions example
 - name: Type quality gate
-  run: npx typegrade analyze . --min-score 70
+  run: npx typegrade . --min-score 70
 ```
 
 Exits with code 1 if Agent Readiness < 70. Exits with code 0 otherwise.
@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npx typegrade analyze . --min-score 70
+      - run: npx typegrade . --min-score 70
 ```
 
 ### Gate with JSON output for downstream consumption
@@ -52,8 +52,8 @@ jobs:
 ```yaml
 - name: Score and gate
   run: |
-    npx typegrade analyze . --json > typegrade-report.json
-    SCORE=$(jq -r '.globalScores.agentReadiness.score' typegrade-report.json)
+    npx typegrade . --json > typegrade-report.json
+    SCORE=$(jq -r '.summary.scorecard[] | select(.label=="Agent Readiness") | .score' typegrade-report.json)
     if [ "$SCORE" -lt 70 ]; then
       echo "Agent Readiness score $SCORE is below threshold 70"
       exit 1
@@ -65,7 +65,7 @@ jobs:
     path: typegrade-report.json
 ```
 
-This captures the full report as a CI artifact regardless of pass/fail.
+This captures the full `SmartCliResult` report as a CI artifact regardless of pass/fail.
 
 ### Gate for a published package (pre-release check)
 
@@ -82,10 +82,10 @@ Scores the tarball as a consumer would see it (package mode, 8 dimensions).
 
 ```bash
 #!/bin/bash
-RESULT=$(npx typegrade analyze . --json)
-TRUST=$(echo "$RESULT" | jq -r '.trustSummary.classification // "unknown"')
-CAN_GATE=$(echo "$RESULT" | jq -r '.trustSummary.canGate // false')
-SCORE=$(echo "$RESULT" | jq -r '.globalScores.agentReadiness.score')
+RESULT=$(npx typegrade . --json)
+TRUST=$(echo "$RESULT" | jq -r '.trust.classification // "unknown"')
+CAN_GATE=$(echo "$RESULT" | jq -r '.trust.canGate // false')
+SCORE=$(echo "$RESULT" | jq -r '.summary.scorecard[] | select(.label=="Agent Readiness") | .score')
 
 if [ "$TRUST" = "abstained" ]; then
   echo "Result is abstained — cannot gate"
@@ -116,11 +116,11 @@ classified as `"directional"` regardless of other signals.
 
 ```bash
 #!/bin/bash
-RESULT=$(npx typegrade analyze . --json)
-STATUS=$(echo "$RESULT" | jq -r '.status')
-SCORE=$(echo "$RESULT" | jq -r '.globalScores.agentReadiness.score')
-COVERAGE=$(echo "$RESULT" | jq -r '.confidenceSummary.sampleCoverage // 0')
-UNDERSAMPLED=$(echo "$RESULT" | jq -r '.coverageDiagnostics.undersampled // false')
+RESULT=$(npx typegrade . --json)
+STATUS=$(echo "$RESULT" | jq -r '.primary.status')
+SCORE=$(echo "$RESULT" | jq -r '.summary.scorecard[] | select(.label=="Agent Readiness") | .score')
+COVERAGE=$(echo "$RESULT" | jq -r '.primary.confidenceSummary.sampleCoverage // 0')
+UNDERSAMPLED=$(echo "$RESULT" | jq -r '.primary.coverageDiagnostics.undersampled // false')
 
 if [ "$STATUS" != "complete" ]; then
   echo "Warning: analysis status is $STATUS, skipping gate"
@@ -149,6 +149,8 @@ fi
 - run: npx typegrade analyze . --profile application --min-score 60
 ```
 
+(Use the `analyze` subcommand when specifying `--profile`.)
+
 Use `--profile application` for non-library projects. Application scoring
 downweights publishQuality and boosts boundary and config discipline.
 
@@ -159,7 +161,7 @@ downweights publishQuality and boosts boundary and config discipline.
 Wrong:
 
 ```yaml
-- run: npx typegrade analyze . --min-score 75
+- run: npx typegrade . --min-score 75
 # Fails on a project with 3 exported functions — score capped at 65
 ```
 
@@ -167,18 +169,18 @@ Correct:
 
 ```yaml
 - run: |
-    RESULT=$(npx typegrade analyze . --json)
-    STATUS=$(echo "$RESULT" | jq -r '.status')
+    RESULT=$(npx typegrade . --json)
+    STATUS=$(echo "$RESULT" | jq -r '.primary.status')
     if [ "$STATUS" = "degraded" ]; then
       echo "Degraded analysis — skipping gate"
       exit 0
     fi
-    UNDERSAMPLED=$(echo "$RESULT" | jq -r '.coverageDiagnostics.undersampled // false')
+    UNDERSAMPLED=$(echo "$RESULT" | jq -r '.primary.coverageDiagnostics.undersampled // false')
     if [ "$UNDERSAMPLED" = "true" ]; then
       echo "Undersampled — skipping gate"
       exit 0
     fi
-    SCORE=$(echo "$RESULT" | jq -r '.globalScores.agentReadiness.score')
+    SCORE=$(echo "$RESULT" | jq -r '.summary.scorecard[] | select(.label=="Agent Readiness") | .score')
     [ "$SCORE" -ge 70 ] || exit 1
 ```
 
@@ -190,7 +192,7 @@ would always fail regardless of actual type quality.
 Wrong:
 
 ```yaml
-- run: npx typegrade analyze . --min-score 90
+- run: npx typegrade . --min-score 90
 # Most real projects score 55-80. This blocks everything.
 ```
 
@@ -198,7 +200,7 @@ Correct:
 
 ```yaml
 # Start with a baseline check, then ratchet up
-- run: npx typegrade analyze . --min-score 60
+- run: npx typegrade . --min-score 60
 # After improvements, raise to 70
 ```
 
@@ -239,14 +241,14 @@ entirely. Gate logic that depends on these fields must handle `undefined`.
 Wrong:
 
 ```yaml
-- run: npx typegrade analyze . --min-score 70
+- run: npx typegrade . --min-score 70
 # CI fails but no artifact to diagnose why
 ```
 
 Correct:
 
 ```yaml
-- run: npx typegrade analyze . --json > typegrade-report.json --min-score 70
+- run: npx typegrade . --json > typegrade-report.json --min-score 70
 - uses: actions/upload-artifact@v4
   if: always()
   with:

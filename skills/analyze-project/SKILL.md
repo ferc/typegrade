@@ -18,30 +18,35 @@ sources:
 
 # typegrade — Analyze a Local Project
 
-Use `typegrade analyze` to score a local TypeScript project on type precision.
-Source mode sees your full source and runs all 12 dimensions.
+Run `typegrade` on a local path to score your TypeScript project on type
+precision. Source mode sees your full source and runs all 12 dimensions.
 
 ## Setup
 
 ```bash
-npx typegrade analyze .
+npx typegrade .
 ```
 
 This analyzes the current directory. It emits `.d.ts` in memory to see what
 consumers see, then scores the public surface plus 4 implementation dimensions
 (soundness, boundary discipline, config discipline, declaration fidelity).
 
+The smart root command auto-detects your target. A local path triggers source
+mode; a package name triggers package mode. Advanced subcommands (`analyze`,
+`score`, `compare`, etc.) are still available but rarely needed.
+
 ## Core Patterns
 
 ### Basic analysis with human-readable output
 
 ```bash
-npx typegrade analyze ./src
+npx typegrade .
+npx typegrade ./src
 ```
 
 Prints a summary with a trust label (Trusted, Directional, or Abstained),
-global scores (Consumer API, Agent Readiness, Type Safety), domain score
-if detected, and top issues.
+global scores (Consumer API, Agent Readiness, Type Safety), strengths, risks,
+and the next best improvement.
 
 ### Verbose per-dimension breakdown
 
@@ -50,6 +55,7 @@ npx typegrade analyze . --verbose
 ```
 
 Adds a table showing all 12 dimension scores with metrics and confidence.
+(Use the `analyze` subcommand for verbose/explain flags.)
 
 ### Explainability report
 
@@ -81,10 +87,10 @@ dimensions that help AI agents generate correct code.
 
 ```bash
 # Force validation domain (affects domain-fit scoring weights)
-npx typegrade analyze . --domain validation
+npx typegrade . --domain validation
 
 # Disable domain detection entirely
-npx typegrade analyze . --domain off
+npx typegrade . --domain off
 ```
 
 Domain auto-detection uses package name patterns and API surface analysis.
@@ -95,19 +101,13 @@ Override when the heuristic misclassifies. Valid domains: `validation`,
 ### JSON output for automation
 
 ```bash
-npx typegrade analyze . --json
+npx typegrade . --json
 ```
 
-Returns an `AnalysisResult` object (schema 0.14.0) with mandatory envelope
-fields: `status`, `scoreValidity`, `analysisSchemaVersion`, `globalScores`,
-`profileInfo`, `packageIdentity`, and `degradedCategory` (when degraded).
-Results include a `trustSummary` with classification (`"trusted"`,
-`"directional"`, or `"abstained"`), `canCompare`, and `canGate` flags. A
-`resolutionDiagnostics` field traces the acquisition pipeline stages.
-New in 0.14.0: `executionDiagnostics` (pipeline path, phase timings,
-resource warnings, fallbacks applied) and `monorepoHealth` (workspace health
-summary when a workspace root is detected in source mode). See the
-`consume-json` skill for full field details.
+Returns a `SmartCliResult` envelope wrapping the full `AnalysisResult`. The
+envelope includes `summary` (headline, verdict, scorecard), `trust`
+(classification, canCompare, canGate), `nextAction`, `supplements`, and
+`executionDiagnostics`. See the `consume-json` skill for full field details.
 
 ### Include generated issues
 
@@ -118,14 +118,15 @@ npx typegrade analyze . --include-generated
 By default, issues from generated files (dist/, build output) are excluded from
 `topIssues`. Use `--include-generated` to restore them in the output.
 
-### Agent-optimized output
+### Agent-optimized improvement
 
 ```bash
-npx typegrade analyze . --agent
+npx typegrade . --improve --json
 ```
 
-Emits precision-first JSON with fix batches, designed for downstream agent
-consumption in iterative improvement workflows.
+The canonical agent path. Runs analysis with the autofix-agent profile and
+produces agent-ready JSON with fix batches, suppression breakdown, and
+verification steps. See the `self-analyze` skill for details.
 
 ### Agent control flags
 
@@ -204,8 +205,8 @@ leaks, trust-zone crossings), and computes a health score.
 Wrong:
 
 ```bash
-npx typegrade analyze .         # Source mode: 12 dimensions, score 72
-npx typegrade score my-package  # Package mode: 8 dimensions, score 68
+npx typegrade .                 # Source mode: 12 dimensions, score 72
+npx typegrade my-package        # Package mode: 8 dimensions, score 68
 # "We lost 4 points after publishing" — incorrect conclusion
 ```
 
@@ -213,12 +214,12 @@ Correct:
 
 ```bash
 # Compare like-for-like:
-npx typegrade analyze .         # Source mode: 12 dimensions
-npx typegrade analyze .         # Same mode for before/after comparisons
+npx typegrade .                     # Source mode: 12 dimensions
+npx typegrade .                     # Same mode for before/after comparisons
 
 # Or compare package-to-package:
-npx typegrade score my-package@1.0  # Package mode
-npx typegrade score my-package@2.0  # Same mode
+npx typegrade my-package@1.0        # Package mode
+npx typegrade my-package@2.0        # Same mode
 ```
 
 Source mode includes 4 implementation dimensions (soundness, boundary
@@ -230,8 +231,8 @@ cannot see. The scores are structurally different and not comparable.
 Wrong:
 
 ```typescript
-const result = JSON.parse(execSync("npx typegrade analyze . --json").toString());
-if (result.composites[0].score < 60) {
+const result = JSON.parse(execSync("npx typegrade . --json").toString());
+if (result.primary.composites[0].score < 60) {
   throw new Error("Type quality too low");
 }
 ```
@@ -239,15 +240,15 @@ if (result.composites[0].score < 60) {
 Correct:
 
 ```typescript
-const result = JSON.parse(execSync("npx typegrade analyze . --json").toString());
-if (result.status !== "complete") {
-  console.warn(`Analysis degraded: ${result.degradedReason}`);
+const result = JSON.parse(execSync("npx typegrade . --json").toString());
+if (result.trust.classification === "abstained") {
+  console.warn(`Abstained: ${result.trust.reasons[0]}`);
+  return;
 }
-const composite = result.globalScores.consumerApi;
-if (composite.score < 60 && (result.confidenceSummary?.sampleCoverage ?? 0) >= 0.5) {
+const score = result.summary.scorecard.find(e => e.label === "Consumer API")?.score;
+if (score !== null && score < 60) {
   throw new Error("Type quality too low");
 }
-// If sampleCoverage < 0.5, the score is indicative only
 ```
 
 Scores with confidence below 0.5 come from undersampled projects with few
@@ -259,7 +260,7 @@ Wrong:
 
 ```bash
 # Analyzing a Next.js app with default (library) profile
-npx typegrade analyze .
+npx typegrade .
 # Gets penalized on publishQuality even though the app never publishes
 ```
 

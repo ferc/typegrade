@@ -25,16 +25,53 @@ automation, dashboards, and agent workflows.
 ## Setup
 
 ```bash
-npx typegrade analyze . --json
-npx typegrade score zod --json
-npx typegrade compare zod valibot --json
-npx typegrade boundaries . --json
-npx typegrade fix-plan . --json
-npx typegrade apply-fixes . --json
-npx typegrade diff lib@1.0 lib@2.0 --json
+npx typegrade . --json                         # Audit a local project
+npx typegrade zod --json                       # Score a package
+npx typegrade zod valibot --json               # Compare two packages
+npx typegrade zod valibot --against . --json   # Codebase-aware fit comparison
+npx typegrade . --improve --json               # Agent improvement plan
 ```
 
-All commands produce JSON on stdout when `--json` is passed.
+The smart root command returns a `SmartCliResult` envelope that wraps the
+underlying `AnalysisResult`, `CompareResult`, or `FitCompareResult`.
+Advanced subcommands (`analyze`, `score`, `compare`, etc.) return the raw
+result types directly.
+
+## SmartCliResult Envelope
+
+```typescript
+interface SmartCliResult {
+  resultKind: "smart-cli";
+  analysisSchemaVersion: string;
+  mode: "repo-audit" | "package-score" | "package-compare" | "fit-compare";
+  targetKind: "repo" | "workspace" | "package" | "pair";
+  summary: SmartSummary;
+  trust: TrustSummary;
+  primary: AnalysisResult | SmartComparePayload | FitCompareResult;
+  supplements: SmartSupplements;
+  nextAction: SmartNextAction;
+  executionDiagnostics: ExecutionDiagnostics;
+}
+
+interface SmartSummary {
+  headline: string;
+  verdict: "good" | "needs-work" | "poor" | "degraded" | "abstained";
+  scorecard: ScorecardEntry[];
+  topReasons: string[];
+  topRisks: string[];
+}
+
+interface SmartNextAction {
+  kind: "fix" | "compare" | "none";
+  title: string;
+  why: string;
+  files: string[];
+  verification: string;
+}
+```
+
+Access scores via `summary.scorecard`, trust via `trust.classification`,
+and the full underlying result via `primary`.
 
 ## AnalysisResult Structure
 
@@ -215,61 +252,57 @@ primary strategy.
 ### Extract Agent Readiness score
 
 ```bash
-# Via globalScores (preferred — structured access)
-npx typegrade score zod --json | jq '.globalScores.agentReadiness.score'
+# Via SmartCliResult summary (smart root command)
+npx typegrade zod --json | jq '.summary.scorecard[] | select(.label=="Agent Readiness") | .score'
 
-# Via composites array (also works)
-npx typegrade score zod --json | jq '.composites[] | select(.key=="agentReadiness") | .score'
+# Via primary AnalysisResult (drill into the underlying result)
+npx typegrade zod --json | jq '.primary.globalScores.agentReadiness.score'
+
+# Via advanced subcommand (returns raw AnalysisResult)
+npx typegrade score zod --json | jq '.globalScores.agentReadiness.score'
 ```
 
 ### Check trust classification before acting on results
 
 ```bash
-npx typegrade score some-lib --json | jq '{trust: .trustSummary.classification, canGate: .trustSummary.canGate}'
+npx typegrade some-lib --json | jq '{trust: .trust.classification, canGate: .trust.canGate}'
 # If classification is "abstained", do not use scores for gating or comparison
 ```
 
 ### Check analysis status before acting on results
 
 ```bash
-npx typegrade score some-lib --json | jq '{status: .status, validity: .scoreValidity}'
-# If status is "degraded", check .degradedReason before using scores
+npx typegrade some-lib --json | jq '{status: .primary.status, validity: .primary.scoreValidity}'
+# If status is "degraded", check .primary.degradedReason before using scores
 ```
 
 ### Check if a package is undersampled
 
 ```bash
-npx typegrade score tiny-lib --json | jq '.coverageDiagnostics.undersampled'
+npx typegrade tiny-lib --json | jq '.primary.coverageDiagnostics.undersampled'
 ```
 
 ### Get all dimension scores
 
 ```bash
-npx typegrade analyze . --json | jq '[.dimensions[] | {name: .key, score: .score, confidence: .confidence}]'
+npx typegrade . --json | jq '[.primary.dimensions[] | {name: .key, score: .score, confidence: .confidence}]'
 ```
 
 ### Programmatic API in TypeScript
 
 ```typescript
-import { analyzeProject, scorePackage, buildFixPlan, computeDiff } from "typegrade";
+import { runSmart, analyzeProject, scorePackage, buildFixPlan, computeDiff } from "typegrade";
 
-const result = analyzeProject("./src");
+// Smart dispatch (recommended — returns SmartCliResult)
+const { result } = await runSmart(["zod"], { json: true });
+console.log(result.summary.headline, result.trust.classification);
 
-// Check status before using scores
-if (result.status === "degraded") {
-  console.warn(`Degraded result: ${result.degradedReason}`);
-}
-
-// Use globalScores for structured access
-const { agentReadiness } = result.globalScores;
-console.log(`Agent Readiness: ${agentReadiness.score} (${agentReadiness.grade})`);
-
-if (result.coverageDiagnostics.undersampled) {
-  console.warn("Result is undersampled — treat as indicative");
-}
+// Direct APIs (return raw AnalysisResult)
+const sourceResult = analyzeProject("./src");
+const packageResult = scorePackage("zod");
 
 // Fix planning
-const plan = buildFixPlan(result);
+const plan = buildFixPlan(sourceResult);
 console.log(`Fix batches: ${plan.batches.length}, expected uplift: +${plan.totalExpectedUplift}`);
 
 // Diff analysis

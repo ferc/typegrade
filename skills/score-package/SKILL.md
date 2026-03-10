@@ -19,26 +19,27 @@ sources:
 
 # typegrade — Score a Published Package
 
-Use `typegrade score` to evaluate a published npm package on type precision.
+Run `typegrade` with an npm package name to evaluate it on type precision.
 Package mode installs the package and analyzes its published `.d.ts`
 declarations — the 8 consumer-facing dimensions only.
 
 ## Setup
 
 ```bash
-npx typegrade score zod
+npx typegrade zod
 ```
 
 This resolves, installs, and analyzes the `zod` package. Results are cached
-by default for repeated runs.
+by default for repeated runs. The smart root command auto-detects that `zod`
+is a package name (not a local path) and runs package mode.
 
 ## Core Patterns
 
 ### Score with a specific version
 
 ```bash
-npx typegrade score express@5
-npx typegrade score @tanstack/react-query@5.62.0
+npx typegrade express@5
+npx typegrade @tanstack/react-query@5.62.0
 ```
 
 Uses standard npm specifiers. Scoped packages work as expected.
@@ -46,7 +47,7 @@ Uses standard npm specifiers. Scoped packages work as expected.
 ### Force fresh install (skip cache)
 
 ```bash
-npx typegrade score zod --no-cache
+npx typegrade zod --no-cache
 ```
 
 Disables the content-addressed cache at `$XDG_CACHE_HOME/typegrade/`.
@@ -59,20 +60,21 @@ npx typegrade score zod --verbose
 ```
 
 Shows all 8 consumer dimensions with individual scores, metrics, and confidence.
+(Use the `score` subcommand for the verbose flag.)
 
 ### JSON output
 
 ```bash
-npx typegrade score zod --json
+npx typegrade zod --json
 ```
 
-Returns a full `AnalysisResult` object. See the `consume-json` skill for
-stable field details.
+Returns a `SmartCliResult` envelope wrapping the full `AnalysisResult`.
+See the `consume-json` skill for stable field details.
 
 ### Domain override
 
 ```bash
-npx typegrade score zod --domain validation
+npx typegrade zod --domain validation
 ```
 
 Forces domain classification. Auto-detection is usually correct for
@@ -161,16 +163,16 @@ Do not use these scores for blocking decisions.
 Wrong:
 
 ```bash
-npx typegrade score zod          # Domain: validation, score 72
-npx typegrade score express      # Domain: router, score 55
+npx typegrade zod          # Domain: validation, score 72
+npx typegrade express      # Domain: router, score 55
 # "zod is 17 points better than express" — misleading
 ```
 
 Correct:
 
 ```bash
-npx typegrade score zod          # Domain: validation
-npx typegrade score valibot      # Domain: validation (same domain)
+npx typegrade zod          # Domain: validation
+npx typegrade valibot      # Domain: validation (same domain)
 # Domain scores are comparable because both are validation libraries
 ```
 

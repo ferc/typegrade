@@ -18,25 +18,27 @@ sources:
 
 # typegrade — Self-Analyze and Improve
 
-Use `typegrade self-analyze` for closed-loop type quality improvement.
+Use `typegrade . --improve` for closed-loop type quality improvement.
 It runs analysis with the autofix-agent profile and produces actionable
 output with fix batches ordered by impact.
 
 ## Setup
 
 ```bash
-npx typegrade self-analyze .
+npx typegrade . --improve
 ```
 
 Analyzes the current directory with agent-optimized output. Shows current
 scores, actionable findings, fix batches, and suppression breakdown.
+The `--improve` flag is the canonical agent path — it replaces the
+`self-analyze` subcommand for most workflows.
 
 ## Core Patterns
 
 ### Human-readable self-analysis
 
 ```bash
-npx typegrade self-analyze .
+npx typegrade . --improve
 ```
 
 Output:
@@ -64,7 +66,7 @@ Output:
 ### JSON output for agent consumption
 
 ```bash
-npx typegrade self-analyze . --json
+npx typegrade . --improve --json
 ```
 
 Returns an `AgentReport` with up to 50 actionable issues (25 in strict/source
@@ -131,7 +133,7 @@ abstained, score regresses by >5 points).
 
 ```bash
 # Step 1: Analyze and identify fix batches
-npx typegrade self-analyze . --json > report.json
+npx typegrade . --improve --json > report.json
 
 # Step 2: Follow the suggested execution order
 jq '.executionOrder' report.json
@@ -143,7 +145,7 @@ jq '.fixBatches[] | select(.risk=="low")' report.json
 jq '.stopConditions[] | select(.met==true)' report.json
 
 # Step 5: Re-analyze to verify improvement
-npx typegrade self-analyze .
+npx typegrade . --improve
 
 # Step 6: Move to medium-risk fixes with human review
 jq '.fixBatches[] | select(.risk=="medium")' report.json
@@ -165,10 +167,12 @@ npx typegrade self-analyze . --budget 10
 npx typegrade self-analyze . --strict-agent
 ```
 
+(Agent control flags require the `self-analyze` subcommand.)
+
 ### Specific path analysis
 
 ```bash
-npx typegrade self-analyze ./src/api
+npx typegrade ./src/api --improve
 ```
 
 Scopes the analysis to a subdirectory for focused improvement.
