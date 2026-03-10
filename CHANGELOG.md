@@ -1,3 +1,23 @@
+## [0.14.0](https://github.com/ferc/typegrade/compare/v0.13.0...v0.14.0) (2026-03-10)
+
+### Features
+
+* balanced analysis plan — trust, evidence, boundaries, agent output, diagnostics, and schema 0.14.0 ([e5f46d1](https://github.com/ferc/typegrade/commit/e5f46d1d2d73dcc94a2f7dc930fb0af8b6b77693))
+* codebase-aware fit-compare, enriched comparisons, scenario outcomes, and schema 0.13.0 ([ce9a619](https://github.com/ferc/typegrade/commit/ce9a619b3bdbd3a74fb4038ba823741ae4851814))
+* decision-grade reports, agent execution contract, and schema 0.12.0 ([93cf81b](https://github.com/ferc/typegrade/commit/93cf81b49752767646265143ecbaa193f17736ef))
+* domain mismatch abstention, evidence gating, and comparability tracking ([1e00d34](https://github.com/ferc/typegrade/commit/1e00d34fbda298fc5a6bc64b74a2ba0be66df5e5))
+* issue clusters, inspection reports, codebase relevance, agent JSON alignment, and schema 0.14.0 ([b2bf7af](https://github.com/ferc/typegrade/commit/b2bf7afb594f7cd197589c39e971c05971dcc95e))
+* JSON contract normalization, source diagnostics, confidence bottlenecks, source diff, migration metrics ([82ade01](https://github.com/ferc/typegrade/commit/82ade01705c16603ff69381ef0353ef9c74285a1))
+* push-to-99% — 9 workstreams for off-corpus trust, shadow gating, and agent precision ([a01eb89](https://github.com/ferc/typegrade/commit/a01eb89510cc86acd4d9b66660f3e7bcc1253405))
+* smart root command — one tool, many modes ([6ce5f32](https://github.com/ferc/typegrade/commit/6ce5f3295f7e6a75d42d7c29c95af2a63a891a7f))
+* source/monorepo benchmarks, release gates, and off-corpus directional scoring ([9e9e86c](https://github.com/ferc/typegrade/commit/9e9e86c37ec4b5f2665c862cc20fdd01d2b931a5))
+
+### Bug Fixes
+
+* add missing wilsonLowerBound import in shadow benchmark ([23ed3a0](https://github.com/ferc/typegrade/commit/23ed3a07a2dcf92451b3541e6d349c9ddadb25d6))
+* reduce analyzer noise by filtering safe assertions and fixing boundary scoring ([a9c8e7c](https://github.com/ferc/typegrade/commit/a9c8e7c9407478391932f55ee40b3ec128736185))
+* smart CLI target classification, trust alignment, and agentReport typing ([d765a75](https://github.com/ferc/typegrade/commit/d765a7538a2030df45fc720f0f40fc3a78ccf9c0))
+
 ## [0.13.0](https://github.com/ferc/typegrade/compare/v0.12.0...v0.13.0) (2026-03-09)
 
 ### Features
