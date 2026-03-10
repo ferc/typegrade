@@ -240,7 +240,33 @@ These commands are still available for specialized use cases. Run `typegrade <co
 | `self-analyze [path]` | Closed-loop self-improvement |
 | `fix-plan [path]` | Generate actionable fix plan |
 | `apply-fixes [path]` | Apply safe deterministic fixes |
-| `diff <base> <target>` | Compare two snapshots |
+| `diff <base> <target>` | Compare two snapshots or JSON files |
+
+### Source diff workflow
+
+Save a baseline, make changes, then diff:
+
+```bash
+typegrade analyze . --save baseline     # saves to .typegrade/snapshots/baseline.json
+# ... make changes ...
+typegrade analyze . --baseline baseline  # diffs against saved baseline
+```
+
+Or compare two saved JSON files directly:
+
+```bash
+typegrade diff ./before.json ./after.json --json
+```
+
+### JSON contract
+
+All `--json` output includes a `resultKind` discriminator and `analysisSchemaVersion` for automation:
+
+```jsonc
+{ "resultKind": "analysis", "analysisSchemaVersion": "0.15.0", ... }
+// Possible resultKind values: smart-cli, analysis, comparison, boundaries,
+// fix-plan, fix-application, diff, fit-compare, monorepo, agent-report
+```
 
 ## Read more
 

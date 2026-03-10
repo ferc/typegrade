@@ -8,6 +8,7 @@ import {
   type FitCompareDecision,
   type FitCompareResult,
   type FitSignal,
+  type MigrationComplexity,
   type MigrationRiskReport,
 } from "./types.js";
 import { type ScorePackageOptions, scorePackage } from "./package-scorer.js";
@@ -373,14 +374,67 @@ function assessMigrationRisk(
   const estimatedBatchCount = Math.max(1, Math.ceil(estimatedTouchPoints / 3));
   const requiresHumanReview = apiMismatchRisk === "high" || typingRisk === "high";
 
-  return {
+  // Concrete migration metrics
+  const candidateDecls = candidate.coverageDiagnostics?.measuredDeclarations ?? 0;
+  const codebaseDecls = codebase.coverageDiagnostics?.measuredDeclarations ?? 0;
+  const apiSurfaceDelta = Math.abs(candidateDecls - codebaseDecls);
+
+  const candidateBoundaryCoverage = candidate.boundarySummary?.boundaryCoverage ?? 0;
+  const codebaseBoundaryCoverage = codebase.boundarySummary?.boundaryCoverage ?? 0;
+  const boundaryCoverageGap =
+    Math.round(Math.abs(candidateBoundaryCoverage - codebaseBoundaryCoverage) * 100) / 100;
+
+  const codebaseTsScore = codebase.composites.find((cc) => cc.key === "typeSafety")?.score ?? 50;
+  const typeSafetyGap = Math.abs(typeSafetyScore - codebaseTsScore);
+
+  const estimatedCallSiteChanges = estimatedTouchPoints * 3;
+
+  const migrationComplexity = classifyMigrationComplexity({
     apiMismatchRisk,
     boundaryRisk,
-    estimatedBatchCount,
     estimatedTouchPoints,
+    typingRisk,
+  });
+
+  return {
+    apiMismatchRisk,
+    apiSurfaceDelta,
+    boundaryCoverageGap,
+    boundaryRisk,
+    estimatedBatchCount,
+    estimatedCallSiteChanges,
+    estimatedTouchPoints,
+    migrationComplexity,
     requiresHumanReview,
+    typeSafetyGap,
     typingRisk,
   };
+}
+
+/** Classify overall migration complexity from risk signals */
+function classifyMigrationComplexity(opts: {
+  apiMismatchRisk: "low" | "medium" | "high";
+  boundaryRisk: "low" | "medium" | "high";
+  estimatedTouchPoints: number;
+  typingRisk: "low" | "medium" | "high";
+}): MigrationComplexity {
+  const riskMap = { high: 3, low: 1, medium: 2 };
+  const totalRisk =
+    riskMap[opts.apiMismatchRisk] + riskMap[opts.typingRisk] + riskMap[opts.boundaryRisk];
+  const highCount = [opts.apiMismatchRisk, opts.typingRisk, opts.boundaryRisk].filter(
+    (rr) => rr === "high",
+  ).length;
+
+  if (highCount >= 2 && opts.estimatedTouchPoints > 30) {
+    return "major";
+  }
+  if (highCount >= 1 || opts.estimatedTouchPoints > 15) {
+    return "significant";
+  }
+  if (totalRisk > 4 || opts.estimatedTouchPoints > 5) {
+    return "moderate";
+  }
+  return "trivial";
 }
 
 /** Convert a 0-100 score to a risk level. */
@@ -605,6 +659,7 @@ function computeFirstMigrationBatches(
   codebase: AnalysisResult,
 ): string[] {
   const batches: string[] = [];
+  const risk = candidate.migrationRisk;
 
   const codebaseIssues = codebase.dimensions.flatMap((dd) => dd.issues);
   const directIssues = codebaseIssues.filter((ii) => ii.fixability === "direct");
@@ -614,9 +669,24 @@ function computeFirstMigrationBatches(
     batches.push(`Fix ${count} directly fixable type issues in your codebase`);
   }
 
-  if (candidate.migrationRisk.apiMismatchRisk !== "low") {
-    const touchPoints = candidate.migrationRisk.estimatedTouchPoints;
-    batches.push(`Review API surface compatibility — ${touchPoints} files may need updates`);
+  if (risk.apiMismatchRisk !== "low") {
+    const touchPoints = risk.estimatedTouchPoints;
+    const callSites = risk.estimatedCallSiteChanges ?? touchPoints * 3;
+    batches.push(
+      `Review API surface compatibility — ${touchPoints} files, ~${callSites} call sites may need updates`,
+    );
+  }
+
+  if (risk.typeSafetyGap !== undefined && risk.typeSafetyGap > 10) {
+    batches.push(
+      `Close the ${Math.round(risk.typeSafetyGap)}-point type safety gap by adding strict return types`,
+    );
+  }
+
+  if (risk.boundaryCoverageGap !== undefined && risk.boundaryCoverageGap > 0.2) {
+    batches.push(
+      `Bridge boundary coverage gap (${Math.round(risk.boundaryCoverageGap * 100)}%) — add validation at I/O boundaries`,
+    );
   }
 
   if (candidate.result.domainScore) {
@@ -624,7 +694,7 @@ function computeFirstMigrationBatches(
     batches.push(`Verify domain-specific patterns align with ${domain} conventions`);
   }
 
-  if (candidate.migrationRisk.requiresHumanReview) {
+  if (risk.requiresHumanReview) {
     batches.push("Human review required before adoption — high typing or API risk detected");
   }
 

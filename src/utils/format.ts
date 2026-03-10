@@ -360,5 +360,5 @@ export function renderExplainability(result: AnalysisResult): string {
  * ```
  */
 export function renderJson(result: AnalysisResult): string {
-  return JSON.stringify(result, null, 2);
+  return JSON.stringify({ resultKind: "analysis", ...result }, null, 2);
 }

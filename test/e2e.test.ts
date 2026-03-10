@@ -574,7 +574,7 @@ describe("e2e: analyzeProject", () => {
   describe("schema consistency invariants", () => {
     it("every result has all mandatory fields", () => {
       const result = analyzeProject(resolve(fixturesDir, "high-precision"));
-      expect(result.analysisSchemaVersion).toBe("0.14.0");
+      expect(result.analysisSchemaVersion).toBe("0.15.0");
       // Status can be complete or degraded depending on fixture size
       expect(["complete", "degraded"]).toContain(result.status);
       expect(result.globalScores).toBeDefined();

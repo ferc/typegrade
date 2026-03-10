@@ -1,16 +1,18 @@
-import type {
-  AnalysisProfile,
-  AnalysisResult,
-  BoundaryQualityScore,
-  BoundarySummary,
-  ComparisonDecisionReport,
-  FitCompareResult,
-  FixApplicationResult,
-  FixMode,
-  FixPlan,
-  MonorepoReport,
+import {
+  ANALYSIS_SCHEMA_VERSION,
+  type AnalysisProfile,
+  type AnalysisResult,
+  type BoundaryQualityScore,
+  type BoundarySummary,
+  type ComparisonDecisionReport,
+  type FitCompareResult,
+  type FixApplicationResult,
+  type FixMode,
+  type FixPlan,
+  type MonorepoReport,
 } from "./types.js";
 import { SmartUsageError, runSmart } from "./cli-smart.js";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   renderDimensionTable,
   renderExplainability,
@@ -143,6 +145,20 @@ const VALID_DOMAINS = [
 
 const VALID_PROFILES = ["library", "package", "application", "autofix-agent"] as const;
 
+/** Check if a path looks like a JSON file (for diff command) */
+function isJsonFile(path: string): boolean {
+  return path.endsWith(".json") && existsSync(path);
+}
+
+/** Save an analysis result snapshot to .typegrade/snapshots/ */
+function saveSnapshot(name: string, result: AnalysisResult): string {
+  const dir = ".typegrade/snapshots";
+  mkdirSync(dir, { recursive: true });
+  const filePath = `${dir}/${name}.json`;
+  writeFileSync(filePath, JSON.stringify(result, null, 2));
+  return filePath;
+}
+
 export function runCli() {
   const program = new Command();
 
@@ -231,10 +247,51 @@ export function runCli() {
     .option("--include-indirect", "Include indirectly fixable issues")
     .option("--budget <n>", "Maximum actionable issues to include", parseInt)
     .option("--strict-agent", "Enforce most conservative filter mode (with --agent)")
-    .action((path: string | undefined, cmdOpts: Record<string, unknown>) => {
+    .option("--save <name>", "Save analysis snapshot to .typegrade/snapshots/<name>.json")
+    .option("--baseline <path>", "Compare against a baseline snapshot (name or .json file)")
+    .action(async (path: string | undefined, cmdOpts: Record<string, unknown>) => {
       const parentOpts = program.opts();
       const opts = { ...parentOpts, ...cmdOpts };
-      return runAnalyzeAction(program, path, opts);
+
+      // If --baseline is given, run analysis then diff against baseline
+      if (typeof opts["baseline"] === "string") {
+        const baselinePath = opts["baseline"] as string;
+        const { analyzeProject } = await import("./analyzer.js");
+        const { computeDiff, loadAnalysisSnapshot, renderDiffReport } = await import("./diff.js");
+        const projectPath = path ?? ".";
+        const result = analyzeProject(projectPath, {
+          domain: parseDomainOption(String(opts.domain ?? "auto")),
+          explain: Boolean(opts.explain),
+          mode: "source",
+        });
+
+        // Load baseline: check .typegrade/snapshots/<name>.json or literal path
+        const resolvedBaseline = baselinePath.endsWith(".json")
+          ? baselinePath
+          : `.typegrade/snapshots/${baselinePath}.json`;
+        const baselineResult = loadAnalysisSnapshot(resolvedBaseline);
+
+        // Optionally save the new result too
+        if (typeof opts["save"] === "string") {
+          const saved = saveSnapshot(opts["save"] as string, result);
+          console.error(pc.dim(`Saved snapshot: ${saved}`));
+        }
+
+        const diff = computeDiff({ baseline: baselineResult, target: result });
+        if (opts.json) {
+          console.log(JSON.stringify({ resultKind: "diff", ...diff }, null, 2));
+        } else {
+          console.log(renderDiffReport(diff));
+        }
+        return;
+      }
+
+      // Save snapshot if requested
+      const result = await runAnalyzeAction(program, path, opts);
+      if (typeof opts["save"] === "string" && result) {
+        const saved = saveSnapshot(opts["save"] as string, result);
+        console.error(pc.dim(`Saved snapshot: ${saved}`));
+      }
     });
 
   program
@@ -320,8 +377,10 @@ export function runCli() {
         console.log(
           JSON.stringify(
             {
+              analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
               comparison: { first: compareResult.resultA, second: compareResult.resultB },
               decision: compareResult.decision,
+              resultKind: "comparison",
             },
             null,
             2,
@@ -354,10 +413,12 @@ export function runCli() {
         console.log(
           JSON.stringify(
             {
+              analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
               boundaryHotspots: result.boundaryHotspots,
               boundaryQuality: result.boundaryQuality,
               boundarySummary: result.boundarySummary,
               recommendedFixes: result.recommendedFixes,
+              resultKind: "boundaries",
             },
             null,
             2,
@@ -386,7 +447,7 @@ export function runCli() {
       });
       const plan = buildFixPlan(result);
       if (opts.json) {
-        console.log(JSON.stringify(plan, null, 2));
+        console.log(JSON.stringify({ resultKind: "fix-plan", ...plan }, null, 2));
       } else {
         console.log(renderFixPlanReport(plan));
       }
@@ -414,14 +475,24 @@ export function runCli() {
       const plan = buildFixPlan(result);
       const applicationResult = applyFixes({ mode, plan, projectPath });
       if (opts.json) {
-        console.log(JSON.stringify(applicationResult, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
+              resultKind: "fix-application",
+              ...applicationResult,
+            },
+            null,
+            2,
+          ),
+        );
       } else {
         console.log(renderApplyFixesReport(applicationResult));
       }
     });
 
   program
-    .command("diff <baseline> <target>", { hidden: true })
+    .command("diff <baseline> <target>")
     .description("Compare two analysis snapshots or packages")
     .option("--json", "Output as JSON")
     .option("--domain <domain>", `Domain mode: ${VALID_DOMAINS.join("|")}`, "auto")
@@ -432,12 +503,20 @@ export function runCli() {
       const domain = parseDomainOption(String(opts.domain ?? "auto"));
       const noCache = opts.cache === false;
       const { scorePackage } = await import("./package-scorer.js");
-      const { computeDiff, renderDiffReport } = await import("./diff.js");
-      const baselineResult = scorePackage(baseline, { domain, noCache });
-      const targetResult = scorePackage(target, { domain, noCache });
+      const { computeDiff, loadAnalysisSnapshot, renderDiffReport } = await import("./diff.js");
+
+      // Load baseline: JSON file or package name
+      const baselineResult = isJsonFile(baseline)
+        ? loadAnalysisSnapshot(baseline)
+        : scorePackage(baseline, { domain, noCache });
+      // Load target: JSON file or package name
+      const targetResult = isJsonFile(target)
+        ? loadAnalysisSnapshot(target)
+        : scorePackage(target, { domain, noCache });
+
       const diff = computeDiff({ baseline: baselineResult, target: targetResult });
       if (opts.json) {
-        console.log(JSON.stringify(diff, null, 2));
+        console.log(JSON.stringify({ resultKind: "diff", ...diff }, null, 2));
       } else {
         // Warn about degraded results in the diff
         if (baselineResult.status === "degraded") {
@@ -486,7 +565,7 @@ export function runCli() {
       const result = fitCompare(pkgA, pkgB, { codebasePath, domain, forceCrossDomain, noCache });
 
       if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
+        console.log(JSON.stringify({ resultKind: "fit-compare", ...result }, null, 2));
       } else {
         console.log(renderFitCompare(result, pkgA, pkgB));
       }
@@ -503,7 +582,7 @@ export function runCli() {
       const { analyzeMonorepo } = await import("./monorepo/index.js");
       const report = analyzeMonorepo({ rootPath });
       if (opts.json) {
-        console.log(JSON.stringify(report, null, 2));
+        console.log(JSON.stringify({ resultKind: "monorepo", ...report }, null, 2));
       } else {
         console.log(renderMonorepoReport(report));
       }
@@ -544,10 +623,10 @@ export function runCli() {
 }
 
 async function runAnalyzeAction(
-  program: Command,
+  _program: Command,
   path: string | undefined,
   opts: Record<string, unknown>,
-) {
+): Promise<AnalysisResult> {
   const projectPath = (path as string | undefined) ?? ".";
   const domain = parseDomainOption(String(opts.domain ?? "auto"));
   const profile = opts.profile ? parseProfileOption(String(opts.profile)) : undefined;
@@ -572,10 +651,11 @@ async function runAnalyzeAction(
     } else {
       await outputResult(result, toOutputOptions(opts));
     }
-    return;
+    return result;
   }
 
   await outputResult(result, toOutputOptions(opts));
+  return result;
 }
 
 async function tryScorePackage(

@@ -27,6 +27,22 @@ The bottleneck dimension dominates (60% weight), but the average adds signal fro
 
 Each composite also includes `compositeConfidenceReasons` — structured reasons explaining the confidence bottleneck and any notable gaps between dimensions.
 
+### Confidence bottlenecks
+
+When dimensions have confidence below 0.5, the result includes `confidenceBottlenecks` — an array (up to 5, sorted worst-first) of actionable explanations:
+
+```json
+{
+  "dimensionKey": "specializationPower",
+  "dimensionLabel": "Specialization Power",
+  "confidence": 0.3,
+  "explanation": "Undersampled package — confidence capped (1 reason(s))",
+  "improvementHint": "Add generic type parameters, conditional types, mapped types, or infer keywords"
+}
+```
+
+Each bottleneck identifies the dragging dimension, explains why confidence is low (from `confidenceSignals`), and provides a concrete improvement hint specific to that dimension.
+
 ### Examples
 
 | Scenario                           | Calculation            | Result    |

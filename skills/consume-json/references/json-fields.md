@@ -4,7 +4,7 @@
 
 | Field                   | Type                    | Presence        | Description                                                                                                                                                   |
 | ----------------------- | ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `analysisSchemaVersion` | `string`                | Always          | Schema version (e.g. `"0.14.0"`)                                                                                                                              |
+| `analysisSchemaVersion` | `string`                | Always          | Schema version (e.g. `"0.15.0"`)                                                                                                                              |
 | `status`                | `AnalysisStatus`        | Always          | `'complete' \| 'degraded' \| 'invalid-input' \| 'unsupported-package'`                                                                                        |
 | `scoreValidity`         | `ScoreValidity`         | Always          | `'fully-comparable' \| 'partially-comparable' \| 'not-comparable'`                                                                                            |
 | `degradedReason`        | `string`                | When degraded   | Why the analysis is degraded                                                                                                                                  |
@@ -155,7 +155,7 @@
 | ----------------------- | ---------------- | -------------------------------------------------- |
 | `batches`               | `FixPlanBatch[]` | Ordered fix batches with dependencies              |
 | `totalExpectedUplift`   | `number`         | Total expected score improvement                   |
-| `analysisSchemaVersion` | `string`         | Schema version for compatibility (e.g. `"0.14.0"`) |
+| `analysisSchemaVersion` | `string`         | Schema version for compatibility (e.g. `"0.15.0"`) |
 | `verificationCommands`  | `string[]`       | Commands to verify fixes                           |
 
 ## FixPlanBatch

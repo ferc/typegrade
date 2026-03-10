@@ -42,7 +42,7 @@ export { buildFixPlan } from "./fix/planner.js";
 export { applyFixes } from "./fix/applier.js";
 
 // Diff analysis
-export { computeDiff, renderDiffReport } from "./diff.js";
+export { computeDiff, loadAnalysisSnapshot, renderDiffReport } from "./diff.js";
 
 // Boundary flow analysis
 export { buildTaintFlowChains } from "./boundaries/flow.js";
@@ -97,10 +97,12 @@ export type {
   CompositeKey,
   CompositeScore,
   CrossPackageBoundarySummary,
+  ConfidenceBottleneck,
   ConfidenceSignal,
   ConfidenceSummary,
   CoverageDiagnostics,
   CoverageFailureMode,
+  DeclEmitDiagnostic,
   DegradedCategory,
   DiffResult,
   DimensionDiff,
@@ -134,6 +136,7 @@ export type {
   LibraryInspectionReport,
   CandidateFitAssessment,
   LayerViolation,
+  MigrationComplexity,
   MigrationRiskReport,
   MetricDelta,
   MetricProvenance,
@@ -149,6 +152,7 @@ export type {
   Recommendation,
   RedactedEvalSummary,
   ResolutionDiagnostics,
+  ResultKind,
   ResourceWarning,
   RoleClassification,
   RootCauseCategory,

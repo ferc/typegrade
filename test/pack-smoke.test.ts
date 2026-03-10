@@ -34,6 +34,7 @@ describe("pack smoke test", () => {
       "gatherProfileSignals",
       "isLocalTarget",
       "isPackageTarget",
+      "loadAnalysisSnapshot",
       "loadConfig",
       "normalizeResult",
       "renderAgentJson",

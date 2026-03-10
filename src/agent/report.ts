@@ -1,4 +1,10 @@
-import type { AbortCondition, AnalysisResult, AutofixSummary, Issue } from "../types.js";
+import {
+  ANALYSIS_SCHEMA_VERSION,
+  type AbortCondition,
+  type AnalysisResult,
+  type AutofixSummary,
+  type Issue,
+} from "../types.js";
 import type { AgentReport, EnrichedFixBatch, StopCondition } from "./types.js";
 import { computeExecutionOrder, enrichFixBatches, groupFixBatches } from "./fix-batch.js";
 import { filterIssues } from "../origin/filter.js";
@@ -416,6 +422,7 @@ export function renderAgentJson(report: AgentReport): string {
         : { abstentionReason: report.abstentionReason }),
       actionableIssueCount: report.actionableIssues.length,
       actionableIssues: report.actionableIssues,
+      analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
       enrichedBatches: report.enrichedBatches,
       executionOrder: report.executionOrder,
       expectedScoreImprovement: report.expectedScoreImprovement,
@@ -425,6 +432,7 @@ export function renderAgentJson(report: AgentReport): string {
         ? {}
         : { prunedBatchCaveat: report.prunedBatchCaveat }),
       reportTrust: report.reportTrust ?? null,
+      resultKind: "agent-report" as const,
       stopConditions: report.stopConditions,
       suppressedCount: report.suppressedCount,
       suppressionReasons: report.suppressionReasons,

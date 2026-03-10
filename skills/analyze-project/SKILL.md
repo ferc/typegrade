@@ -8,7 +8,7 @@ description: >
   undersampled results. Use when running typegrade on a local codebase.
 type: core
 library: typegrade
-library_version: "0.14.0"
+library_version: "0.15.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -108,6 +108,20 @@ Returns a `SmartCliResult` envelope wrapping the full `AnalysisResult`. The
 envelope includes `summary` (headline, verdict, scorecard), `trust`
 (classification, canCompare, canGate), `nextAction`, `supplements`, and
 `executionDiagnostics`. See the `consume-json` skill for full field details.
+
+### Save and compare against a baseline
+
+```bash
+# Save the current analysis result under a name
+npx typegrade . --save before-refactor
+
+# Run again after changes and compare against the saved baseline
+npx typegrade . --baseline before-refactor.json
+```
+
+`--save <name>` writes the full JSON result to `<name>.json` in the current
+directory. `--baseline <path>` loads a previously saved result and appends a
+diff summary showing per-composite and per-dimension score deltas.
 
 ### Include generated issues
 

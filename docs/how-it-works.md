@@ -17,6 +17,8 @@ Source mode analyzes your TypeScript source files directly. All 12 dimensions co
 
 If declaration emit fails, source mode falls back to analyzing raw source files for the consumer dimensions, with all confidences capped at 0.6. Source fallback also sets `scoreValidity` to `"partially-comparable"`, which produces a `directional` trust classification (see [Confidence Model: Trust classification](confidence-model.md#trust-classification)).
 
+When declaration emit produces diagnostics (partial or full failure), the actual TypeScript error codes, file paths, and messages are captured in `executionDiagnostics.declEmitDiagnostics` (top 10, deduplicated). Each diagnostic includes actionable `guidance` for common patterns (e.g., TS4058 = return type from private module — re-export the type or annotate explicitly).
+
 Source-mode analysis also detects workspace roots and, when found, attaches a `MonorepoHealthSummary` as `monorepoHealth` on the `AnalysisResult`. This provides workspace layering health data alongside the per-project analysis without requiring a separate `typegrade monorepo` invocation.
 
 In source mode, a `sourceModeConfidence` object is computed with metrics specific to source analysis: source file coverage, declaration emit success, source-owned export coverage, ownership clarity, and fixability rate. See [Confidence Model: Source-mode confidence](confidence-model.md#source-mode-confidence) for details.
@@ -294,6 +296,7 @@ Every `AnalysisResult` includes an `executionDiagnostics` field (as of schema 0.
 | `phaseTimings`     | `Record<string, number>` | Millisecond timings for each phase: `projectLoad`, `declEmit`, `surface`, `dimensions`, `scoring`     |
 | `resourceWarnings` | `ResourceWarning[]`    | Warnings encountered during analysis (OOM, timeouts, fallbacks)                                        |
 | `fallbacksApplied` | `string[]`             | Fallback strategies that were activated (e.g., `"declaration-emit-fallback"`, `"graph-fallback-glob"`) |
+| `declEmitDiagnostics` | `DeclEmitDiagnostic[]?` | Top 10 TypeScript diagnostics from declaration emit (code, file, message, guidance)                   |
 
 ### ResourceWarning kinds
 
@@ -626,7 +629,13 @@ Where `decisionScore` is a weighted composite of the candidate's scores (consume
 
 ### Migration risk
 
-Each candidate receives a `MigrationRiskReport` with risk levels (`low`, `medium`, `high`) for API mismatch, typing, and boundary concerns, plus estimated touch points and batch counts.
+Each candidate receives a `MigrationRiskReport` with risk levels (`low`, `medium`, `high`) for API mismatch, typing, and boundary concerns, plus estimated touch points and batch counts. As of schema 0.15.0, the report also includes concrete metrics:
+
+- **`apiSurfaceDelta`** — absolute difference in measured declaration counts between candidate and codebase.
+- **`boundaryCoverageGap`** — gap between candidate and codebase boundary validation coverage (0-1).
+- **`typeSafetyGap`** — numeric gap in typeSafety composite score.
+- **`estimatedCallSiteChanges`** — approximate call sites that may need modification.
+- **`migrationComplexity`** — overall classification: `trivial`, `moderate`, `significant`, or `major`, derived from all risk signals and touch points.
 
 ### Programmatic API
 
@@ -642,14 +651,25 @@ The `compare` command (`typegrade compare <pkgA> <pkgB>`) performs a side-by-sid
 
 Programmatically, the `comparePackages(pkgA, pkgB, options?)` function returns both `AnalysisResult` objects and an optional rendered text comparison.
 
-The `ComparisonDecisionReport` includes evidence quality metadata (as of schema 0.14.0):
+The `ComparisonDecisionReport` includes evidence quality metadata (as of schema 0.15.0):
 
 - **`evidenceQualityA`** / **`evidenceQualityB`** — numeric evidence quality scores (0-100) for each package, blending trust classification, coverage, scenario evidence, and domain clarity.
 - **`comparisonEligibilityReason`** — human-readable explanation of whether both packages meet the evidence threshold for comparison.
 
 Evidence quality uses adaptive weighting: compact libraries with sufficient surface (>= 6 declarations, >= 12 positions) are not penalized for missing domain or scenario evidence. Instead, domain/scenario weight is redistributed to trust and coverage signals.
 
-The type system also supports a `DiffResult` for comparing two analysis runs of the same project (e.g., before and after a change). Each `DiffResult` carries `analysisSchemaVersion` for compatibility verification. A diff result includes:
+The `diff` command compares two analysis runs. It accepts package names, local paths, or saved JSON snapshot files:
+
+```bash
+typegrade diff zod@3.23 zod@3.24          # compare two package versions
+typegrade diff ./before.json ./after.json  # compare saved snapshots
+typegrade analyze . --save baseline        # save a snapshot
+typegrade analyze . --baseline baseline    # analyze and diff against saved baseline
+```
+
+Snapshots are saved to `.typegrade/snapshots/<name>.json`. The `--baseline` flag on `analyze` loads a snapshot and produces a diff instead of a raw analysis result.
+
+Each `DiffResult` carries `analysisSchemaVersion` for compatibility verification. A diff result includes:
 
 - **Composite diffs**: delta for each composite score (`consumerApi`, `agentReadiness`, `typeSafety`).
 - **Dimension diffs**: delta for each individual dimension score.

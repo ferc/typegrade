@@ -8,6 +8,31 @@ import {
   type Issue,
 } from "./types.js";
 import pc from "picocolors";
+import { readFileSync } from "node:fs";
+
+// --- Snapshot Loading ---
+
+/**
+ * Load a previously saved analysis result from a JSON file.
+ *
+ * @example
+ * ```ts
+ * import { loadAnalysisSnapshot, computeDiff } from "typegrade";
+ * const baseline = loadAnalysisSnapshot("./baseline.json");
+ * const target = loadAnalysisSnapshot("./target.json");
+ * console.log(computeDiff({ baseline, target }).summary);
+ * ```
+ */
+export function loadAnalysisSnapshot(filePath: string): AnalysisResult {
+  const raw = readFileSync(filePath, "utf8");
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  if (!parsed["analysisSchemaVersion"]) {
+    throw new Error(
+      `File ${filePath} does not appear to be a typegrade analysis result (missing analysisSchemaVersion)`,
+    );
+  }
+  return parsed as unknown as AnalysisResult;
+}
 
 // --- Issue Fingerprinting ---
 

@@ -586,6 +586,20 @@ export interface ConfidenceSummary {
   sampleCoverage: number;
 }
 
+/** A dimension identified as a confidence bottleneck with actionable guidance */
+export interface ConfidenceBottleneck {
+  /** Dimension key with low confidence */
+  dimensionKey: string;
+  /** Dimension label for display */
+  dimensionLabel: string;
+  /** Confidence value (0-1) */
+  confidence: number;
+  /** Why confidence is low */
+  explanation: string;
+  /** What the user can do to improve confidence */
+  improvementHint: string;
+}
+
 export interface BenchmarkDiagnostics {
   assertionMargins: { assertion: string; delta: number; minDelta?: number }[];
   rankingLossGlobal?: number;
@@ -608,6 +622,20 @@ export interface ResourceWarning {
   message: string;
 }
 
+/** A single diagnostic from the declaration emit phase */
+export interface DeclEmitDiagnostic {
+  /** TypeScript error code (e.g., 4023, 4058) */
+  code: number;
+  /** File where the diagnostic originated */
+  file: string;
+  /** Diagnostic message (truncated to 200 chars) */
+  message: string;
+  /** Diagnostic category */
+  category: "error" | "warning" | "suggestion" | "message";
+  /** Actionable guidance for this error pattern */
+  guidance?: string | undefined;
+}
+
 /** Execution diagnostics for the analysis pipeline */
 export interface ExecutionDiagnostics {
   /** Path through the analysis pipeline */
@@ -618,6 +646,8 @@ export interface ExecutionDiagnostics {
   resourceWarnings: ResourceWarning[];
   /** Fallback strategies applied during analysis */
   fallbacksApplied: string[];
+  /** Declaration emit diagnostics — top TS errors from the emit phase */
+  declEmitDiagnostics?: DeclEmitDiagnostic[] | undefined;
 }
 
 export interface AnalysisResult {
@@ -671,6 +701,8 @@ export interface AnalysisResult {
   dedupStats: { groups: number; filesRemoved: number };
   /** Confidence summary across all layers — always present */
   confidenceSummary: ConfidenceSummary;
+  /** Dimensions identified as confidence bottlenecks with actionable guidance */
+  confidenceBottlenecks?: ConfidenceBottleneck[] | undefined;
   /** Source-mode-specific confidence metrics */
   sourceModeConfidence?: SourceModeConfidence | undefined;
   /** Coverage diagnostics — reachable files, positions, undersampling — always present */
@@ -1428,6 +1460,9 @@ export interface AbortCondition {
 
 // --- Fit-Compare (Codebase-Aware Library Comparison) ---
 
+/** Overall migration complexity classification */
+export type MigrationComplexity = "trivial" | "moderate" | "significant" | "major";
+
 /** Risk of migrating to a candidate library */
 export interface MigrationRiskReport {
   /** Risk from API shape mismatches */
@@ -1442,6 +1477,16 @@ export interface MigrationRiskReport {
   estimatedBatchCount: number;
   /** Whether human review is required */
   requiresHumanReview: boolean;
+  /** Absolute difference in public API surface entry count */
+  apiSurfaceDelta?: number | undefined;
+  /** Gap between candidate and codebase boundary validation coverage (0-1) */
+  boundaryCoverageGap?: number | undefined;
+  /** Numeric gap in typeSafety composite score */
+  typeSafetyGap?: number | undefined;
+  /** Estimated call sites that may need modification */
+  estimatedCallSiteChanges?: number | undefined;
+  /** Overall migration complexity classification */
+  migrationComplexity: MigrationComplexity;
 }
 
 /** Fit signal for a candidate relative to a codebase */
@@ -1612,7 +1657,22 @@ export interface SmartComparePayload {
   decision: ComparisonDecisionReport;
 }
 
+// --- Result Kind Discriminator (Feature 1: JSON Contract Normalization) ---
+
+/** Discriminator for JSON output from all CLI commands */
+export type ResultKind =
+  | "smart-cli"
+  | "analysis"
+  | "comparison"
+  | "boundaries"
+  | "fix-plan"
+  | "fix-application"
+  | "diff"
+  | "fit-compare"
+  | "monorepo"
+  | "agent-report";
+
 // --- Analysis Schema ---
 
 /** Current schema version for analysis output */
-export const ANALYSIS_SCHEMA_VERSION = "0.14.0";
+export const ANALYSIS_SCHEMA_VERSION = "0.15.0";

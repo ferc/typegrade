@@ -9,10 +9,12 @@ import {
   type BoundaryRecommendedFix,
   type ClusterCategory,
   type CompositeScore,
+  type ConfidenceBottleneck,
   type ConfidenceSummary,
   type CoverageDiagnostics,
   type CoverageFailureMode,
   type DecisionGrade,
+  type DeclEmitDiagnostic,
   type DimensionResult,
   type DomainKey,
   type DomainScore,
@@ -785,6 +787,125 @@ function canKeepUndersampledPackageDirectional(
   return true;
 }
 
+// --- Declaration Emit Diagnostic Guidance ---
+
+const EMIT_DIAGNOSTIC_GUIDANCE: Record<number, string> = {
+  2742: "Inferred type from external module — add an explicit return type annotation",
+  4023: "Exported variable has or is using name from external module — add explicit type annotation",
+  4025: "Exported variable has or is using private name — re-export the referenced type or add explicit annotation",
+  4055: "Return type of public method from exported class has or is using private name",
+  4058: "Return type of exported function has or is using name from private module — re-export the type or annotate explicitly",
+  4060: "Default export from private module — re-export explicitly from a public entrypoint",
+  4078: "Parameter has or is using private name — make the referenced type public or annotate explicitly",
+  4082: "Default export of the module has or is using private name",
+};
+
+/** Map a ts-morph DiagnosticCategory integer to a string */
+function mapDiagnosticCategory(cat: number): "error" | "warning" | "suggestion" | "message" {
+  // Ts-morph: 0=Warning, 1=Error, 2=Suggestion, 3=Message
+  switch (cat) {
+    case 1: {
+      return "error";
+    }
+    case 0: {
+      return "warning";
+    }
+    case 2: {
+      return "suggestion";
+    }
+    default: {
+      return "message";
+    }
+  }
+}
+
+/** Capture top 10 emit diagnostics with actionable guidance */
+function captureDeclEmitDiagnostics(
+  diagnostics: ReturnType<ReturnType<typeof Project.prototype.emitToMemory>["getDiagnostics"]>,
+): DeclEmitDiagnostic[] {
+  const result: DeclEmitDiagnostic[] = [];
+  const seen = new Set<string>();
+
+  for (const diag of diagnostics) {
+    if (result.length >= 10) {
+      break;
+    }
+    const code = diag.getCode();
+    const file = diag.getSourceFile()?.getFilePath() ?? "<unknown>";
+    const rawMsg = diag.getMessageText();
+    const message =
+      typeof rawMsg === "string" ? rawMsg.slice(0, 200) : String(rawMsg).slice(0, 200);
+    const dedup = `${code}:${file}`;
+    if (seen.has(dedup)) {
+      continue;
+    }
+    seen.add(dedup);
+    const category = mapDiagnosticCategory(diag.getCategory());
+    const guidance = EMIT_DIAGNOSTIC_GUIDANCE[code];
+    result.push({ category, code, file, guidance, message });
+  }
+
+  return result;
+}
+
+// --- Confidence Bottleneck Computation ---
+
+const BOTTLENECK_HINTS: Record<string, string> = {
+  agentUsability:
+    "Add JSDoc on public APIs, use branded/narrowed return types, and reduce overload ambiguity",
+  apiSafety:
+    "Replace any/unknown in public API signatures with concrete types; narrow union returns",
+  apiSpecificity:
+    "Add explicit return types and narrow parameter types instead of broad unions or generics",
+  boundaryDiscipline:
+    "Add runtime validation at I/O boundaries (HTTP, env, config, filesystem reads)",
+  configDiscipline:
+    "Type configuration objects explicitly instead of using Record<string, unknown>",
+  declarationFidelity:
+    "Ensure .d.ts files accurately reflect source types — check for manual declaration drift",
+  errorHandling:
+    "Use typed error classes or Result<T,E> patterns instead of throwing untyped errors",
+  genericConstraints:
+    "Add type parameter constraints (extends clauses) to generic functions and classes",
+  overloadPrecision: "Provide overload signatures that narrow return types based on input patterns",
+  semanticLift:
+    "Use conditional types, mapped types, or template literal types to encode domain semantics",
+  specializationPower:
+    "Add generic type parameters, conditional types, mapped types, or infer keywords",
+  unsoundness: "Remove type assertions (as), non-null assertions (!), and unsafe casts",
+};
+
+function computeConfidenceBottlenecks(dimensions: DimensionResult[]): ConfidenceBottleneck[] {
+  const bottlenecks: ConfidenceBottleneck[] = [];
+
+  for (const dim of dimensions) {
+    if (!dim.enabled || dim.confidence === undefined || dim.confidence >= 0.5) {
+      continue;
+    }
+    const signals = dim.confidenceSignals ?? [];
+    let explanation = `Low sample coverage for ${dim.label}`;
+    if (signals.length > 0) {
+      explanation = signals.map((ss) => ss.reason).join("; ");
+    } else if (dim.applicability === "not_applicable") {
+      explanation = `${dim.label} is not applicable to this codebase`;
+    } else if (dim.applicability === "insufficient_evidence") {
+      explanation = `Insufficient evidence to measure ${dim.label}`;
+    }
+    const improvementHint =
+      BOTTLENECK_HINTS[dim.key] ?? `Increase type coverage and annotation quality for ${dim.label}`;
+    bottlenecks.push({
+      confidence: dim.confidence,
+      dimensionKey: dim.key,
+      dimensionLabel: dim.label,
+      explanation,
+      improvementHint,
+    });
+  }
+
+  bottlenecks.sort((aa, bb) => aa.confidence - bb.confidence);
+  return bottlenecks.slice(0, 5);
+}
+
 export interface AnalyzeOptions {
   sourceFilesOptions?: GetSourceFilesOptions;
   mode?: AnalysisMode;
@@ -957,6 +1078,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   /** Declaration emit success rate: 1.0=full, 0<x<1=partial, 0=failed/skipped */
   let declEmitSuccessRate = 0;
   const resourceWarnings: ResourceWarning[] = [];
+  let declEmitDiagnostics: DeclEmitDiagnostic[] | undefined = undefined;
   const declEmitStart = performance.now();
 
   if (mode === "source" && !options?.skipDeclEmit) {
@@ -968,6 +1090,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       const emitDiagnosticCount = diagnostics.length;
       if (emitDiagnosticCount > 0) {
         caveats.push(`Declaration emit produced ${emitDiagnosticCount} diagnostic(s)`);
+        declEmitDiagnostics = captureDeclEmitDiagnostics(diagnostics);
       }
 
       if (emittedFiles.length > 0) {
@@ -1442,12 +1565,16 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     analysisScope = "package";
   }
 
+  // Compute confidence bottlenecks (all confidence adjustments are final by now)
+  const confidenceBottlenecks = computeConfidenceBottlenecks(dimensions);
+
   const result: AnalysisResult = {
     actionabilitySummary,
     analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     analysisScope,
     caveats,
     composites,
+    confidenceBottlenecks: confidenceBottlenecks.length > 0 ? confidenceBottlenecks : undefined,
     confidenceSummary,
     coverageDiagnostics,
     dedupStats,
@@ -1558,6 +1685,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   }
   result.executionDiagnostics = {
     analysisPath: usingSourceFallback ? "source-fallback" : "standard",
+    declEmitDiagnostics: declEmitDiagnostics,
     fallbacksApplied: fallbacks,
     phaseTimings,
     resourceWarnings,

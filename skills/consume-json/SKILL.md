@@ -8,7 +8,7 @@ description: >
   automation, dashboards, or agent workflows that ingest typegrade output.
 type: core
 library: typegrade
-library_version: "0.14.0"
+library_version: "0.15.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/types.ts"
@@ -41,7 +41,7 @@ result types directly.
 
 ```typescript
 interface SmartCliResult {
-  resultKind: "smart-cli";
+  resultKind: "smart-cli"; // Discriminator — see note below
   analysisSchemaVersion: string;
   mode: "repo-audit" | "package-score" | "package-compare" | "fit-compare";
   targetKind: "repo" | "workspace" | "package" | "pair";
@@ -52,6 +52,11 @@ interface SmartCliResult {
   nextAction: SmartNextAction;
   executionDiagnostics: ExecutionDiagnostics;
 }
+// All JSON output types include a `resultKind` discriminator field.
+// Possible values: "smart-cli", "analysis", "comparison", "boundaries",
+// "fix-plan", "fix-application", "diff", "fit-compare", "monorepo",
+// "agent-report". Use resultKind to branch on the output type when
+// consuming typegrade JSON programmatically.
 
 interface SmartSummary {
   headline: string;

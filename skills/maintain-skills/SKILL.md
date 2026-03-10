@@ -8,7 +8,7 @@ description: >
   or documentation.
 type: lifecycle
 library: typegrade
-library_version: "0.14.0"
+library_version: "0.15.0"
 sources:
   - "ferc/typegrade:AGENTS.md"
   - "ferc/typegrade:skills/_artifacts/domain_map.yaml"

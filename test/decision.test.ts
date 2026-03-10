@@ -46,7 +46,7 @@ function makeResult(opts: {
   const trust = makeTrust(opts.trust ?? "trusted");
 
   return {
-    analysisSchemaVersion: "0.14.0",
+    analysisSchemaVersion: "0.15.0",
     caveats: [],
     composites,
     confidenceSummary: {
