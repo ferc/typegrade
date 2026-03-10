@@ -9,12 +9,16 @@ import { filterIssues } from "../origin/filter.js";
  * Filters to only high-confidence, source-owned, directly fixable findings.
  * Groups into fix batches and suggests execution order.
  */
-/** Maximum actionable issues to include in agent report */
-const AGENT_ISSUE_BUDGET = 50;
-/** Maximum actionable issues in strict agent mode (--agent flag) */
-const AGENT_STRICT_BUDGET = 25;
+/** Maximum actionable issues to include in agent report (package mode) */
+const AGENT_ISSUE_BUDGET = 25;
+/** Maximum actionable issues in strict agent mode (source/self) */
+const AGENT_STRICT_BUDGET = 15;
 /** Minimum confidence for agent mode (higher than default) */
 const AGENT_MIN_CONFIDENCE = 0.7;
+/** Minimum dimension confidence to include issues from that dimension */
+const AGENT_MIN_DIMENSION_CONFIDENCE = 0.6;
+/** Maximum fix batches to emit (prune lower-impact ones) */
+const AGENT_MAX_BATCHES = 3;
 
 export function buildAgentReport(
   result: AnalysisResult,
@@ -81,8 +85,26 @@ export function buildAgentReport(
   const minConfidence = opts?.minConfidence ?? AGENT_MIN_CONFIDENCE;
   const includeIndirect = opts?.includeIndirect ?? false;
 
-  // Collect all issues from dimensions
-  const allIssues = result.dimensions.flatMap((dim) => dim.issues);
+  // Collect issues from dimensions, filtering out low-confidence and non-owned issues
+  const allIssues: Issue[] = [];
+  for (const dim of result.dimensions) {
+    const dimConfidence = dim.confidence ?? 1;
+    for (const issue of dim.issues) {
+      // Skip issues from low-confidence dimensions — they are noise
+      if (dimConfidence < AGENT_MIN_DIMENSION_CONFIDENCE) {
+        continue;
+      }
+      // Only include source-owned or workspace-owned issues
+      if (
+        issue.ownership &&
+        issue.ownership !== "source-owned" &&
+        issue.ownership !== "workspace-owned"
+      ) {
+        continue;
+      }
+      allIssues.push(issue);
+    }
+  }
 
   // Filter to actionable issues using shared signal-hygiene filter
   const { actionable: actionableIssues } = filterIssues(allIssues, {
@@ -112,10 +134,20 @@ export function buildAgentReport(
   const suppressionReasons = computeSuppressionBreakdown(allIssues, budgetedIssues);
 
   // Group into fix batches (cluster by module directory in source mode)
-  const fixBatches = groupFixBatches(
+  let fixBatches = groupFixBatches(
     budgetedIssues,
     isSourceMode ? { clusterByModule: true } : undefined,
   );
+
+  // Prune fix batches to top N by expected impact
+  let prunedBatchCaveat: string | undefined = undefined;
+  if (fixBatches.length > AGENT_MAX_BATCHES) {
+    const prunedCount = fixBatches.length - AGENT_MAX_BATCHES;
+    // Batches already sorted by impact descending in groupFixBatches
+    fixBatches = fixBatches.slice(0, AGENT_MAX_BATCHES);
+    prunedBatchCaveat = `${prunedCount} lower-impact batch(es) pruned — focus on top ${AGENT_MAX_BATCHES} for maximum effect`;
+  }
+
   const executionOrder = computeExecutionOrder(fixBatches);
 
   // Enrich batches with score deltas and verification commands
@@ -174,6 +206,7 @@ export function buildAgentReport(
     expectedScoreImprovement,
     fixBatches,
     nextBestBatch,
+    ...(prunedBatchCaveat === undefined ? {} : { prunedBatchCaveat }),
     reportTrust,
     stopConditions,
     suppressedCount,
@@ -388,6 +421,9 @@ export function renderAgentJson(report: AgentReport): string {
       expectedScoreImprovement: report.expectedScoreImprovement,
       fixBatches: report.fixBatches,
       nextBestBatch: report.nextBestBatch ?? null,
+      ...(report.prunedBatchCaveat === undefined
+        ? {}
+        : { prunedBatchCaveat: report.prunedBatchCaveat }),
       reportTrust: report.reportTrust ?? null,
       stopConditions: report.stopConditions,
       suppressedCount: report.suppressedCount,

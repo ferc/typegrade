@@ -104,6 +104,47 @@ function countDtsFiles(pkgDir: string, maxDepth = 4): number {
 }
 
 /**
+ * Detect if a package uses a bundler plugin that generates types at build time
+ * rather than shipping pre-built .d.ts files. These packages cannot be analyzed
+ * without running the build step.
+ */
+function detectBundlerPlugin(pkgJson: Record<string, unknown>): boolean {
+  // Common bundler plugins that generate types dynamically
+  const bundlerTypePlugins = [
+    "rollup-plugin-dts",
+    "vite-plugin-dts",
+    "@rollup/plugin-typescript",
+    "unplugin-auto-import",
+    "rollup-plugin-typescript2",
+    "esbuild-plugin-d.ts",
+  ];
+
+  // Check devDependencies and dependencies for known type-generating plugins
+  const deps = {
+    ...(pkgJson["dependencies"] as Record<string, string> | undefined),
+    ...(pkgJson["devDependencies"] as Record<string, string> | undefined),
+  };
+
+  // Bundler plugin dependency indicates unsupported bundler layout
+  for (const plugin of bundlerTypePlugins) {
+    if (deps[plugin]) {
+      return true;
+    }
+  }
+
+  // Check for build scripts referencing type generation
+  const scripts = pkgJson["scripts"] as Record<string, string> | undefined;
+  if (scripts) {
+    const buildScript = scripts["build"] ?? scripts["prepare"] ?? scripts["prepublish"] ?? "";
+    if (buildScript.includes("dts") || buildScript.includes("tsc --emitDeclarationOnly")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Classify a package layout to determine analysis strategy.
  */
 function classifyPackageLayout(
@@ -116,6 +157,10 @@ function classifyPackageLayout(
   const dtsFiles = countDtsFiles(pkgDir);
 
   if (dtsFiles === 0) {
+    // No declarations at all — check if it's a bundler plugin situation
+    if (hasTypeEntries && detectBundlerPlugin(pkgJson)) {
+      return "unsupported-bundler";
+    }
     return "no-declarations";
   }
   if (!hasTypeEntries && dtsFiles > 0) {
@@ -369,6 +414,93 @@ function stampResultStatus(result: AnalysisResult): void {
   result.analysisSchemaVersion = result.analysisSchemaVersion ?? ANALYSIS_SCHEMA_VERSION;
 }
 
+/**
+ * Search for .d.ts files up to `maxDepth` levels deep and return the first one found.
+ * This is a deeper fallback than LAST_RESORT_PATHS — it does a recursive scan
+ * to find declarations at non-standard locations.
+ */
+function findAnyDtsFile(pkgDir: string, maxDepth = 5): string | null {
+  const search = (dir: string, depth: number): string | null => {
+    if (depth > maxDepth) {
+      return null;
+    }
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      // Check files first at this level
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          const nm = entry.name;
+          if (nm.endsWith(".d.ts") || nm.endsWith(".d.mts") || nm.endsWith(".d.cts")) {
+            return join(dir, nm);
+          }
+        }
+      }
+      // Then recurse into subdirectories
+      for (const entry of entries) {
+        if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+          const found = search(join(dir, entry.name), depth + 1);
+          if (found) {
+            return found;
+          }
+        }
+      }
+    } catch {
+      // Ignore unreadable directories
+    }
+    return null;
+  };
+  return search(pkgDir, 0);
+}
+
+/** Build a fallback analysis result from non-standard declaration path */
+function buildNonStandardDeclFallback(opts: {
+  deepDts: string;
+  domain: string | undefined;
+  effectivePkgDir: string;
+  installRoot: string;
+  moduleKind: "esm" | "cjs" | "dual" | "unknown";
+  nameOrPath: string;
+  noCache: boolean | undefined;
+  packageName: string;
+  packageVersion: string;
+  resultCacheKeyStr: string;
+  typesSource: "bundled" | "@types" | "mixed" | "unknown";
+}): AnalysisResult {
+  const analyzeOpts = {
+    mode: "package" as const,
+    packageContext: {
+      graphStats: makeFallbackGraphStats(),
+      packageJsonPath: join(opts.effectivePkgDir, "package.json"),
+      packageName: opts.packageName,
+      packageRoot: opts.effectivePkgDir,
+      typesEntrypoint: opts.deepDts.replace(`${opts.effectivePkgDir}/`, ""),
+      typesSource: opts.typesSource,
+    },
+    sourceFilesOptions: { includeDts: true, includeNodeModules: true },
+  };
+  if (opts.domain !== undefined) {
+    (analyzeOpts as Record<string, unknown>)["domain"] = opts.domain;
+  }
+  const result = analyzeProject(opts.installRoot, analyzeOpts);
+  result.packageIdentity = {
+    displayName: opts.packageName,
+    entrypointStrategy: "fallback-glob",
+    moduleKind: opts.moduleKind,
+    resolvedSpec: opts.nameOrPath,
+    resolvedVersion: opts.packageVersion === "latest" ? null : opts.packageVersion,
+    typesSource: opts.typesSource,
+  };
+  result.caveats = result.caveats ?? [];
+  result.caveats.push(
+    "Declarations found at non-standard location — confidence may be lower than usual",
+  );
+  stampResultStatus(result);
+  if (!opts.noCache) {
+    writeResultCache(opts.resultCacheKeyStr, result);
+  }
+  return result;
+}
+
 function scoreLocalPackage(opts: {
   localPath: string;
   pkgJsonPath: string;
@@ -412,8 +544,55 @@ function scoreLocalPackage(opts: {
   const entrypoints = resolveEntrypoints(localPath);
   const graphResolved = graph.filesToAnalyze.length > 0;
 
+  // Unsupported bundler layout — type entries exist but point to build artifacts not yet generated
+  if (layout === "unsupported-bundler" && !graphResolved) {
+    return buildDegradedResult({
+      category: "unsupported-package-layout",
+      errorMessage: `Package ${packageName} uses a bundler plugin for type generation — declarations are not available at install time`,
+      packageName,
+      spec: localPath,
+      version: resolvedVersion,
+    });
+  }
+
   // Only degrade for missing declarations after BOTH shallow check AND graph resolution fail
   if (layout === "no-declarations" && !graphResolved) {
+    // Deep scan: try to find .d.ts files at non-standard locations
+    const deepDts = findAnyDtsFile(localPath);
+    if (deepDts) {
+      // Found declarations at non-standard path — use fallback glob analysis
+      const result = analyzeProject(localPath, {
+        ...(domain !== undefined && { domain }),
+        mode: "package",
+        packageContext: {
+          graphStats: makeFallbackGraphStats(),
+          packageJsonPath: pkgJsonPath,
+          packageName,
+          packageRoot: localPath,
+          typesEntrypoint: deepDts.replace(`${localPath}/`, ""),
+          typesSource: "bundled",
+        },
+        sourceFilesOptions: { includeDts: true, includeNodeModules: true },
+      });
+      result.packageIdentity = {
+        displayName: packageName,
+        entrypointStrategy: "fallback-glob",
+        moduleKind,
+        resolvedSpec: localPath,
+        resolvedVersion,
+        typesSource: "bundled",
+      };
+      result.caveats = result.caveats ?? [];
+      result.caveats.push(
+        "Declarations found at non-standard location — confidence may be lower than usual",
+      );
+      stampResultStatus(result);
+      if (!noCache) {
+        writeResultCache(resultKey, result);
+      }
+      return result;
+    }
+
     return buildDegradedResult({
       category: "missing-declarations",
       errorMessage: `No .d.ts files found in ${packageName}`,
@@ -792,18 +971,27 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
   try {
     const pkgDir = join(installRoot, "node_modules", packageName);
 
+    // Pre-flight check: verify the package directory exists and has a package.json
+    if (!existsSync(pkgDir) || !existsSync(join(pkgDir, "package.json"))) {
+      return buildDegradedResult({
+        category: "invalid-package-spec",
+        errorMessage: `Package directory or package.json not found for ${packageName}`,
+        packageName,
+        spec: nameOrPath,
+        version: packageVersion === "latest" ? null : packageVersion,
+      });
+    }
+
     // Detect types package
     let typesPackageName: string | undefined = undefined;
     let pkgJson: Record<string, unknown> = {};
-    if (existsSync(pkgDir)) {
-      pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
-      if (!pkgJson["types"] && !pkgJson["typings"] && !pkgJson["exports"]) {
-        const candidate = packageName.startsWith("@")
-          ? `@types/${packageName.slice(1).replace("/", "__")}`
-          : `@types/${packageName}`;
-        if (existsSync(join(installRoot, "node_modules", candidate))) {
-          typesPackageName = candidate;
-        }
+    pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+    if (!pkgJson["types"] && !pkgJson["typings"] && !pkgJson["exports"]) {
+      const candidate = packageName.startsWith("@")
+        ? `@types/${packageName.slice(1).replace("/", "__")}`
+        : `@types/${packageName}`;
+      if (existsSync(join(installRoot, "node_modules", candidate))) {
+        typesPackageName = candidate;
       }
     }
 
@@ -838,8 +1026,50 @@ export function scorePackage(nameOrPath: string, options?: ScorePackageOptions):
     });
     const graphResolved = graph.filesToAnalyze.length > 0;
 
+    // Unsupported bundler layout — types exist in package.json but need a build step
+    if (layout === "unsupported-bundler" && !graphResolved) {
+      return buildDegradedResult({
+        category: "unsupported-package-layout",
+        errorMessage: `Package ${packageName} uses a bundler plugin for type generation — declarations are not available at install time`,
+        packageName,
+        spec: nameOrPath,
+        version: packageVersion === "latest" ? null : packageVersion,
+      });
+    }
+
     // Only degrade after BOTH shallow check AND graph resolution fail
     if (layout === "no-declarations" && !graphResolved) {
+      // Companion types: if no @types was found and no .d.ts exist, this is a pure JS package
+      if (!typesPackageName) {
+        // Deep scan: try to find .d.ts files at non-standard locations
+        const deepDts = findAnyDtsFile(effectivePkgDir);
+        if (!deepDts) {
+          // Truly no declarations — pure JS package
+          return buildDegradedResult({
+            category: "unsupported-package-layout",
+            errorMessage: `Package ${packageName} is a pure JavaScript package with no type declarations or @types companion`,
+            packageName,
+            spec: nameOrPath,
+            version: packageVersion === "latest" ? null : packageVersion,
+          });
+        }
+        // Found declarations at non-standard path — fallback analysis
+        const fallbackResult = buildNonStandardDeclFallback({
+          deepDts,
+          domain: options?.domain,
+          effectivePkgDir,
+          installRoot,
+          moduleKind: detectModuleKind(pkgJson),
+          nameOrPath,
+          noCache: options?.noCache,
+          packageName,
+          packageVersion,
+          resultCacheKeyStr,
+          typesSource,
+        });
+        return fallbackResult;
+      }
+
       return buildDegradedResult({
         category: "missing-declarations",
         errorMessage: `No .d.ts files found in ${packageName}`,

@@ -167,7 +167,23 @@ The `RedactedShadowSummary` also includes 99% confidence bounds for key metrics 
 
 ### Shadow gates
 
-The `pnpm gate:shadow` command checks the latest shadow summary against gate thresholds. Gate results are emitted as pass/fail with aggregate metrics only.
+The `pnpm gate:shadow` command reads the saved `benchmarks-output/shadow-summary.json` and checks it against gate thresholds. It does not re-run the shadow benchmark — it validates the most recent summary. Gate results are emitted as pass/fail with aggregate metrics only.
+
+Checks include:
+- Summary freshness (must be within 24 hours).
+- All shadow gates from the saved summary passed.
+- Aggregate assertions: degraded rate, comparable rate, domain coverage, and scenario coverage.
+
+## Aggregate assertions
+
+Holdout and shadow tracks use aggregate assertions (`AggregateAssertion` in `benchmarks/types.ts`) instead of per-package pairwise assertions. These are quarantine-compliant: they check only aggregate rates (degraded rate, fallback rate, comparable rate, domain/scenario coverage) with no package-specific logic.
+
+- **Holdout assertions** (`HOLDOUT_ASSERTIONS`): strict, zero-tolerance — all holdout packages must produce complete, non-degraded, non-fallback, fully-comparable results.
+- **Shadow assertions** (`SHADOW_ASSERTIONS`): relaxed thresholds for random npm packages — degraded rate below 10%, comparable rate above 40%, domain coverage above 70%, scenario coverage above 35%.
+
+## Schema versioning
+
+Both `RedactedEvalSummary` and `RedactedShadowSummary` include an optional `analysisSchemaVersion` field that records which version of the analysis schema was used for the benchmark run. This enables tracking score changes across schema versions and detecting when benchmark results were produced with an outdated schema.
 
 ## Benchmark artifacts
 
@@ -194,7 +210,7 @@ Each benchmark run saves per-package results to split-specific subdirectories un
 | `pnpm gate:train`          | Train gate check                                             |
 | `pnpm gate:holdout`        | Holdout gate check                                           |
 | `pnpm gate:eval`           | Eval gate check (CI/judge only)                              |
-| `pnpm gate:shadow`         | Shadow gate check (CI/judge only)                            |
+| `pnpm gate:shadow`         | Shadow gate check (reads saved summary, builder-accessible)  |
 | `pnpm perf`                | Run all performance benchmarks                               |
 | `pnpm perf:cli`            | Measure CLI cold-start (`--version`, `--help`)               |
 | `pnpm perf:score`          | Measure `analyze`, `boundaries`, `fix-plan` latency          |

@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EXPECTED_DOMAINS, PAIRWISE_ASSERTIONS } from "./assertions.js";
 import { flattenManifest, loadManifest } from "./split-loader.js";
@@ -10,15 +10,20 @@ import {
   wilsonLowerBound,
   wilsonUpperBound,
 } from "./stats.js";
+import type { RedactedShadowSummary } from "./types.js";
+import { HOLDOUT_ASSERTIONS, SHADOW_ASSERTIONS } from "./types.js";
 
 const args = process.argv.slice(2);
 const evalMode = args.includes("--eval");
 const holdoutMode = args.includes("--holdout");
-const gateMode: "train" | "holdout" | "eval" = evalMode
+const shadowMode = args.includes("--shadow");
+const gateMode: "train" | "holdout" | "eval" | "shadow" = evalMode
   ? "eval"
   : holdoutMode
     ? "holdout"
-    : "train";
+    : shadowMode
+      ? "shadow"
+      : "train";
 
 interface GateResult {
   gate: string;
@@ -82,6 +87,19 @@ function findLatestEvalSummary(): Record<string, unknown> | null {
   const summaryPath = join(import.meta.dirname, "..", "benchmarks-output", "eval-summary.json");
   if (!existsSync(summaryPath)) return null;
   return JSON.parse(readFileSync(summaryPath, "utf8"));
+}
+
+function findLatestShadowSummary(): { summary: RedactedShadowSummary; ageMs: number } | null {
+  const summaryPath = join(import.meta.dirname, "..", "benchmarks-output", "shadow-summary.json");
+  if (!existsSync(summaryPath)) return null;
+  try {
+    const stat = statSync(summaryPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as RedactedShadowSummary;
+    return { ageMs, summary };
+  } catch {
+    return null;
+  }
 }
 
 function runTrainGates(): GateResult[] {
@@ -789,6 +807,85 @@ function runHoldoutGates(): GateResult[] {
     }),
   );
 
+  // Gate H8-H10: Aggregate assertions (quarantine-compliant, no package-specific logic)
+  const degradedCount = entries.filter((en) => en.status === "degraded").length;
+  const fallbackCount = entries.filter((en) => en.graphStats?.usedFallbackGlob).length;
+  const holdoutMetrics = {
+    comparableRate: total > 0 ? comparableCount / total : 0,
+    degradedRate: total > 0 ? degradedCount / total : 0,
+    fallbackGlobRate: total > 0 ? fallbackCount / total : 0,
+  };
+
+  for (const assertion of HOLDOUT_ASSERTIONS) {
+    gates.push(
+      runGate(`agg:${assertion.name}`, () => assertion.check(holdoutMetrics)),
+    );
+  }
+
+  return gates;
+}
+
+function runShadowSummaryGates(): GateResult[] {
+  const gates: GateResult[] = [];
+  const shadowData = findLatestShadowSummary();
+
+  if (!shadowData) {
+    console.log("WARNING: No shadow summary found. Run 'pnpm benchmark:shadow' first.\n");
+    return [
+      {
+        detail: "No shadow summary file",
+        durationMs: 0,
+        gate: "shadow-summary-exists",
+        passed: false,
+      },
+    ];
+  }
+
+  const { ageMs, summary } = shadowData;
+  const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
+
+  // Gate S0: Summary freshness — must be within 24h
+  gates.push(
+    runGate("shadow-summary-fresh", () => {
+      const ageHours = Math.round(ageMs / (60 * 60 * 1000) * 10) / 10;
+      return {
+        detail: `${ageHours}h old (max 24h)`,
+        passed: ageMs < maxAgeMs,
+      };
+    }),
+  );
+
+  // Gate S1: Overall shadow gate pass/fail from the saved summary
+  gates.push(
+    runGate("shadow-all-gates-passed", () => {
+      const failedGates = summary.gates.filter((gg) => !gg.passed);
+      if (failedGates.length === 0) {
+        return { detail: `${summary.gates.length} gates passed`, passed: true };
+      }
+      const failedNames = failedGates.map((gg) => gg.gate).join(", ");
+      return {
+        detail: `${failedGates.length} failed: ${failedNames}`,
+        passed: false,
+      };
+    }),
+  );
+
+  // Gate S2-S5: Aggregate assertions against shadow summary metrics
+  // Older summaries may lack some fields — default to 0 for rates
+  const shadowMetrics = {
+    comparableRate: summary.comparableRate ?? 0,
+    degradedRate: summary.degradedRate ?? 0,
+    domainCoverageRate: summary.domainCoverageRate ?? 0,
+    fallbackGlobRate: summary.fallbackGlobRate ?? 0,
+    scenarioCoverageRate: summary.scenarioCoverageRate ?? 0,
+  };
+
+  for (const assertion of SHADOW_ASSERTIONS) {
+    gates.push(
+      runGate(`agg:${assertion.name}`, () => assertion.check(shadowMetrics)),
+    );
+  }
+
   return gates;
 }
 
@@ -800,7 +897,9 @@ function main() {
       ? runEvalGates()
       : gateMode === "holdout"
         ? runHoldoutGates()
-        : runTrainGates();
+        : gateMode === "shadow"
+          ? runShadowSummaryGates()
+          : runTrainGates();
 
   // Print results
   console.log("=== Gate Results ===\n");
@@ -824,7 +923,9 @@ function main() {
       ? "gate-eval-report.json"
       : gateMode === "holdout"
         ? "gate-holdout-report.json"
-        : "gate-report.json";
+        : gateMode === "shadow"
+          ? "gate-shadow-report.json"
+          : "gate-report.json";
   const reportPath = join(outputDir, reportFilename);
   writeFileSync(
     reportPath,
@@ -843,12 +944,15 @@ function main() {
   );
   console.log(`\nGate report saved to benchmarks-output/${reportFilename}`);
 
-  // Train and holdout gates are strict — eval gates are report-only (non-blocking)
+  // Train and holdout gates are strict — eval and shadow gates are report-only (non-blocking)
   if (!allPassed && (gateMode === "train" || gateMode === "holdout")) {
     process.exit(1);
   }
   if (!allPassed && gateMode === "eval") {
     console.log("\nEval gate failures are non-blocking (report-only mode).");
+  }
+  if (!allPassed && gateMode === "shadow") {
+    console.log("\nShadow gate failures are non-blocking (report-only mode).");
   }
 }
 

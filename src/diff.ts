@@ -87,11 +87,19 @@ function diffDimensions(opts: {
 
 // --- Issue Diffing ---
 
+/** Whether an issue is source-owned (eligible for diff reporting) */
+function isSourceOwned(issue: Issue): boolean {
+  if (!issue.ownership) {
+    return true;
+  }
+  return issue.ownership === "source-owned" || issue.ownership === "workspace-owned";
+}
+
 /** Find new issues present in target but not in baseline */
 function findNewIssues(opts: { baseline: AnalysisResult; target: AnalysisResult }): Issue[] {
   const baselineFingerprints = new Set(opts.baseline.topIssues.map(issueFingerprint));
   return opts.target.topIssues.filter(
-    (issue) => !baselineFingerprints.has(issueFingerprint(issue)),
+    (issue) => isSourceOwned(issue) && !baselineFingerprints.has(issueFingerprint(issue)),
   );
 }
 
@@ -99,7 +107,7 @@ function findNewIssues(opts: { baseline: AnalysisResult; target: AnalysisResult 
 function findResolvedIssues(opts: { baseline: AnalysisResult; target: AnalysisResult }): Issue[] {
   const targetFingerprints = new Set(opts.target.topIssues.map(issueFingerprint));
   return opts.baseline.topIssues.filter(
-    (issue) => !targetFingerprints.has(issueFingerprint(issue)),
+    (issue) => isSourceOwned(issue) && !targetFingerprints.has(issueFingerprint(issue)),
   );
 }
 
@@ -113,6 +121,10 @@ function findWorsenedIssues(opts: { baseline: AnalysisResult; target: AnalysisRe
 
   const worsened: Issue[] = [];
   for (const targetIssue of opts.target.topIssues) {
+    // Only report worsened issues from source-owned code
+    if (!isSourceOwned(targetIssue)) {
+      continue;
+    }
     const fp = issueFingerprint(targetIssue);
     const baselineIssue = baselineByFingerprint.get(fp);
     if (

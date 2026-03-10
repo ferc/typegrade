@@ -89,4 +89,6 @@ export interface AgentReport {
   reportTrust?: TrustSummary | undefined;
   /** Abort signals — conditions under which the agent should stop entirely */
   abortSignals: AbortCondition[];
+  /** Caveat when lower-impact batches were pruned */
+  prunedBatchCaveat?: string | undefined;
 }

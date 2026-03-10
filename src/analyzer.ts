@@ -12,6 +12,7 @@ import {
   type ConfidenceSummary,
   type CoverageDiagnostics,
   type CoverageFailureMode,
+  type DecisionGrade,
   type DimensionResult,
   type DomainKey,
   type DomainScore,
@@ -309,11 +310,29 @@ export function normalizeResult(result: AnalysisResult): AnalysisResult {
           result.autofixAbstentionReason = `Overall confidence too low for fix batches (${Math.round(avgConfidence * 100)}%)`;
         }
       }
+
+      // WS4: Stricter source-mode confidence gating — source/self with low
+      // Confidence cannot claim fully-comparable validity
+      if (
+        (result.analysisScope === "source" || result.analysisScope === "self") &&
+        avgConfidence < 0.4 &&
+        result.scoreValidity === "fully-comparable"
+      ) {
+        result.scoreValidity = "partially-comparable";
+        result.caveats = result.caveats ?? [];
+        result.caveats.push(
+          `Source-mode confidence too low for full comparability (${Math.round(avgConfidence * 100)}%)`,
+        );
+      }
     }
   }
 
   // --- Trust summary computation ---
   result.trustSummary = computeTrustSummary(result);
+
+  // --- WS8: Decision grade and comparability reasons ---
+  result.decisionGrade = computeDecisionGrade(result);
+  result.comparabilityReasons = buildComparabilityReasons(result);
 
   // --- Stable issue IDs and dimension keys (mandatory in output) ---
   enrichDimensionKeys(result.dimensions);
@@ -434,6 +453,102 @@ function computeTrustSummary(result: AnalysisResult): TrustSummary {
   // Trusted: complete with strong evidence
   reasons.push("Complete analysis with sufficient coverage");
   return { canCompare: true, canGate: true, classification: "trusted", reasons };
+}
+
+/** Average of the four confidence summary dimensions */
+function computeAvgConfidence(cs: ConfidenceSummary): number {
+  return (
+    (cs.graphResolution + cs.domainInference + cs.sampleCoverage + cs.scenarioApplicability) / 4
+  );
+}
+
+/**
+ * Compute decision grade — how strong the analysis evidence is for
+ * decision-making. Layered on top of trust classification to give
+ * consumers a single "can I act on this?" signal.
+ *
+ * - strong: full evidence, suitable for gating and comparison
+ * - directional: usable for guidance but not decision-grade
+ * - abstain: no usable evidence — do not act on this result
+ */
+function computeDecisionGrade(result: AnalysisResult): DecisionGrade {
+  // Abstain: no usable evidence
+  if (
+    result.status === "degraded" ||
+    result.status === "invalid-input" ||
+    result.status === "unsupported-package"
+  ) {
+    return "abstain";
+  }
+  if (result.scoreValidity === "not-comparable") {
+    return "abstain";
+  }
+
+  const trust = result.trustSummary?.classification;
+  if (trust === "abstained") {
+    return "abstain";
+  }
+
+  // Directional: usable but not decision-grade
+  if (trust === "directional") {
+    return "directional";
+  }
+  if (result.scoreValidity === "partially-comparable") {
+    return "directional";
+  }
+  if (result.graphStats.usedFallbackGlob) {
+    return "directional";
+  }
+
+  // Source mode with low confidence is directional
+  if (
+    (result.analysisScope === "source" || result.analysisScope === "self") &&
+    result.confidenceSummary
+  ) {
+    const avgConf = computeAvgConfidence(result.confidenceSummary);
+    if (avgConf < 0.6) {
+      return "directional";
+    }
+  }
+
+  return "strong";
+}
+
+/**
+ * Build human-readable reasons explaining why this result is or is not
+ * comparable to other results. Consumers can display these in UI or logs.
+ */
+function buildComparabilityReasons(result: AnalysisResult): string[] {
+  const reasons: string[] = [];
+
+  if (result.status === "degraded") {
+    reasons.push(`Analysis degraded: ${result.degradedReason ?? "unknown"}`);
+    return reasons;
+  }
+  if (result.status === "invalid-input") {
+    reasons.push("Invalid input — analysis could not run");
+    return reasons;
+  }
+  if (result.status === "unsupported-package") {
+    reasons.push("Unsupported package layout");
+    return reasons;
+  }
+
+  if (result.graphStats.usedFallbackGlob) {
+    reasons.push("Graph resolution used fallback glob");
+  }
+  if (result.coverageDiagnostics.undersampled) {
+    reasons.push("Undersampled coverage");
+  }
+  if (result.executionDiagnostics?.analysisPath === "source-fallback") {
+    reasons.push("Source-mode declaration emit fallback");
+  }
+
+  if (reasons.length === 0) {
+    reasons.push("Complete analysis with sufficient evidence");
+  }
+
+  return reasons;
 }
 
 function computeIssueId(issue: {
@@ -1003,17 +1118,22 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   // Run scenario pack if domain was detected with sufficient confidence and no fallback glob
   let scenarioScore: ScenarioScore | undefined = undefined;
   let scenarioAbstentionReason: string | undefined = undefined;
+  const scenarioApplicabilityReasons: string[] = [];
   if (scenarioApplicabilityStatus === "not_applicable") {
     scenarioAbstentionReason =
       domainOpt === "off"
         ? "Domain scoring disabled"
         : `Domain confidence too low (${domainInference.confidence.toFixed(2)}) — scenario not applicable`;
+    scenarioApplicabilityReasons.push(scenarioAbstentionReason);
   } else if (!domainConfidenceMet) {
     scenarioAbstentionReason = `Domain confidence too low (${domainInference.confidence.toFixed(2)})`;
+    scenarioApplicabilityReasons.push(scenarioAbstentionReason);
   } else if (usedFallbackGlob) {
     scenarioAbstentionReason = "Graph used fallback glob — scenario evaluation skipped";
+    scenarioApplicabilityReasons.push(scenarioAbstentionReason);
   } else if (domainInference.confidence < SCENARIO_CONFIDENCE_THRESHOLD) {
     scenarioAbstentionReason = `Domain confidence ${domainInference.confidence.toFixed(2)} below scenario threshold`;
+    scenarioApplicabilityReasons.push(scenarioAbstentionReason);
   } else {
     const pack = getScenarioPackWithVariant(
       domainInference.domain as DomainKey,
@@ -1026,11 +1146,16 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         scenarioScore = evaluateScenarioPack(pack, consumerSurface, packageName);
         // Attach applicability status to the scenario score
         scenarioScore.scenarioApplicability = scenarioApplicabilityStatus;
+        scenarioApplicabilityReasons.push(
+          `Scenario pack '${pack.name}' applicable for domain '${domainInference.domain}'`,
+        );
       } else {
         scenarioAbstentionReason = `Scenario pack '${pack.name}' not applicable: ${applicabilityCheck.reason}`;
+        scenarioApplicabilityReasons.push(scenarioAbstentionReason);
       }
     } else {
       scenarioAbstentionReason = `No scenario pack for domain '${domainInference.domain}'`;
+      scenarioApplicabilityReasons.push(scenarioAbstentionReason);
     }
   }
   if (scenarioAbstentionReason && !scenarioScore) {
@@ -1249,6 +1374,32 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   if (degradedReason) {
     result.degradedReason = degradedReason;
     result.degradedCategory = "insufficient-surface";
+  }
+
+  // Attach domain and scenario applicability reasons
+  const domainReasons: string[] =
+    "domainApplicabilityReasons" in domainInference
+      ? [...(domainInference.domainApplicabilityReasons ?? [])]
+      : [];
+  if (!domainScore && domainReasons.length === 0) {
+    // Domain score omitted — explain why
+    if (domainOpt === "off") {
+      domainReasons.push("Domain scoring disabled");
+    } else if (domainInference.domain === "general") {
+      domainReasons.push("Domain is 'general' — no domain-specific scoring");
+    } else if (usedFallbackGlob) {
+      domainReasons.push("Graph used fallback glob — domain scoring skipped");
+    } else if (!domainConfidenceMet) {
+      domainReasons.push(
+        `Domain confidence ${domainInference.confidence.toFixed(2)} below threshold`,
+      );
+    }
+  }
+  if (domainReasons.length > 0) {
+    result.domainApplicabilityReasons = domainReasons;
+  }
+  if (scenarioApplicabilityReasons.length > 0) {
+    result.scenarioApplicabilityReasons = scenarioApplicabilityReasons;
   }
 
   // Compute source-mode confidence for source/self analyses

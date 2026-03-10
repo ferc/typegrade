@@ -175,6 +175,7 @@ export type {
   SuppressionOverrides,
   TaintFlowChain,
   TaintFlowStep,
+  DecisionGrade,
   TrustClassification,
   TrustLevel,
   TrustSummary,

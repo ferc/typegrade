@@ -53,6 +53,20 @@ const LAST_RESORT_PATHS = [
   "release/index.d.ts",
   "pkg/index.d.ts",
   "bundle/index.d.ts",
+  // Non-index declaration files at well-known locations
+  "dist/types.d.ts",
+  "dist/typings.d.ts",
+  "types.d.ts",
+  "typings.d.ts",
+  "dist/main.d.ts",
+  "dist/module.d.ts",
+  // Additional module format directories
+  "dist/es/index.d.ts",
+  "dist/mjs/index.d.ts",
+  "dist/umd/index.d.ts",
+  // Declarations directories
+  "dist/declarations/index.d.ts",
+  "declarations/index.d.ts",
 ] as const;
 
 /**

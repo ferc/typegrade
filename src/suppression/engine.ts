@@ -9,6 +9,15 @@ const LEXICAL_PATTERNS = [/naming convention/i, /inconsistent case/i];
 
 const INTERNAL_TOOLING_PATTERNS = [/[/\\]scripts[/\\]/, /[/\\]tools[/\\]/, /\.config\./];
 
+/** TypeScript internal declaration name patterns that produce self-referential false positives */
+const SELF_REFERENTIAL_DECLARATION_PATTERNS = [
+  /^__type$/,
+  /^__event$/,
+  /^__module$/,
+  /^_default$/,
+  /^__[a-zA-Z]+$/,
+];
+
 const EXPECTED_COMPLEXITY_DOMAINS = new Set(["schema", "stream"]);
 
 /** Options for the suppression engine */
@@ -181,6 +190,32 @@ function evaluateSuppression(
       category: "expected-domain-complexity",
       confidence: 0.7,
       reason: `Expected complexity in ${context.domain} domain`,
+    };
+  }
+
+  // Lexical self-referential: issue message references a TS internal declaration name
+  if (config.suppressSelfReferential) {
+    for (const pattern of SELF_REFERENTIAL_DECLARATION_PATTERNS) {
+      if (pattern.test(issue.message)) {
+        return {
+          category: "self-referential-false-positive",
+          confidence: 0.85,
+          reason: `Declaration name matches internal pattern: ${issue.message.slice(0, 60)}`,
+        };
+      }
+    }
+  }
+
+  // Ambiguous ownership: generated/vendor-origin files with non-error severity
+  if (
+    issue.fileOrigin &&
+    (issue.fileOrigin === "generated" || issue.fileOrigin === "vendor") &&
+    issue.severity !== "error"
+  ) {
+    return {
+      category: "ambiguous-ownership",
+      confidence: 0.8,
+      reason: `Non-error issue in ${issue.fileOrigin}-origin file: ${issue.file}`,
     };
   }
 

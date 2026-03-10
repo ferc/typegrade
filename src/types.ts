@@ -11,6 +11,9 @@ export type ScoreValidity = "fully-comparable" | "partially-comparable" | "not-c
 /** Trust classification for the overall result */
 export type TrustClassification = "trusted" | "directional" | "abstained";
 
+/** Decision grade — how strong the analysis evidence is for decision-making */
+export type DecisionGrade = "strong" | "directional" | "abstain";
+
 /** Stage of package acquisition where failure occurred or processing stopped */
 export type AcquisitionStage =
   | "spec-resolution"
@@ -439,6 +442,7 @@ export type ScenarioPackKey =
   | "orm"
   | "result"
   | "schema"
+  | "frontend"
   | "stream"
   | "state"
   | "testing"
@@ -720,6 +724,14 @@ export interface AnalysisResult {
   executionDiagnostics?: ExecutionDiagnostics;
   /** Monorepo health summary (attached when workspace root is detected in source mode) */
   monorepoHealth?: MonorepoHealthSummary;
+  /** Decision grade — overall evidence quality for decision-making */
+  decisionGrade?: DecisionGrade;
+  /** Reasons why this result is or isn't comparable to others */
+  comparabilityReasons?: string[];
+  /** Reasons for scenario applicability status */
+  scenarioApplicabilityReasons?: string[];
+  /** Reasons for domain applicability status */
+  domainApplicabilityReasons?: string[];
 }
 
 export interface PrecisionFeatures {
@@ -1055,6 +1067,8 @@ export interface MonorepoHealthSummary {
   workspaceConfidence: number;
   /** Confidence in the layer model assignment */
   layerModelConfidence: number;
+  /** Decision grade for the monorepo health assessment */
+  decisionGrade?: DecisionGrade;
 }
 
 /** Cross-package boundary summary for monorepo mode */

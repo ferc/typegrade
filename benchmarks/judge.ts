@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ANALYSIS_SCHEMA_VERSION } from "../src/types.js";
 import type {
   ParetoViolation,
   RawBenchmarkSnapshotV2,
@@ -1428,6 +1429,7 @@ function main() {
   // Build redacted summary (no package names, no per-package scores)
   const summary: RedactedEvalSummary = {
     allGatesPassed,
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     gates,
     metrics: summaryMetrics,
     packageCount: snapshot.entries.length,

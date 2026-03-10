@@ -99,15 +99,14 @@ Prevents structural regressions in agent-facing output.
 
 ### Shadow gate (`pnpm gate:shadow`)
 
-Runs shadow validation against a random sample of npm packages from the eval pool. Measures trust contract correctness on unseen packages:
+Reads the saved `benchmarks-output/shadow-summary.json` and checks aggregate metrics against thresholds. Does not re-run the shadow benchmark.
 
-- Abstention correctness (degraded/not-comparable results are appropriate).
-- Comparable rate (proportion of packages producing usable scores).
-- False-authoritative rate (trusted classification on packages with poor data).
-- Domain and scenario overreach.
-- Score compression and cross-run stability.
+Checks:
+- Summary freshness (within 24 hours).
+- All saved shadow gates passed.
+- Aggregate assertions: degraded rate, comparable rate, domain coverage, scenario coverage.
 
-**Judge-only.** Raw results go to `benchmarks-output/shadow-raw/`. Only the `RedactedShadowSummary` (aggregate metrics, no package names) is builder-visible. See [Benchmarks: Shadow validation](benchmarks.md#shadow-validation) for the full metric set.
+**Builder-accessible** (reads only aggregate summary). The `benchmark:shadow` command that produces raw results remains judge-only. See [Benchmarks: Shadow validation](benchmarks.md#shadow-validation) for the full metric set.
 
 ## Judge system (`pnpm benchmark:judge`)
 
@@ -161,10 +160,29 @@ These boundaries are enforced by CI:
 
 ### Command access matrix
 
-| Role     | Allowed commands                                                                                                  |
-| -------- | ----------------------------------------------------------------------------------------------------------------- |
-| Builder  | `benchmark:train`, `benchmark:holdout`, `gate:train`, `gate:holdout`, `benchmark:optimize`, `benchmark:calibrate` |
-| Judge/CI | `benchmark:eval`, `benchmark:pool`, `benchmark:judge`, `benchmark:shadow`, `gate:eval`, `gate:shadow`             |
+| Role     | Allowed commands                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Builder  | `benchmark:train`, `benchmark:holdout`, `gate:train`, `gate:holdout`, `gate:shadow`, `benchmark:optimize`, `benchmark:calibrate` |
+| Judge/CI | `benchmark:eval`, `benchmark:pool`, `benchmark:judge`, `benchmark:shadow`, `gate:eval`                                           |
+
+## Aggregate assertions
+
+Holdout and shadow tracks use aggregate assertions (`AggregateAssertion` type) rather than per-package pairwise assertions. This preserves quarantine compliance: aggregate assertions check only rates and proportions, never referencing individual package names or scores.
+
+- **`HOLDOUT_ASSERTIONS`**: strict, zero-tolerance (zero degraded, zero fallback, 100% comparable).
+- **`SHADOW_ASSERTIONS`**: relaxed thresholds for random npm packages (degraded < 10%, comparable > 40%, domain coverage > 70%, scenario coverage > 35%).
+
+Aggregate assertions are defined in `benchmarks/types.ts` and checked in `benchmarks/gate.ts`.
+
+## Schema versioning
+
+Both `RedactedEvalSummary` and `RedactedShadowSummary` include an `analysisSchemaVersion` field that tracks which analysis schema version produced the benchmark results. This enables:
+
+- Detecting stale benchmark results produced with an older schema.
+- Correlating score changes with schema evolution.
+- Validating that benchmark evidence matches the current codebase.
+
+The schema version is sourced from `ANALYSIS_SCHEMA_VERSION` in `src/types.ts`.
 
 ## Adding new assertions
 

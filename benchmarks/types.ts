@@ -88,6 +88,8 @@ export interface RedactedEvalSummary {
   split: BenchmarkSplit;
   packageCount: number;
   seed?: number;
+  /** Analysis schema version used for this benchmark run */
+  analysisSchemaVersion?: string;
   /** Aggregate metrics safe for builder consumption */
   metrics: {
     undersampledRate: number;
@@ -216,6 +218,7 @@ export const QUARANTINE_POLICY: BenchmarkQuarantinePolicy = {
     "benchmark:holdout",
     "gate:train",
     "gate:holdout",
+    "gate:shadow",
     "benchmark:optimize",
     "benchmark:calibrate",
   ],
@@ -225,7 +228,6 @@ export const QUARANTINE_POLICY: BenchmarkQuarantinePolicy = {
     "benchmark:judge",
     "benchmark:shadow",
     "gate:eval",
-    "gate:shadow",
   ],
   forbiddenImportsForOptimizer: [
     "manifest.eval.fixed.json",
@@ -272,6 +274,8 @@ export interface MonotonicConstraint {
 export interface RedactedShadowSummary {
   timestamp: string;
   totalPackages: number;
+  /** Analysis schema version used for this benchmark run */
+  analysisSchemaVersion?: string;
   /** Rate of packages producing comparable results */
   comparableRate: number;
   /** Rate of correct abstention (degraded/not-comparable for appropriate cases) */
@@ -303,10 +307,112 @@ export interface RedactedShadowSummary {
     bySizeBand: Record<string, { count: number; comparableRate: number }>;
     byModuleKind: Record<string, { count: number; comparableRate: number }>;
   };
+  /** Rate of packages that degraded (not just install failure) */
+  degradedRate: number;
+  /** Rate of domain detection on complete analyses */
+  domainCoverageRate: number;
+  /** Rate of scenario detection on applicable complete analyses */
+  scenarioCoverageRate: number;
+  /** Breakdown of decision grades across all results */
+  decisionGradeBreakdown: { strong: number; directional: number; abstain: number };
+  /** Degraded category breakdown */
+  degradedCategoryBreakdown?: Record<string, number>;
   /** Gate pass/fail results */
   gates: { gate: string; passed: boolean; detail: string }[];
   allGatesPassed: boolean;
 }
+
+// ─── Aggregate Assertions (holdout/shadow) ────────────────────────────────
+
+/** Aggregate metrics input for holdout/shadow assertion checks */
+export interface AggregateMetrics {
+  degradedRate: number;
+  fallbackGlobRate: number;
+  comparableRate: number;
+  domainCoverageRate?: number;
+  scenarioCoverageRate?: number;
+}
+
+/** Aggregate assertion for holdout/shadow tracks (no package-specific logic) */
+export interface AggregateAssertion {
+  name: string;
+  description: string;
+  /** Track this applies to */
+  track: "holdout" | "shadow";
+  /** Check function returns pass/fail with detail */
+  check: (metrics: AggregateMetrics) => { passed: boolean; detail: string };
+}
+
+/** Holdout aggregate assertions — strict, zero-tolerance for trained-quality packages */
+export const HOLDOUT_ASSERTIONS: AggregateAssertion[] = [
+  {
+    check: (mm) => ({
+      detail: `Degraded rate: ${(mm.degradedRate * 100).toFixed(1)}%`,
+      passed: mm.degradedRate === 0,
+    }),
+    description: "All holdout packages produce complete results",
+    name: "holdout-zero-degraded",
+    track: "holdout",
+  },
+  {
+    check: (mm) => ({
+      detail: `Fallback rate: ${(mm.fallbackGlobRate * 100).toFixed(1)}%`,
+      passed: mm.fallbackGlobRate === 0,
+    }),
+    description: "All holdout packages resolve via proper entrypoints",
+    name: "holdout-zero-fallback",
+    track: "holdout",
+  },
+  {
+    check: (mm) => ({
+      detail: `Comparable rate: ${(mm.comparableRate * 100).toFixed(1)}%`,
+      passed: mm.comparableRate === 1.0,
+    }),
+    description: "All holdout packages are fully comparable",
+    name: "holdout-all-comparable",
+    track: "holdout",
+  },
+];
+
+/** Shadow aggregate assertions — relaxed thresholds for random npm packages */
+export const SHADOW_ASSERTIONS: AggregateAssertion[] = [
+  {
+    check: (mm) => ({
+      detail: `Degraded rate: ${(mm.degradedRate * 100).toFixed(1)}%`,
+      passed: mm.degradedRate < 0.1,
+    }),
+    description: "Shadow degraded rate below 10%",
+    name: "shadow-degraded-rate",
+    track: "shadow",
+  },
+  {
+    check: (mm) => ({
+      detail: `Comparable rate: ${(mm.comparableRate * 100).toFixed(1)}%`,
+      passed: mm.comparableRate > 0.4,
+    }),
+    description: "Shadow comparable rate above 40%",
+    name: "shadow-comparable-rate",
+    track: "shadow",
+  },
+  {
+    check: (mm) => ({
+      detail: `Domain coverage: ${((mm.domainCoverageRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.domainCoverageRate ?? 0) > 0.7,
+    }),
+    description: "Domain detection coverage above 70% on complete analyses",
+    name: "shadow-domain-coverage",
+    track: "shadow",
+  },
+  {
+    check: (mm) => ({
+      detail: `Scenario coverage: ${((mm.scenarioCoverageRate ?? 0) * 100).toFixed(1)}%`,
+      passed: (mm.scenarioCoverageRate ?? 0) > 0.35,
+    }),
+    description: "Scenario coverage above 35% on applicable analyses",
+    name: "shadow-scenario-coverage",
+    track: "shadow",
+  },
+];
 
 export const MONOTONIC_CONSTRAINTS: MonotonicConstraint[] = [
   {

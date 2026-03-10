@@ -185,7 +185,7 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
       typeof value === "string" &&
       (key === "default" || key === "import" || key === "require")
     ) {
-      // Condition string value — try resolving as declaration file
+      // Resolve condition string value as declaration file (.d.ts or .js companion)
       const resolved = resolveDeclarationFile(pkgDir, value);
       if (resolved) {
         entrypoints.push({
@@ -193,6 +193,17 @@ function collectExportsEntrypoints(opts: CollectExportsOpts): void {
           filePath: resolved,
           subpath: currentSubpath,
         });
+      } else if (key === "default") {
+        // For "default" condition, also try finding a companion .d.ts via findDtsCompanion
+        // This catches cases where "default" points to a JS bundle with a separate .d.ts
+        const companion = findDtsCompanion(pkgDir, value);
+        if (companion) {
+          entrypoints.push({
+            condition: conditionLabel(currentSubpath, "default"),
+            filePath: companion,
+            subpath: currentSubpath,
+          });
+        }
       }
     } else if (
       !key.startsWith(".") &&
@@ -317,6 +328,8 @@ function resolveWildcardSubpathExport(opts: {
 /**
  * Resolve a wildcard subpath export with a direct string target.
  * Example: "./*": "./dist/*.d.ts" — expand by scanning the target directory.
+ * Also handles JS wildcard targets by inferring companion .d.ts patterns:
+ *   "./*": "./dist/*.js" → tries "./dist/*.d.ts"
  */
 function resolveWildcardStringExport(opts: {
   pattern: string;
@@ -334,16 +347,58 @@ function resolveWildcardStringExport(opts: {
     return;
   }
 
-  // Only resolve if the target looks like a declaration file
-  if (!targetSuffix.includes(".d.")) {
+  // If the target is a declaration file, scan directly
+  if (targetSuffix.includes(".d.")) {
+    scanWildcardDir({ entrypoints, pattern, pkgDir, targetPrefix, targetSuffix });
     return;
   }
 
+  // If the target is a JS file, infer the companion .d.ts pattern
+  // E.g., "./dist/*.js" → try "./dist/*.d.ts", "./dist/*.d.mts", "./dist/*.d.cts"
+  const jsMatch = targetSuffix.match(/^\.[mc]?js$/);
+  if (jsMatch) {
+    const [jsExt] = jsMatch;
+    const dtsExtMap: Record<string, string> = {
+      ".cjs": ".d.cts",
+      ".js": ".d.ts",
+      ".mjs": ".d.mts",
+    };
+    const primaryDts = dtsExtMap[jsExt] ?? ".d.ts";
+    // Try the primary companion extension first, then all others
+    const extensions = [primaryDts, ...DTS_EXTENSIONS.filter((ext) => ext !== primaryDts)];
+    for (const ext of extensions) {
+      const found = scanWildcardDir({
+        entrypoints,
+        pattern,
+        pkgDir,
+        targetPrefix,
+        targetSuffix: ext,
+      });
+      if (found) {
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * Scan a directory for files matching a wildcard pattern and add them as entrypoints.
+ * Returns true if any files were found.
+ */
+function scanWildcardDir(opts: {
+  targetPrefix: string;
+  targetSuffix: string;
+  pkgDir: string;
+  pattern: string;
+  entrypoints: ResolvedEntrypoint[];
+}): boolean {
+  const { targetPrefix, targetSuffix, pkgDir, pattern, entrypoints } = opts;
   const targetDir = join(pkgDir, targetPrefix);
   if (!existsSync(targetDir)) {
-    return;
+    return false;
   }
 
+  let found = false;
   try {
     const entries = readdirSync(targetDir);
     for (const entry of entries) {
@@ -360,11 +415,13 @@ function resolveWildcardStringExport(opts: {
           filePath,
           subpath,
         });
+        found = true;
       }
     }
   } catch {
     // Directory scan failed
   }
+  return found;
 }
 
 // --- typesVersions resolution ---
@@ -372,21 +429,24 @@ function resolveWildcardStringExport(opts: {
 /**
  * Parse the typesVersions field and resolve version-specific type entrypoints.
  * Format: { ">=4.0": { "*": ["dist/types/*"] }, ... }
- * We pick the first version range (TypeScript convention: most specific first).
+ * Selects the best matching version range for the current TypeScript version.
+ * Falls back to the wildcard "*" range, then the first defined range.
  */
 function collectTypesVersionsEntrypoints(
   typesVersions: Record<string, Record<string, string[]>>,
   pkgDir: string,
   entrypoints: ResolvedEntrypoint[],
 ): void {
-  // Use the first (most specific) version range
   const versionRanges = Object.keys(typesVersions);
   if (versionRanges.length === 0) {
     return;
   }
 
-  // Prefer the wildcard "*" range, otherwise take the first
-  const selectedRange = versionRanges.find((range) => range === "*") ?? versionRanges[0]!;
+  // Select the best matching range:
+  // 1. Try the wildcard "*" range first (covers all versions)
+  // 2. Try to match against the current TypeScript version
+  // 3. Fall back to the first range (convention: most specific first)
+  const selectedRange = selectTypesVersionRange(versionRanges);
   const pathMappings = typesVersions[selectedRange];
   if (!pathMappings || typeof pathMappings !== "object") {
     return;
@@ -399,43 +459,140 @@ function collectTypesVersionsEntrypoints(
 
     // For the root pattern ("." or "*"), resolve to a concrete file
     if (pattern === "." || pattern === "*") {
-      for (const target of targets) {
-        if (typeof target !== "string") {
-          continue;
-        }
-        // If target contains *, it's a wildcard mapping — try to resolve index
-        const concreteTarget = target.includes("*") ? target.replace("*", "index") : target;
-        const resolved = resolveDeclarationFile(pkgDir, concreteTarget);
-        if (resolved) {
-          entrypoints.push({
-            condition: `typesVersions[${selectedRange}]`,
-            filePath: resolved,
-            subpath: ".",
-          });
-          // First matching target wins
-          break;
-        }
-      }
+      resolveTypesVersionTargets({ entrypoints, pkgDir, selectedRange, subpath: ".", targets });
     } else {
       // Named subpath pattern like "./utils" or "utils"
       const subpath = pattern.startsWith(".") ? pattern : `./${pattern}`;
-      for (const target of targets) {
-        if (typeof target !== "string") {
-          continue;
-        }
-        const concreteTarget = target.includes("*") ? target.replace("*", "index") : target;
-        const resolved = resolveDeclarationFile(pkgDir, concreteTarget);
-        if (resolved) {
-          entrypoints.push({
-            condition: `typesVersions[${selectedRange}]`,
-            filePath: resolved,
-            subpath,
-          });
-          break;
-        }
+      resolveTypesVersionTargets({ entrypoints, pkgDir, selectedRange, subpath, targets });
+    }
+  }
+}
+
+/**
+ * Resolve an array of typesVersions targets into entrypoints.
+ * Tries each target in order — first match wins. Handles wildcard patterns
+ * by replacing "*" with "index" and also scanning the directory.
+ */
+function resolveTypesVersionTargets(opts: {
+  targets: unknown[];
+  pkgDir: string;
+  entrypoints: ResolvedEntrypoint[];
+  selectedRange: string;
+  subpath: string;
+}): void {
+  const { targets, pkgDir, entrypoints, selectedRange, subpath } = opts;
+  for (const target of targets) {
+    if (typeof target !== "string") {
+      continue;
+    }
+    // If target contains *, it's a wildcard mapping — try to resolve index
+    const concreteTarget = target.includes("*") ? target.replace("*", "index") : target;
+    const resolved = resolveDeclarationFile(pkgDir, concreteTarget);
+    if (resolved) {
+      entrypoints.push({
+        condition: `typesVersions[${selectedRange}]`,
+        filePath: resolved,
+        subpath,
+      });
+      // First matching target wins
+      break;
+    }
+    // Try scanning directory for .d.ts files matching wildcard pattern
+    if (target.includes("*")) {
+      const match = scanWildcardDtsDir({
+        condition: `typesVersions[${selectedRange}]`,
+        pkgDir,
+        subpath,
+        target,
+      });
+      if (match) {
+        entrypoints.push(match);
+        return;
       }
     }
   }
+}
+
+/**
+ * Select the best typesVersions range for the current TypeScript version.
+ * Priority: wildcard "*" → matching version range → first range.
+ */
+function selectTypesVersionRange(ranges: string[]): string {
+  // Wildcard covers everything
+  const wildcard = ranges.find((range) => range === "*");
+  if (wildcard) {
+    return wildcard;
+  }
+
+  // Try to parse the current TS version for matching
+  const tsVersion = getCurrentTsVersion();
+  if (tsVersion) {
+    // Find the best matching range — prefer higher minimum versions
+    // Ranges like ">=4.0", ">=5.0", ">=3.5"
+    const matched = findBestMatchingRange(ranges, tsVersion);
+    if (matched) {
+      return matched;
+    }
+  }
+
+  // Fall back to first range
+  return ranges[0]!;
+}
+
+/**
+ * Parse the current TypeScript version from the environment.
+ * Returns [major, minor] or null if unavailable.
+ */
+function getCurrentTsVersion(): [number, number] | null {
+  try {
+    // Try to get TS version from the ts-morph dependency
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ts = require("typescript");
+    const ver = ts.version as string;
+    const parts = ver.split(".");
+    const major = parseInt(parts[0] ?? "", 10);
+    const minor = parseInt(parts[1] ?? "", 10);
+    if (!isNaN(major) && !isNaN(minor)) {
+      return [major, minor];
+    }
+  } catch {
+    // TypeScript not available in current context
+  }
+  return null;
+}
+
+/**
+ * Find the best matching version range from a list of semver range strings.
+ * Supports common range formats: ">=4.0", ">=5.0", "<5.0", "*".
+ * Returns the highest-minimum range that the current version satisfies.
+ */
+function findBestMatchingRange(ranges: string[], tsVersion: [number, number]): string | null {
+  const [tsMajor, tsMinor] = tsVersion;
+  let bestRange: string | null = null;
+  let bestMinMajor = -1;
+  let bestMinMinor = -1;
+
+  for (const range of ranges) {
+    // Parse >=X.Y patterns
+    const geMatch = range.match(/^>=\s*(\d+)\.(\d+)/);
+    if (geMatch) {
+      const rangeMajor = parseInt(geMatch[1]!, 10);
+      const rangeMinor = parseInt(geMatch[2]!, 10);
+      // Check if current version satisfies >=X.Y
+      const satisfies = tsMajor > rangeMajor || (tsMajor === rangeMajor && tsMinor >= rangeMinor);
+      // Prefer higher minimum versions (more specific)
+      if (
+        satisfies &&
+        (rangeMajor > bestMinMajor || (rangeMajor === bestMinMajor && rangeMinor > bestMinMinor))
+      ) {
+        bestRange = range;
+        bestMinMajor = rangeMajor;
+        bestMinMinor = rangeMinor;
+      }
+    }
+  }
+
+  return bestRange;
 }
 
 // --- Companion @types resolution ---
@@ -486,6 +643,39 @@ function resolveCompanionTypesPackage(
 }
 
 // --- Helpers ---
+
+/** Scan a directory for .d.ts files matching a wildcard pattern */
+function scanWildcardDtsDir(opts: {
+  condition: string;
+  pkgDir: string;
+  subpath: string;
+  target: string;
+}): { condition: string; filePath: string; subpath: string } | null {
+  const [prefix, suffix] = opts.target.split("*");
+  if (prefix === undefined || suffix === undefined) {
+    return null;
+  }
+  const scanDir = join(opts.pkgDir, prefix);
+  if (!existsSync(scanDir)) {
+    return null;
+  }
+  try {
+    const dirEntries = readdirSync(scanDir);
+    for (const entry of dirEntries) {
+      const name = String(entry);
+      if (!name.endsWith(suffix) || !DTS_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+        continue;
+      }
+      const filePath = join(scanDir, name);
+      if (existsSync(filePath)) {
+        return { condition: opts.condition, filePath, subpath: opts.subpath };
+      }
+    }
+  } catch {
+    // Scan failed
+  }
+  return null;
+}
 
 /**
  * Resolve a declaration file path, handling .d.ts / .d.mts / .d.cts extensions.

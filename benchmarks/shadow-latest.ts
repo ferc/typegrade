@@ -8,7 +8,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scorePackage } from "../src/package-scorer.js";
-import type { AnalysisResult } from "../src/types.js";
+import { ANALYSIS_SCHEMA_VERSION } from "../src/types.js";
+import type { AnalysisResult, DecisionGrade } from "../src/types.js";
 import type { RedactedShadowSummary } from "./types.js";
 import { loadManifest, samplePool } from "./split-loader.js";
 import { minSampleForBound, wilsonLowerBound, wilsonUpperBound } from "./stats.js";
@@ -46,6 +47,16 @@ interface ShadowRawEntry {
   typesSource: string;
   sizeBand: string;
   moduleKind: string;
+  comparabilityReasons: string[];
+  coverageClassification: string;
+  decisionGrade: DecisionGrade;
+  degradedCategory: string | null;
+  degradedReasonChain: string[];
+  domainConfidence: number;
+  domainDetected: string;
+  domainFitScore: number | null;
+  scenarioApplicabilityStatus: string;
+  scenarioGrade: string | null;
 }
 
 /**
@@ -75,6 +86,34 @@ function anonymize(input: string): string {
     hash = ((hash << 5) - hash + ch) | 0;
   }
   return Math.abs(hash).toString(36).slice(0, 8);
+}
+
+/** Compute the decision grade from an analysis result */
+function computeDecisionGrade(result: AnalysisResult): DecisionGrade {
+  if (
+    result.status === "degraded" ||
+    result.status === "invalid-input" ||
+    result.status === "unsupported-package"
+  ) {
+    return "abstain";
+  }
+  if (result.scoreValidity === "not-comparable") {
+    return "abstain";
+  }
+  const trust = result.trustSummary?.classification;
+  if (trust === "abstained") {
+    return "abstain";
+  }
+  if (trust === "directional") {
+    return "directional";
+  }
+  if (result.scoreValidity === "partially-comparable") {
+    return "directional";
+  }
+  if (result.graphStats.usedFallbackGlob) {
+    return "directional";
+  }
+  return "strong";
 }
 
 /** Run shadow-latest benchmark and produce redacted summary */
@@ -122,6 +161,15 @@ export async function runShadowLatest(
   let fallbackGlob = 0;
   let domainOverreach = 0;
   let scenarioOverreach = 0;
+  let degradedCount = 0;
+  let strongCount = 0;
+  let directionalCount = 0;
+  let abstainCount = 0;
+  let domainCoverageCount = 0;
+  let scenarioCoverageCount = 0;
+  let completeCount = 0;
+  let applicableCompleteCount = 0;
+  const degradedCategoryBreakdown: Record<string, number> = {};
 
   for (const pkg of specs) {
     const specHash = anonymize(pkg.spec);
@@ -132,8 +180,10 @@ export async function runShadowLatest(
       result = scorePackage(pkg.spec, { noCache: true });
     } catch (error) {
       installFailures++;
+      abstainCount++;
       rawEntries.push({
         agentReadiness: null,
+        comparabilityReasons: ["install-failure"],
         confidenceSummary: {
           domainInference: 0,
           graphResolution: 0,
@@ -141,10 +191,19 @@ export async function runShadowLatest(
           scenarioApplicability: 0,
         },
         consumerApi: null,
+        coverageClassification: "unknown",
+        decisionGrade: "abstain",
+        degradedCategory: "install-failure",
+        degradedReasonChain: ["install-failure"],
+        domainConfidence: 0,
+        domainDetected: "unknown",
+        domainFitScore: null,
         entrypointStrategy: "unknown",
         hasDomainScore: false,
         hasScenarioScore: false,
         moduleKind: pkg.moduleKind ?? "unknown",
+        scenarioApplicabilityStatus: "unknown",
+        scenarioGrade: null,
         scoreValidity: "not-comparable",
         sizeBand: pkg.sizeBand ?? "unknown",
         specHash,
@@ -161,6 +220,7 @@ export async function runShadowLatest(
     const isComparable = result.scoreValidity === "fully-comparable";
     const isDegraded = result.status === "degraded";
     const hasNumericScores = result.composites.some((cc) => cc.score !== null);
+    const grade = computeDecisionGrade(result);
 
     if (isComparable) comparable++;
     if (isDegraded && !hasNumericScores) abstained++;
@@ -177,14 +237,68 @@ export async function runShadowLatest(
       scenarioOverreach++;
     }
 
+    // Track degraded packages (excluding install failures handled above)
+    if (isDegraded) {
+      degradedCount++;
+      const cat = result.degradedCategory ?? "unknown";
+      degradedCategoryBreakdown[cat] = (degradedCategoryBreakdown[cat] ?? 0) + 1;
+    }
+
+    // Track decision grade breakdown
+    if (grade === "strong") {
+      strongCount++;
+    } else if (grade === "directional") {
+      directionalCount++;
+    } else {
+      abstainCount++;
+    }
+
+    // Track domain and scenario coverage among complete/comparable results
+    const isComplete = isComparable || result.scoreValidity === "partially-comparable";
+    if (isComplete) {
+      completeCount++;
+      if (result.domainScore !== undefined) {
+        domainCoverageCount++;
+      }
+      // Applicable-complete: has domain inference with sufficient confidence
+      if (
+        result.domainInference?.domain &&
+        result.domainInference.domain !== "general" &&
+        (result.domainInference.confidence ?? 0) >= 0.5
+      ) {
+        applicableCompleteCount++;
+        if (result.scenarioScore !== undefined) {
+          scenarioCoverageCount++;
+        }
+      }
+    }
+
+    // Build comparability reasons from trust and coverage
+    const compReasons: string[] = [...(result.comparabilityReasons ?? [])];
+    if (result.trustSummary?.reasons) {
+      for (const rr of result.trustSummary.reasons) {
+        if (!compReasons.includes(rr)) compReasons.push(rr);
+      }
+    }
+
     rawEntries.push({
       agentReadiness: result.composites.find((cc) => cc.key === "agentReadiness")?.score ?? null,
+      comparabilityReasons: compReasons,
       confidenceSummary: result.confidenceSummary,
       consumerApi: result.composites.find((cc) => cc.key === "consumerApi")?.score ?? null,
+      coverageClassification: result.coverageDiagnostics.samplingClass ?? "unknown",
+      decisionGrade: grade,
+      degradedCategory: result.degradedCategory ?? null,
+      degradedReasonChain: result.degradedReasonChain ?? [],
+      domainConfidence: result.domainInference?.confidence ?? 0,
+      domainDetected: result.domainInference?.domain ?? "unknown",
+      domainFitScore: result.domainScore?.score ?? null,
       entrypointStrategy: result.packageIdentity.entrypointStrategy,
       hasDomainScore: result.domainScore !== undefined,
       hasScenarioScore: result.scenarioScore !== undefined,
       moduleKind: pkg.moduleKind ?? result.packageIdentity.moduleKind ?? "unknown",
+      scenarioApplicabilityStatus: result.scenarioScore?.scenarioApplicability ?? "unknown",
+      scenarioGrade: result.scenarioScore?.grade ?? null,
       scoreValidity: result.scoreValidity,
       sizeBand: pkg.sizeBand ?? "unknown",
       specHash,
@@ -222,6 +336,12 @@ export async function runShadowLatest(
   const fallbackRate = total > 0 ? fallbackGlob / total : 0;
   const domainOverreachRate = total > 0 ? domainOverreach / total : 0;
   const scenarioOverreachRate = total > 0 ? scenarioOverreach / total : 0;
+
+  // Compute new aggregate rates
+  const degradedRate = total > 0 ? degradedCount / total : 0;
+  const domainCoverageRate = completeCount > 0 ? domainCoverageCount / completeCount : 0;
+  const scenarioCoverageRate =
+    applicableCompleteCount > 0 ? scenarioCoverageCount / applicableCompleteCount : 0;
 
   // Score compression: check if scores cluster in narrow band
   const validScores = rawEntries
@@ -283,6 +403,7 @@ export async function runShadowLatest(
   const overreachUB = wilsonUpperBound(domainOverreach, total);
   const scenOverreachUB = wilsonUpperBound(scenarioOverreach, total);
   const comparableLB = wilsonLowerBound(comparable, total);
+  const degradedUB = wilsonUpperBound(degradedCount, total);
 
   // Minimum sample size needed to claim <1% failure rate at 99% CI
   const minFor1Pct = minSampleForBound(0.01, 0.99);
@@ -328,19 +449,40 @@ export async function runShadowLatest(
       gate: "sample-size-adequacy",
       passed: total >= 50,
     },
+    {
+      detail: `${(degradedRate * 100).toFixed(1)}%, 99%CI upper: ${(degradedUB * 100).toFixed(1)}%`,
+      gate: "degraded-rate-CI<10%",
+      passed: degradedUB < 0.1,
+    },
+    {
+      detail: `${(domainCoverageRate * 100).toFixed(1)}% of complete analyses`,
+      gate: "domain-coverage>70%",
+      passed: domainCoverageRate > 0.7,
+    },
+    {
+      detail: `${(scenarioCoverageRate * 100).toFixed(1)}% of applicable complete analyses`,
+      gate: "scenario-coverage>35%",
+      passed: scenarioCoverageRate > 0.35,
+    },
   ];
 
   const summary: RedactedShadowSummary = {
     abstentionCorrectnessRate: Math.round(abstentionRate * 1000) / 1000,
     allGatesPassed: gateResults.every((gg) => gg.passed),
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     comparableRate: Math.round(comparableRate * 1000) / 1000,
     confidenceBounds,
     crossRunStability: 1, // Single run — stability requires multiple runs
+    decisionGradeBreakdown: { abstain: abstainCount, directional: directionalCount, strong: strongCount },
+    degradedCategoryBreakdown: Object.keys(degradedCategoryBreakdown).length > 0 ? degradedCategoryBreakdown : undefined,
+    degradedRate: Math.round(degradedRate * 1000) / 1000,
+    domainCoverageRate: Math.round(domainCoverageRate * 1000) / 1000,
     domainOverreachRate: Math.round(domainOverreachRate * 1000) / 1000,
     falseAuthoritativeRate: Math.round(falseAuthRate * 1000) / 1000,
     fallbackGlobRate: Math.round(fallbackRate * 1000) / 1000,
     gates: gateResults,
     installFailureRate: Math.round(installRate * 1000) / 1000,
+    scenarioCoverageRate: Math.round(scenarioCoverageRate * 1000) / 1000,
     scenarioOverreachRate: Math.round(scenarioOverreachRate * 1000) / 1000,
     scoreCompressionRate: Math.round(scoreCompression * 1000) / 1000,
     stratification: { byModuleKind, bySizeBand, byTypesSource },
@@ -367,11 +509,15 @@ function buildEmptySummary(): RedactedShadowSummary {
       fallbackGlobRate: 0,
     },
     crossRunStability: 0,
+    decisionGradeBreakdown: { abstain: 0, directional: 0, strong: 0 },
+    degradedRate: 0,
+    domainCoverageRate: 0,
     domainOverreachRate: 0,
     falseAuthoritativeRate: 0,
     fallbackGlobRate: 0,
     gates: [{ detail: "No packages sampled", gate: "shadow-data-exists", passed: false }],
     installFailureRate: 0,
+    scenarioCoverageRate: 0,
     scenarioOverreachRate: 0,
     scoreCompressionRate: 0,
     timestamp: new Date().toISOString(),
@@ -417,6 +563,11 @@ async function main() {
   console.log(`  Comparable rate: ${(summary.comparableRate * 100).toFixed(1)}%`);
   console.log(`  False-authoritative rate: ${(summary.falseAuthoritativeRate * 100).toFixed(1)}%`);
   console.log(`  Fallback-glob rate: ${(summary.fallbackGlobRate * 100).toFixed(1)}%`);
+  console.log(`  Degraded rate: ${(summary.degradedRate * 100).toFixed(1)}%`);
+  console.log(`  Domain coverage: ${(summary.domainCoverageRate * 100).toFixed(1)}%`);
+  console.log(`  Scenario coverage: ${(summary.scenarioCoverageRate * 100).toFixed(1)}%`);
+  const dg = summary.decisionGradeBreakdown;
+  console.log(`  Decision grades: strong=${dg.strong}, directional=${dg.directional}, abstain=${dg.abstain}`);
   console.log(`\nRedacted summary saved to benchmarks-output/shadow-summary.json`);
   console.log(`Raw results saved to benchmarks-output/shadow-raw/ (judge-only)`);
 

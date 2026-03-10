@@ -1,4 +1,10 @@
-import type { FitCompareResult, SmartCliResult, SmartComparePayload } from "./types.js";
+import type {
+  AnalysisResult,
+  DecisionGrade,
+  FitCompareResult,
+  SmartCliResult,
+  SmartComparePayload,
+} from "./types.js";
 import pc from "picocolors";
 
 /**
@@ -207,13 +213,35 @@ function renderFit(sr: SmartCliResult): string {
 
 function renderTrustBadge(sr: SmartCliResult): string {
   const tc = sr.trust.classification;
+  const grade = extractDecisionGrade(sr);
+  const gradeSuffix = grade ? `  ${formatDecisionGrade(grade)}` : "";
+
   if (tc === "abstained") {
-    return pc.red(`  Abstained: ${sr.trust.reasons[0] ?? "unknown"}`);
+    return pc.red(`  Abstained: ${sr.trust.reasons[0] ?? "unknown"}`) + gradeSuffix;
   }
   if (tc === "directional") {
-    return pc.yellow(`  Directional: ${sr.trust.reasons[0] ?? "reduced confidence"}`);
+    return pc.yellow(`  Directional: ${sr.trust.reasons[0] ?? "reduced confidence"}`) + gradeSuffix;
   }
-  return pc.green("  Trusted");
+  return pc.green("  Trusted") + gradeSuffix;
+}
+
+/** Extract decisionGrade from the primary payload when it is an AnalysisResult */
+function extractDecisionGrade(sr: SmartCliResult): DecisionGrade | undefined {
+  if (sr.mode === "repo-audit" || sr.mode === "package-score") {
+    return (sr.primary as AnalysisResult).decisionGrade;
+  }
+  return undefined;
+}
+
+/** Format a decision grade as a colored label */
+function formatDecisionGrade(grade: DecisionGrade): string {
+  if (grade === "strong") {
+    return pc.green("Decision Grade: strong");
+  }
+  if (grade === "directional") {
+    return pc.yellow("Decision Grade: directional");
+  }
+  return pc.red("Decision Grade: abstain");
 }
 
 function formatScorecardLine(entry: {

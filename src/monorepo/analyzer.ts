@@ -1,6 +1,7 @@
 import {
   ANALYSIS_SCHEMA_VERSION,
   type CrossPackageBoundarySummary,
+  type DecisionGrade,
   type Grade,
   type LayerViolation,
   type MonorepoConfig,
@@ -127,6 +128,8 @@ export function analyzeMonorepo(opts: AnalyzeMonorepoOpts): MonorepoReport {
 
   // Compute health summary
   const healthSummary = computeHealthSummary({
+    config,
+    layerGraph,
     packages: packageMap,
     violations,
   });
@@ -657,6 +660,8 @@ export function detectCrossPackageBoundaryIssues(
 }
 
 interface ComputeHealthSummaryOpts {
+  config?: MonorepoConfig | undefined;
+  layerGraph: Record<string, string[]>;
   packages: Map<string, MonorepoPackageInfo>;
   violations: LayerViolation[];
 }
@@ -672,12 +677,12 @@ const SEVERITY_WEIGHTS: Record<ViolationSeverity, number> = {
 /**
  * Compute a health summary for the monorepo based on severity-weighted violations.
  *
- * healthScore = 100 - sum(severity_weight * count), clamped to [0, 100].
+ * healthScore = 100 - sum(severity_weight * count) - densityPenalty, clamped to [0, 100].
  * Grade is derived from healthScore using the standard grade curve.
  * Violation density normalizes by package count for comparability.
  */
 function computeHealthSummary(opts: ComputeHealthSummaryOpts): MonorepoHealthSummary {
-  const { packages, violations } = opts;
+  const { config, layerGraph, packages, violations } = opts;
 
   const violationsByType: Record<string, number> = {};
   const severitySummary: ViolationSeveritySummary = { critical: 0, high: 0, low: 0, medium: 0 };
@@ -695,22 +700,40 @@ function computeHealthSummary(opts: ComputeHealthSummaryOpts): MonorepoHealthSum
     severitySummary.medium * SEVERITY_WEIGHTS.medium +
     severitySummary.low * SEVERITY_WEIGHTS.low;
 
-  const rawScore = 100 - weightedDeduction;
-  const healthScore = Math.max(0, Math.min(100, rawScore));
-  const healthGrade: Grade = computeGrade(healthScore);
-
   // Violation density: violations per package
   const violationDensity =
     packages.size > 0 ? Math.round((violations.length / packages.size) * 100) / 100 : 0;
 
+  // Density-adjusted health: penalize concentrated violations more than spread violations
+  let densityPenalty = 0;
+  if (violationDensity > 2) {
+    densityPenalty = 5;
+  } else if (violationDensity > 1) {
+    densityPenalty = 3;
+  }
+
+  const rawScore = 100 - weightedDeduction - densityPenalty;
+  const healthScore = Math.max(0, Math.min(100, rawScore));
+  const healthGrade: Grade = computeGrade(healthScore);
+
   // Workspace confidence: lower when workspace discovery yielded few packages
-  // Or when many packages have default layer classification
+  // Or when many packages have default layer classification or broken paths
   const workspaceConfidence = computeWorkspaceConfidence(packages);
 
   // Layer model confidence: how much of layer assignment is explicit vs heuristic
-  const layerModelConfidence = computeLayerModelConfidence(packages);
+  const layerModelConfidence = computeLayerModelConfidence({ config, layerGraph, packages });
+
+  // Decision grade: how much to trust the monorepo health assessment
+  const decisionGrade = computeMonorepoDecisionGrade({
+    healthScore,
+    layerModelConfidence,
+    totalPackages: packages.size,
+    totalViolations: violations.length,
+    workspaceConfidence,
+  });
 
   return {
+    decisionGrade,
     healthGrade,
     healthScore,
     layerModelConfidence,
@@ -725,7 +748,8 @@ function computeHealthSummary(opts: ComputeHealthSummaryOpts): MonorepoHealthSum
 
 /**
  * Compute confidence in workspace discovery results.
- * Low confidence when discovery found very few packages or none at all.
+ * Low confidence when discovery found very few packages, none at all,
+ * or when discovered packages have broken/unresolvable paths.
  */
 function computeWorkspaceConfidence(packages: Map<string, MonorepoPackageInfo>): number {
   if (packages.size === 0) {
@@ -734,30 +758,166 @@ function computeWorkspaceConfidence(packages: Map<string, MonorepoPackageInfo>):
   if (packages.size === 1) {
     return 0.3;
   }
-  if (packages.size <= 3) {
-    return 0.6;
+
+  // Check how many discovered packages have resolvable paths
+  let resolvableCount = 0;
+  for (const [, pkg] of packages) {
+    const packageJsonPath = join(pkg.path, "package.json");
+    if (existsSync(packageJsonPath)) {
+      resolvableCount++;
+    }
   }
-  return 0.9;
+
+  const resolvableRatio = resolvableCount / packages.size;
+
+  // Base confidence from package count
+  const baseConfidence = packages.size <= 3 ? 0.6 : 0.9;
+
+  // Deduct for broken paths: each unresolvable package reduces confidence
+  const pathPenalty = (1 - resolvableRatio) * 0.3;
+
+  return Math.max(0, Math.round((baseConfidence - pathPenalty) * 100) / 100);
+}
+
+interface LayerModelConfidenceOpts {
+  config?: MonorepoConfig | undefined;
+  layerGraph: Record<string, string[]>;
+  packages: Map<string, MonorepoPackageInfo>;
 }
 
 /**
  * Compute confidence in layer model assignments.
- * Higher when packages have clear layer indicators (bin, UI deps, name patterns).
+ *
+ * Higher when packages have clear layer indicators (bin, UI deps, name patterns)
+ * or explicit config overrides. Reduced when the layer graph has cycles
+ * (non-DAG structure suggests misclassification).
  */
-function computeLayerModelConfidence(packages: Map<string, MonorepoPackageInfo>): number {
+function computeLayerModelConfidence(opts: LayerModelConfidenceOpts): number {
+  const { config, layerGraph, packages } = opts;
+
   if (packages.size === 0) {
     return 0;
   }
-  // Count packages not on the default "shared" layer (indicates active classification)
+
+  // Count packages with clear (non-default) layer classification
   let classifiedCount = 0;
+  let explicitConfigCount = 0;
+  const configLayers = config?.layers ?? {};
+
   for (const [, pkg] of packages) {
     if (pkg.layer !== "shared") {
       classifiedCount++;
     }
+    // Check if this package had an explicit config override
+    if (configLayers[pkg.name]) {
+      explicitConfigCount++;
+    }
   }
+
   const classifiedRatio = classifiedCount / packages.size;
-  // Even fully-classified heuristic layers cap at 0.8 (explicit config gets 1.0)
-  return Math.min(0.8, 0.3 + classifiedRatio * 0.5);
+  const explicitRatio = explicitConfigCount / packages.size;
+
+  // Base confidence from classification ratio
+  // Heuristic-only caps at 0.8; explicit config can push to 1.0
+  const baseConfidence = Math.min(0.8, 0.3 + classifiedRatio * 0.5);
+  const explicitBonus = explicitRatio * 0.2;
+
+  // Check for cycles in the layer graph (non-DAG reduces confidence)
+  const hasCycles = detectLayerGraphCycles(layerGraph);
+  const cyclePenalty = hasCycles ? 0.2 : 0;
+
+  return Math.max(
+    0,
+    Math.min(1, Math.round((baseConfidence + explicitBonus - cyclePenalty) * 100) / 100),
+  );
+}
+
+/**
+ * Detect whether the layer dependency graph contains cycles.
+ * Uses iterative DFS with gray/black coloring.
+ */
+function detectLayerGraphCycles(layerGraph: Record<string, string[]>): boolean {
+  const white = new Set(Object.keys(layerGraph));
+  const gray = new Set<string>();
+
+  for (const startNode of Object.keys(layerGraph)) {
+    if (!white.has(startNode)) {
+      continue;
+    }
+
+    // Iterative DFS with explicit stack tracking entry/exit
+    const stack: { exit: boolean; node: string }[] = [{ exit: false, node: startNode }];
+
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+
+      if (frame.exit) {
+        // Finished processing this node
+        gray.delete(frame.node);
+        continue;
+      }
+
+      if (gray.has(frame.node)) {
+        // Back edge found — cycle detected
+        return true;
+      }
+
+      if (!white.has(frame.node)) {
+        continue;
+      }
+
+      white.delete(frame.node);
+      gray.add(frame.node);
+      // Push exit marker so we remove from gray when done
+      stack.push({ exit: true, node: frame.node });
+
+      const neighbors = layerGraph[frame.node] ?? [];
+      for (const neighbor of neighbors) {
+        if (gray.has(neighbor)) {
+          return true;
+        }
+        if (white.has(neighbor)) {
+          stack.push({ exit: false, node: neighbor });
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Compute a decision grade for the monorepo health assessment.
+ *
+ * "strong" — both workspace and layer models are confident, sufficient packages.
+ * "directional" — partial confidence, useful for trends but not gating.
+ * "abstain" — too little evidence to make any recommendation.
+ */
+function computeMonorepoDecisionGrade(health: {
+  healthScore: number;
+  layerModelConfidence: number;
+  totalPackages: number;
+  totalViolations: number;
+  workspaceConfidence: number;
+}): DecisionGrade {
+  // Abstain if workspace discovery is unreliable
+  if (health.workspaceConfidence < 0.3) {
+    return "abstain";
+  }
+  if (health.totalPackages < 2) {
+    return "abstain";
+  }
+
+  // Directional if layer model is weak or workspace partially discovered
+  if (health.layerModelConfidence < 0.5) {
+    return "directional";
+  }
+  if (health.workspaceConfidence < 0.7) {
+    return "directional";
+  }
+
+  // Strong if both models are confident
+  return "strong";
 }
 
 /**

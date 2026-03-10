@@ -15,7 +15,7 @@ The builder agent (the agent that modifies scoring code, weights, and calibratio
 - Read and modify train manifests: `benchmarks/manifest.json`, `benchmarks/manifest.train.json`
 - Read and modify train assertions: `benchmarks/assertions.ts`
 - Read train results: `benchmarks/results/`
-- Run: `pnpm benchmark:train`, `pnpm gate:train`, `pnpm benchmark:optimize`, `pnpm benchmark:calibrate`
+- Run: `pnpm benchmark:train`, `pnpm benchmark:holdout`, `pnpm gate:train`, `pnpm gate:holdout`, `pnpm gate:shadow`, `pnpm benchmark:optimize`, `pnpm benchmark:calibrate`
 - React to **aggregate** eval metrics from redacted summaries (pass/fail + aggregate numbers only)
 
 **MUST NOT:**

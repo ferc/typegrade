@@ -61,6 +61,8 @@ export interface DomainInference {
   evidenceClasses: string[];
   /** Breakdown of evidence quality by category */
   domainEvidence?: DomainEvidenceBreakdown;
+  /** Reasons explaining why this domain was or wasn't selected */
+  domainApplicabilityReasons?: string[];
 }
 
 // ─── Internal rule emission ─────────────────────────────────────────────────
@@ -440,7 +442,143 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     signals.push(`${cliMatchCount} declarations match CLI patterns`);
   }
 
-  // 2i: Builder pattern — fluent builder detection (methods returning `this` or same type)
+  // 2i: Frontend — component declarations with JSX-like return types or props patterns
+  {
+    const frontendReturnTypes = new Set([
+      "reactelement",
+      "jsx.element",
+      "vnode",
+      "component",
+      "reactnode",
+      "jsxelement",
+    ]);
+    const frontendPropsPatterns = ["props", "children", "render"];
+    let frontendMatchCount = 0;
+    for (const decl of surface.declarations) {
+      const lowerName = decl.name.toLowerCase();
+      // Check for return types that suggest component declarations
+      if (decl.kind === "function" || decl.kind === "variable") {
+        const hasJsxReturn = decl.positions.some(
+          (pos) =>
+            pos.role === "return" &&
+            (frontendReturnTypes.has(pos.type.getText().toLowerCase()) ||
+              pos.type.getText().toLowerCase().includes("jsx.element")),
+        );
+        if (hasJsxReturn) {
+          frontendMatchCount++;
+        }
+      }
+      // Check for type aliases/interfaces with props/children/render patterns
+      if (
+        (decl.kind === "type-alias" || decl.kind === "interface") &&
+        frontendPropsPatterns.some((pt) => lowerName.includes(pt))
+      ) {
+        frontendMatchCount++;
+      }
+      // Check type parameters for component-related names
+      if (decl.typeParameters.some((tp) => tp.name.toLowerCase().includes("props"))) {
+        frontendMatchCount++;
+      }
+    }
+    if (frontendMatchCount >= 2) {
+      const baseSignal = Math.min(0.6, 0.2 + frontendMatchCount * 0.1);
+      const frontendSignal =
+        baseSignal *
+        (packageNameMatchedDomain && packageNameMatchedDomain !== "frontend"
+          ? competingDomainPenalty
+          : 1);
+      emit({
+        category: "declaration-role",
+        direction: "positive",
+        domain: "frontend",
+        reason: `${frontendMatchCount} declarations match frontend/component patterns (JSX returns, props, children)`,
+        ruleId: "frontend-component-density",
+        weight: frontendSignal,
+      });
+      signals.push(`${frontendMatchCount} declarations match frontend component patterns`);
+    }
+  }
+
+  // 2j: Stream — type parameters and method-level evidence for Observable/Subject patterns
+  {
+    let streamTypeParamCount = 0;
+    let streamMethodCount = 0;
+    const streamTypeNames = new Set(["observable", "subject", "subscription"]);
+    const streamMethodNames = new Set(["pipe", "subscribe", "next", "complete", "error"]);
+    for (const decl of surface.declarations) {
+      // Check type parameters for Observable/Subject/Subscription
+      if (decl.typeParameters.some((tp) => streamTypeNames.has(tp.name.toLowerCase()))) {
+        streamTypeParamCount++;
+      }
+      // Check methods on interfaces/classes for stream method clusters
+      if (decl.methods) {
+        const matchingMethods = decl.methods.filter((method) =>
+          streamMethodNames.has(method.name.toLowerCase()),
+        );
+        if (matchingMethods.length >= 3) {
+          streamMethodCount++;
+        }
+      }
+    }
+    if (streamTypeParamCount >= 1 || streamMethodCount >= 1) {
+      const evidence = streamTypeParamCount + streamMethodCount;
+      const weight =
+        0.2 *
+        (packageNameMatchedDomain && packageNameMatchedDomain !== "stream"
+          ? competingDomainPenalty
+          : 1);
+      emit({
+        category: "declaration-role",
+        direction: "positive",
+        domain: "stream",
+        reason: `${evidence} stream/reactive type-shape evidence (${streamTypeParamCount} type params, ${streamMethodCount} method clusters)`,
+        ruleId: "stream-type-shape",
+        weight,
+      });
+      signals.push(`${evidence} stream/reactive type-shape signals detected`);
+    }
+  }
+
+  // 2k: CLI — Options/Config/Args declarations with command/parse methods
+  {
+    let cliConfigMatchCount = 0;
+    const cliConfigNames = ["options", "config", "args"];
+    const cliActionNames = new Set(["command", "parse"]);
+    for (const decl of surface.declarations) {
+      const lowerName = decl.name.toLowerCase();
+      const matchesConfig = cliConfigNames.some((nm) => lowerName.includes(nm));
+      if (!matchesConfig) {
+        continue;
+      }
+      // Check if the same interface/class has command or parse methods
+      if (decl.methods) {
+        const hasActionMethod = decl.methods.some((method) =>
+          cliActionNames.has(method.name.toLowerCase()),
+        );
+        if (hasActionMethod) {
+          cliConfigMatchCount++;
+        }
+      }
+    }
+    if (cliConfigMatchCount >= 1) {
+      const weight =
+        0.15 *
+        (packageNameMatchedDomain && packageNameMatchedDomain !== "cli"
+          ? competingDomainPenalty
+          : 1);
+      emit({
+        category: "declaration-role",
+        direction: "positive",
+        domain: "cli",
+        reason: `${cliConfigMatchCount} Options/Config/Args declarations with command/parse methods`,
+        ruleId: "cli-config-action-density",
+        weight,
+      });
+      signals.push(`${cliConfigMatchCount} CLI config+action pattern declarations detected`);
+    }
+  }
+
+  // 2l: Builder pattern — fluent builder detection (methods returning `this` or same type)
   // Strengthens ORM, CLI, state, and query builder detection
   {
     const builderPatternCount = countFluentBuilders(surface);
@@ -1065,6 +1203,14 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     });
   }
 
+  if (bestDomain === "frontend") {
+    adjustments.push({
+      adjustment: "accept component prop patterns",
+      dimension: "apiSpecificity",
+      reason: "Frontend libraries use component/props/children patterns with JSX return types",
+    });
+  }
+
   // ── Compute evidence classes ────────────────────────────────────────────
 
   const evidenceClasses: string[] = [];
@@ -1153,6 +1299,24 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     typeShapeSignals,
   };
 
+  // ── Compute domain applicability reasons ─────────────────────────────
+
+  const domainApplicabilityReasons: string[] = [];
+  if (bestDomain === "general") {
+    // Explain why we ended up at "general"
+    const abstentionSignals = signals.filter((sg) => sg.startsWith("Abstaining from"));
+    if (abstentionSignals.length > 0) {
+      // Domain was detected but abstained
+      for (const sg of abstentionSignals) {
+        domainApplicabilityReasons.push(sg);
+      }
+    } else {
+      domainApplicabilityReasons.push("No strong domain signals detected");
+    }
+  } else {
+    domainApplicabilityReasons.push(`Detected via ${evidenceClasses.join(", ")}`);
+  }
+
   // ── Build result ────────────────────────────────────────────────────────
 
   const result: DomainInference = {
@@ -1160,6 +1324,7 @@ export function detectDomain(surface: PublicSurface, packageName?: string): Doma
     confidence,
     domain: bestDomain,
     domainAmbiguity,
+    domainApplicabilityReasons,
     domainEvidence,
     evidenceClasses,
     falsePositiveRisk,

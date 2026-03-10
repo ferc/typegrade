@@ -12,6 +12,7 @@ import {
   VALIDATION_SCHEMA_PACK,
 } from "./validation-pack.js";
 import type { DomainKey } from "../types.js";
+import { FRONTEND_PACK } from "./frontend-pack.js";
 import { ORM_PACK } from "./orm-pack.js";
 import type { PublicSurface } from "../surface/index.js";
 import { RESULT_PACK } from "./result-pack.js";
@@ -32,6 +33,7 @@ export type { CompileBackedResultOpts, CompileTest, CompileTestResult } from "./
 
 const SCENARIO_PACKS: Record<string, ScenarioPack> = {
   cli: CLI_PACK,
+  frontend: FRONTEND_PACK,
   orm: ORM_PACK,
   result: RESULT_PACK,
   router: ROUTER_PACK,
