@@ -43,30 +43,6 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
-    },
-    "./analyze": {
-      "import": {
-        "types": "./dist/analyze.d.ts",
-        "default": "./dist/analyze.js"
-      }
-    },
-    "./score": {
-      "import": {
-        "types": "./dist/score.d.ts",
-        "default": "./dist/score.js"
-      }
-    },
-    "./boundaries": {
-      "import": {
-        "types": "./dist/boundaries.d.ts",
-        "default": "./dist/boundaries.js"
-      }
-    },
-    "./fix": {
-      "import": {
-        "types": "./dist/fix.d.ts",
-        "default": "./dist/fix.js"
-      }
     }
   },
   "publishConfig": {
