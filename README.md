@@ -54,7 +54,7 @@ npx typegrade diff zod@3.22 zod@3.23
 # Analyze boundary trust and validation coverage
 npx typegrade boundaries .
 
-# Generate an actionable fix plan with confidence and verification
+# Generate an actionable fix plan with agent instructions and rollback hints
 npx typegrade fix-plan .
 
 # Apply safe, deterministic fixes automatically
@@ -99,7 +99,7 @@ typegrade analyze ./src --verbose
 
 ```bash
 typegrade compare zod valibot
-# Side-by-side global scores, domain scores, and deltas
+# Side-by-side global scores, domain scores, deltas, and per-package evidence quality
 
 typegrade fit-compare zod valibot --against .
 # Codebase-aware comparison: fit assessment, migration risk, first steps
@@ -115,7 +115,7 @@ typegrade score my-sdk --json | jq '.globalScores.agentReadiness'
 **Agent-driven improvement loop:**
 
 ```bash
-# Generate a fix plan, apply safe fixes, verify, compare
+# Generate a fix plan (batches include agentInstructions, rollbackFiles, rollbackHint)
 typegrade fix-plan . --json > plan.json
 typegrade apply-fixes . --mode safe
 typegrade analyze . --json > after.json
@@ -154,9 +154,9 @@ AI coding agents work against your exported types, not your intentions. When tho
 3. **Extract** the public surface — every exported function, type, interface, class, and their type positions.
 4. **Run analyzers** over that surface — 12 dimensions covering specificity, safety, semantic lift, specialization, usability, and more.
 5. **Compute scores** — global composites, domain-adjusted scores, and scenario benchmarks with subfamily variant selection (e.g., router-server vs router-client, validation-schema vs validation-decoder).
-6. **Analyze boundaries** — track data flow from untrusted sources (HTTP, env, filesystem, queue, database, SDK) through assignments and returns to validation sinks.
-7. **Build fix plans** — group actionable issues into batches with confidence, expected uplift, verification commands, and rollback notes.
-8. **Attach diagnostics** — confidence, coverage classification (complete, compact-complete, compact-partial, undersampled), and coverage failure modes.
+6. **Analyze boundaries** — track data flow from untrusted sources (HTTP, env, filesystem, queue, database, SDK) through assignments and returns to validation sinks. Boundary hotspots produce first-class Issue records that feed into fix-plan and agent pipelines. Boundary analysis is enabled across all source-mode commands including `self-analyze`, `fix-plan`, and `apply-fixes`.
+7. **Build fix plans** — group actionable issues into batches with confidence, expected uplift, verification commands, rollback notes, and agent-oriented instructions.
+8. **Attach diagnostics** — confidence, coverage classification (complete, compact-complete, compact-partial, undersampled), coverage failure modes, and execution diagnostics (phase timings, resource warnings, fallbacks applied).
 9. **Classify trust** — every result is classified as `trusted`, `directional`, or `abstained` based on evidence quality. `trustSummary` indicates whether the result can be compared (`canCompare`) or used in a quality gate (`canGate`).
 
 For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
@@ -195,7 +195,7 @@ For a deeper walkthrough, see [How It Works](docs/how-it-works.md).
 
 ## Benchmark proof
 
-`typegrade` is validated against a corpus of 24 npm packages (as of 2026-03-09) spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins. All 20 train gates pass (as of 2026-03-09) at 100% must-pass, 100% domain accuracy, and 0% fallback glob rate.
+`typegrade` is validated against a corpus of 24 npm packages (as of 2026-03-10) spanning elite, solid, loose, and stretch tiers. The benchmark suite enforces that well-typed libraries (zod, valibot, effect) consistently outscore loosely-typed ones (express, lodash, axios) with stable margins. All 20 train gates pass (as of 2026-03-10) at 100% must-pass, 100% domain accuracy, and 0% fallback glob rate.
 
 Run benchmarks yourself:
 
@@ -225,7 +225,7 @@ Returns an `AnalysisResult` with:
 
 ```jsonc
 {
-  "analysisSchemaVersion": "0.13.0",
+  "analysisSchemaVersion": "0.14.0",
   "status": "complete",
   "scoreValidity": "fully-comparable",
   "mode": "package",
@@ -300,7 +300,7 @@ Returns an `AnalysisResult` with:
     /* top 10 issues by severity */
   ],
   "boundaryHotspots": [
-    /* ranked unvalidated boundary points with risk scores */
+    /* ranked unvalidated boundary points with risk scores — also emitted as Issue records that feed into fix-plan and agent pipeline */
   ],
   "boundaryRecommendedFixes": [
     /* concrete fixes for boundary hotspots */
@@ -308,6 +308,14 @@ Returns an `AnalysisResult` with:
   "recommendations": [
     /* actionable recommendations by category (source mode) */
   ],
+  "executionDiagnostics": {
+    "analysisPath": "source-full",
+    "phaseTimings": { "graph-build": 120, "analyzers": 450, "scoring": 30 },
+    "resourceWarnings": [],
+    "fallbacksApplied": [],
+  },
+  // Attached when workspace root is detected in source mode:
+  // "monorepoHealth": { ... }
 }
 ```
 

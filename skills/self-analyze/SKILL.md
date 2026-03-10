@@ -9,7 +9,7 @@ description: >
   in agent-driven refactoring or self-improvement loops.
 type: core
 library: typegrade
-library_version: "0.13.0"
+library_version: "0.14.0"
 sources:
   - "ferc/typegrade:src/cli.ts"
   - "ferc/typegrade:src/agent/report.ts"
@@ -93,6 +93,9 @@ interface FixBatch {
   expectedImpact: number;
   requiresHumanReview: boolean;
   issues: Issue[];
+  agentInstructions?: string; // Agent-oriented instructions for applying this batch
+  rollbackFiles?: string[]; // Files that should be reverted if the batch fails
+  rollbackHint?: string; // Structured hint for how to roll back
 }
 
 interface EnrichedFixBatch extends FixBatch {
@@ -201,7 +204,11 @@ Fix batches group related issues and are ordered by impact (highest first):
   changing boundary validation logic.
 
 Each batch shows `requiresHumanReview: true` when the fix might change
-runtime behavior.
+runtime behavior. Batches now include `agentInstructions` (step-by-step
+guidance for applying the fix), `rollbackFiles` (files to revert on failure),
+and `rollbackHint` (structured rollback command). In 0.14.0, boundary
+hotspots are promoted to first-class Issues, so they appear in fix batches
+and agent reports alongside other issues.
 
 ## Understanding Suppressions
 

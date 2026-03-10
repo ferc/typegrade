@@ -8,7 +8,7 @@ description: >
   dependencies.
 type: core
 library: typegrade
-library_version: "0.13.0"
+library_version: "0.14.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
@@ -53,7 +53,11 @@ npx typegrade compare zod valibot --json
 ```
 
 Returns `{ "comparison": { "first": AnalysisResult, "second": AnalysisResult } }`.
-Each result is a full `AnalysisResult` object.
+Each result is a full `AnalysisResult` object. In 0.14.0, the comparison
+also includes `evidenceQualityA` and `evidenceQualityB` (0-100 scores)
+indicating how strong the evidence base is for each package, plus
+`comparisonEligibilityReason` explaining why the comparison is or is not
+eligible based on evidence quality.
 
 ### Domain override
 
@@ -151,7 +155,9 @@ npx typegrade compare lib-a lib-b --json | jq '.comparison | {
 
 Small deltas (under 5 points) are often within confidence margins. Check
 `confidenceSummary.sampleCoverage` and `status` for both packages before
-acting on narrow differences.
+acting on narrow differences. In 0.14.0, also check `evidenceQualityA` and
+`evidenceQualityB` on the comparison object — low evidence quality on either
+side weakens the comparison.
 
 ### MEDIUM — Using compare for source-vs-package evaluation
 

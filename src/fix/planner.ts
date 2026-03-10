@@ -144,7 +144,14 @@ function buildBatches(groups: Map<string, Issue[]>): FixPlanBatch[] {
 
     const requiresHumanReview = hasPublicApiChange || risk === "high" || !fixCategory;
 
+    const targetFiles = [filePath];
     const batch: FixPlanBatch = {
+      agentInstructions: buildBatchAgentInstructions({
+        dimension,
+        issues: groupIssues,
+        risk,
+        targetFiles,
+      }),
       confidence,
       dependsOn: [],
       expectedImpact,
@@ -155,8 +162,10 @@ function buildBatches(groups: Map<string, Issue[]>): FixPlanBatch[] {
       requiresHumanReview,
       requiresPublicApiChange: hasPublicApiChange,
       risk,
+      rollbackFiles: targetFiles,
+      rollbackHint: `Revert ${fileName}: git checkout -- ${filePath}`,
       rollbackNotes: `Revert changes to ${fileName} for batch ${batchId}`,
-      targetFiles: [filePath],
+      targetFiles,
       title: `${dimension}: ${groupIssues.length} fix(es) in ${fileName}`,
       verificationCommands: [...DEFAULT_VERIFICATION_COMMANDS],
       ...(fixCategory ? { fixCategory } : {}),
@@ -308,4 +317,38 @@ function sortBatches(batches: FixPlanBatch[]): void {
     // Then by expected uplift descending
     return rhs.expectedScoreUplift - lhs.expectedScoreUplift;
   });
+}
+
+/**
+ * Build agent-oriented instructions for a fix plan batch.
+ */
+function buildBatchAgentInstructions(opts: {
+  dimension: string;
+  issues: Issue[];
+  risk: "low" | "medium" | "high";
+  targetFiles: string[];
+}): string {
+  const { dimension, issues, targetFiles, risk } = opts;
+  const lines: string[] = [
+    `Fix ${issues.length} ${dimension} issue(s) in ${targetFiles.map((tf) => tf.split("/").pop()).join(", ")}.`,
+    `Risk: ${risk}.`,
+  ];
+
+  // Summarize fix kinds
+  const fixKinds = new Set(issues.map((ii) => ii.suggestedFixKind).filter(Boolean));
+  if (fixKinds.size > 0) {
+    lines.push(`Approaches: ${[...fixKinds].join(", ")}.`);
+  }
+
+  // Top issues
+  const top = issues.slice(0, 5);
+  for (const issue of top) {
+    lines.push(`- ${issue.file}:${issue.line}: ${issue.message}`);
+  }
+  if (issues.length > 5) {
+    lines.push(`... and ${issues.length - 5} more.`);
+  }
+
+  lines.push("After: run tsc --noEmit and test suite.");
+  return lines.join("\n");
 }

@@ -551,9 +551,9 @@ function runTrainGates(): GateResult[] {
         const report = JSON.parse(output);
         const issues: string[] = [];
 
-        // Check required fields exist (JSON uses "issues" not "actionableIssues")
-        if (!Array.isArray(report.issues)) {
-          issues.push("missing issues");
+        // Check required fields exist (JSON uses "actionableIssues")
+        if (!Array.isArray(report.actionableIssues)) {
+          issues.push("missing actionableIssues");
         }
         if (!Array.isArray(report.fixBatches)) {
           issues.push("missing fixBatches");
@@ -597,7 +597,7 @@ function runTrainGates(): GateResult[] {
           return { detail: issues.join("; "), passed: false };
         }
         const batchCount = batches?.length ?? 0;
-        const issueCount = (report.issues as unknown[])?.length ?? 0;
+        const issueCount = (report.actionableIssues as unknown[])?.length ?? 0;
         return { detail: `${issueCount} issues, ${batchCount} batches, coherent`, passed: true };
       } catch {
         return { detail: "Failed to parse agent report JSON", passed: false };

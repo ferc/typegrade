@@ -323,6 +323,7 @@ function categoryToAcquisitionStage(category: DegradedCategory): AcquisitionStag
     "invalid-package-spec": "spec-resolution",
     "missing-declarations": "declaration-entrypoint-resolution",
     "partial-graph-resolution": "graph-build",
+    "resource-exhaustion": "complete",
     "unsupported-package-layout": "declaration-entrypoint-resolution",
     "workspace-discovery-failure": "spec-resolution",
   };

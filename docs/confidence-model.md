@@ -42,7 +42,7 @@ Several conditions cap dimension confidence to reflect reduced reliability:
 
 ### Source-mode fallback
 
-When declaration emit fails in source mode and consumer analysis falls back to raw source files, all dimension confidences are capped at **0.6**.
+When declaration emit fails in source mode and consumer analysis falls back to raw source files, all dimension confidences are capped at **0.6**. Additionally, `scoreValidity` is set to `"partially-comparable"`, which produces a `directional` trust classification — source fallback results cannot be `trusted`.
 
 Signal added:
 
@@ -116,14 +116,16 @@ The `scoreValidity` field reflects whether scores can be meaningfully compared t
 | Value                  | When set                                                  | Meaning                                                      |
 | ---------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
 | `fully-comparable`     | Complete analysis with adequate coverage                  | Scores are reliable and comparable                           |
-| `partially-comparable` | Fallback glob resolution or low average confidence (<0.3) | Scores are directionally correct but may not rank accurately |
+| `partially-comparable` | Fallback glob resolution, source-mode fallback, or low average confidence (<0.3) | Scores are directionally correct but may not rank accurately |
 | `not-comparable`       | Undersampled or degraded analysis                         | Scores should not be used for ranking or gating              |
 
 Key transitions:
 
 - **Undersampled** analysis → `"not-comparable"` (insufficient evidence for any comparison).
 - **Fallback glob** resolution → `"partially-comparable"` (some evidence, but entrypoint graph is unreliable).
+- **Source-mode fallback** (declaration emit failed) → `"partially-comparable"` (consumer analysis based on raw source files instead of emitted declarations).
 - **Confidence collapse** (<0.2 average across all four summary axes) → entire result is degraded. All composite scores are nulled, domain/scenario/fix data are stripped, and `degradedCategory` is set to `"confidence-collapse"`. This prevents analyses with near-zero evidence from producing any authoritative-looking output.
+- **Resource exhaustion** (worker OOM, analysis timeout) → result is degraded with `degradedCategory: "resource-exhaustion"`. Resource warnings are recorded in `executionDiagnostics.resourceWarnings`.
 - **Low average confidence** (<0.3 across all four summary axes) on an otherwise complete result → downgraded from `"fully-comparable"` to `"partially-comparable"`.
 - **Low average confidence** (<0.4) → fix batches are suppressed (emptied). `autofixAbstentionReason` explains why no fix batches were emitted.
 - **Low composite confidence** (<0.5 average across composites) → `domainScore`, `scenarioScore`, `autofixSummary`, and `fixPlan` are stripped from the result (set to `undefined`). These layers require sufficient evidence to be meaningful.
@@ -180,19 +182,20 @@ The top-level `trustSummary` on every `AnalysisResult` distills confidence, cove
 
 ### TrustClassification
 
-| Classification | When assigned                                                                       | `canCompare`        | `canGate` |
-| -------------- | ----------------------------------------------------------------------------------- | ------------------- | --------- |
-| `trusted`      | `status` is `complete`, coverage is adequate, `scoreValidity` is `fully-comparable` | true                | true      |
-| `directional`  | Fallback glob, undersampled, `partially-comparable`, or `not-comparable` validity   | depends on validity | false     |
-| `abstained`    | `status` is `degraded`, `invalid-input`, or `unsupported-package`                   | false               | false     |
+| Classification | When assigned                                                                                                                            | `canCompare`        | `canGate` |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | --------- |
+| `trusted`      | `status` is `complete`, coverage is adequate, `scoreValidity` is `fully-comparable`, all composite confidences >= 0.5                    | true                | true      |
+| `directional`  | Fallback glob, undersampled, source fallback, `partially-comparable`/`not-comparable` validity, or any composite confidence < 0.5        | depends on validity | false     |
+| `abstained`    | `status` is `degraded`, `invalid-input`, or `unsupported-package`                                                                        | false               | false     |
 
 ### Classification logic
 
 The classification is computed in `normalizeResult` after all confidence caps and validity checks have been applied:
 
 1. **Abstained**: if `status` is `degraded`, `invalid-input`, or `unsupported-package`, the result is abstained. The `reasons` array includes the status and any `degradedReason`.
-2. **Directional**: if any of these signals are present — `scoreValidity` is `not-comparable` or `partially-comparable`, entrypoint strategy is `fallback-glob`, coverage is undersampled, or graph used fallback glob — the result is directional. `canCompare` is true only if `scoreValidity` is not `not-comparable`.
-3. **Trusted**: complete analysis with sufficient coverage and `fully-comparable` scores. Both `canCompare` and `canGate` are true.
+2. **Directional** (coverage/validity signals): if any of these signals are present — `scoreValidity` is `not-comparable` or `partially-comparable`, entrypoint strategy is `fallback-glob`, coverage is undersampled, or graph used fallback glob — the result is directional. `canCompare` is true only if `scoreValidity` is not `not-comparable`. Note: source-mode fallback sets `scoreValidity` to `"partially-comparable"`, so source fallback results are always directional.
+3. **Directional** (low composite confidence): if any global composite has confidence below 0.5 (and the result was not already classified by steps 1-2), the result is downgraded to directional with `canCompare: true` but `canGate: false`. This prevents results with technically complete analysis but insufficient per-composite evidence from being used for quality gates.
+4. **Trusted**: complete analysis with sufficient coverage, `fully-comparable` scores, and all composite confidences >= 0.5. Both `canCompare` and `canGate` are true.
 
 ### TrustSummary fields
 

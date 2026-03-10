@@ -51,6 +51,12 @@ export interface EnrichedFixBatch extends FixBatch {
   abortIf: AbortCondition[];
   /** Rollback instructions as text */
   rollbackPlan: string;
+  /** Agent-oriented prompt/instructions for applying this batch */
+  agentInstructions: string;
+  /** Files that should be reverted if the batch fails */
+  rollbackFiles: string[];
+  /** Structured hint for how to roll back */
+  rollbackHint: string;
 }
 
 /** Agent report with actionable findings and fix batches */

@@ -147,12 +147,16 @@ export function computeDecisionReport(input: DecisionInput): ComparisonDecisionR
     const low = evidenceA < MIN_EVIDENCE_QUALITY ? nameA : nameB;
     const score = Math.min(evidenceA, evidenceB);
     blockingReasons.push(`${low} evidence quality too low (${score} < ${MIN_EVIDENCE_QUALITY})`);
-    return buildAbstainedReport({
+    const report = buildAbstainedReport({
       abstentionKind: "low-evidence",
       blockingReasons,
       trustA,
       trustB,
     });
+    report.evidenceQualityA = evidenceA;
+    report.evidenceQualityB = evidenceB;
+    report.comparisonEligibilityReason = `Evidence quality below threshold: ${nameA}=${evidenceA}, ${nameB}=${evidenceB} (min: ${MIN_EVIDENCE_QUALITY})`;
+    return report;
   }
 
   // Domain mismatch: abstain unless forced or compatible
@@ -364,9 +368,12 @@ export function computeDecisionReport(input: DecisionInput): ComparisonDecisionR
   return {
     blockingReasons: [],
     comparabilityStatus,
+    comparisonEligibilityReason: `Both packages meet evidence threshold: ${nameA}=${evidenceA}, ${nameB}=${evidenceB} (min: ${MIN_EVIDENCE_QUALITY})`,
     decisionConfidence,
     decisionScoreA,
     decisionScoreB,
+    evidenceQualityA: evidenceA,
+    evidenceQualityB: evidenceB,
     metricDeltas,
     metricProvenance,
     outcome,
@@ -624,15 +631,42 @@ function computeEvidenceQuality(result: AnalysisResult, trust: TrustSummary): nu
   const cs = result.confidenceSummary;
   const coverageQuality = cs ? ((cs.sampleCoverage + cs.graphResolution) / 2) * 100 : 50;
 
-  const es = result.evidenceSummary;
-  const scenarioQuality = es ? es.scenarioEvidence * 100 : 50;
+  // Compact-library allowance: if a library has sufficient declarations and positions
+  // But no domain/scenario signal, those dimensions are neutral (not punitive)
+  const cd = result.coverageDiagnostics;
+  const isCompact = cd?.samplingClass?.startsWith("compact") ?? false;
+  const hasSufficientSurface = cd && cd.measuredDeclarations >= 6 && cd.measuredPositions >= 12;
 
+  const es = result.evidenceSummary;
+  const hasDomainEvidence = es ? es.domainEvidence > 0.3 : false;
+  const hasScenarioEvidence = es ? es.scenarioEvidence > 0.3 : false;
+
+  // Adaptive weighting: scenario/domain evidence are neutral when not applicable
+  // Instead of penalizing compact/general libraries
+  let weights = { coverage: 0.25, domain: 0.15, scenario: 0.2, trust: 0.4 };
+  if ((isCompact || !hasDomainEvidence) && hasSufficientSurface) {
+    // Redistribute domain/scenario weight to trust and coverage
+    const domainRedist = hasDomainEvidence ? 0 : weights.domain;
+    const scenarioRedist = hasScenarioEvidence ? 0 : weights.scenario;
+    const redistributed = domainRedist + scenarioRedist;
+    weights = {
+      coverage: weights.coverage + redistributed * 0.4,
+      domain: hasDomainEvidence ? weights.domain : 0,
+      scenario: hasScenarioEvidence ? weights.scenario : 0,
+      trust: weights.trust + redistributed * 0.6,
+    };
+  }
+
+  const scenarioQuality = es ? es.scenarioEvidence * 100 : 50;
   const domainClarity = result.domainInference?.confidence
     ? result.domainInference.confidence * 100
     : 50;
 
   return Math.round(
-    trustScore * 0.4 + coverageQuality * 0.25 + scenarioQuality * 0.2 + domainClarity * 0.15,
+    trustScore * weights.trust +
+      coverageQuality * weights.coverage +
+      scenarioQuality * weights.scenario +
+      domainClarity * weights.domain,
   );
 }
 

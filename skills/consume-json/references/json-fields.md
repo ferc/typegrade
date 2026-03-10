@@ -4,7 +4,7 @@
 
 | Field                   | Type                    | Presence        | Description                                                                                                                                                   |
 | ----------------------- | ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `analysisSchemaVersion` | `string`                | Always          | Schema version (e.g. `"0.11.0"`)                                                                                                                              |
+| `analysisSchemaVersion` | `string`                | Always          | Schema version (e.g. `"0.14.0"`)                                                                                                                              |
 | `status`                | `AnalysisStatus`        | Always          | `'complete' \| 'degraded' \| 'invalid-input' \| 'unsupported-package'`                                                                                        |
 | `scoreValidity`         | `ScoreValidity`         | Always          | `'fully-comparable' \| 'partially-comparable' \| 'not-comparable'`                                                                                            |
 | `degradedReason`        | `string`                | When degraded   | Why the analysis is degraded                                                                                                                                  |
@@ -29,6 +29,8 @@
 | `boundaryQuality`       | `BoundaryQualityScore`  | Source mode     | Boundary trust score                                                                                                                                          |
 | `boundarySummary`       | `BoundarySummary`       | Source mode     | Boundary validation summary                                                                                                                                   |
 | `autofixSummary`        | `AutofixSummary`        | Agent mode      | Autofix capability summary                                                                                                                                    |
+| `executionDiagnostics`  | `ExecutionDiagnostics`  | When available  | Pipeline path, phase timings, resource warnings, fallbacks applied                                                                                            |
+| `monorepoHealth`        | `MonorepoHealthSummary` | Source mode     | Workspace health summary (when workspace root detected)                                                                                                       |
 
 ## CompositeScore
 
@@ -153,7 +155,7 @@
 | ----------------------- | ---------------- | -------------------------------------------------- |
 | `batches`               | `FixPlanBatch[]` | Ordered fix batches with dependencies              |
 | `totalExpectedUplift`   | `number`         | Total expected score improvement                   |
-| `analysisSchemaVersion` | `string`         | Schema version for compatibility (e.g. `"0.11.0"`) |
+| `analysisSchemaVersion` | `string`         | Schema version for compatibility (e.g. `"0.14.0"`) |
 | `verificationCommands`  | `string[]`       | Commands to verify fixes                           |
 
 ## FixPlanBatch
@@ -168,6 +170,9 @@
 | `expectedScoreUplift` | `number`                      | Expected score improvement                              |
 | `targetFiles`         | `string[]`                    | Files to modify                                         |
 | `dependsOn`           | `string[]`                    | IDs of batches that must be applied first               |
+| `agentInstructions`   | `string`                      | Agent-oriented instructions for applying the batch      |
+| `rollbackFiles`       | `string[]`                    | Files that should be reverted if the batch fails        |
+| `rollbackHint`        | `string`                      | Structured hint for how to roll back                    |
 
 ## DiffResult (from `typegrade diff --json`)
 

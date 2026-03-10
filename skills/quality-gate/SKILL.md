@@ -7,7 +7,7 @@ description: >
   and avoiding false failures. Use when adding typegrade to a CI pipeline.
 type: core
 library: typegrade
-library_version: "0.13.0"
+library_version: "0.14.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/cli.ts"
@@ -106,6 +106,11 @@ fi
 When using `--min-score` directly, abstained results are rejected
 automatically. For custom JSON-based gates, check `trustSummary.canGate`
 to decide whether the result is reliable enough to gate on.
+
+In 0.14.0, trust classification is stricter: source-mode fallback resolution
+now produces `"directional"` (not `"trusted"`), and composite confidence is
+checked — if any global composite has confidence below 0.5, the result is
+classified as `"directional"` regardless of other signals.
 
 ### Confidence-aware gate
 

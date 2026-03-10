@@ -8,7 +8,7 @@ description: >
   automation, dashboards, or agent workflows that ingest typegrade output.
 type: core
 library: typegrade
-library_version: "0.13.0"
+library_version: "0.14.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:src/types.ts"
@@ -43,7 +43,7 @@ The JSON output is an `AnalysisResult` object. Here are the stable fields:
 ```typescript
 interface AnalysisResult {
   // --- Mandatory envelope fields (always present) ---
-  analysisSchemaVersion: string; // e.g. "0.13.0"
+  analysisSchemaVersion: string; // e.g. "0.14.0"
   status: AnalysisStatus; // 'complete' | 'degraded' | 'invalid-input' | 'unsupported-package'
   scoreValidity: ScoreValidity; // 'fully-comparable' | 'partially-comparable' | 'not-comparable'
   degradedReason?: string; // Present when status is 'degraded'
@@ -84,6 +84,10 @@ interface AnalysisResult {
   recommendations?: Recommendation[]; // Actionable recommendations (source mode)
   noiseSummary?: NoiseSummary; // Signal hygiene breakdown (always present)
   autofixSummary?: AutofixSummary; // Agent mode
+
+  // --- New in 0.14.0 ---
+  executionDiagnostics?: ExecutionDiagnostics; // Pipeline path, phase timings, resource warnings
+  monorepoHealth?: MonorepoHealthSummary; // Workspace health (source mode, workspace root)
 }
 ```
 
@@ -190,6 +194,21 @@ interface ResolutionDiagnostics {
 `"companion-types-resolution"`, `"declaration-entrypoint-resolution"`,
 `"graph-build"`. Use `resolutionDiagnostics` to trace exactly where in
 the acquisition pipeline the analysis succeeded or failed.
+
+### ExecutionDiagnostics (new in 0.14.0)
+
+```typescript
+interface ExecutionDiagnostics {
+  analysisPath: string; // Pipeline path taken (e.g. "source-full", "package-standard")
+  phaseTimings: Record<string, number>; // Milliseconds per phase
+  resourceWarnings: ResourceWarning[]; // Memory/file-count warnings
+  fallbacksApplied: string[]; // Fallback strategies used during analysis
+}
+```
+
+Present on all results. Use `phaseTimings` to identify slow phases and
+`fallbacksApplied` to understand when the pipeline deviated from the
+primary strategy.
 
 ## Core Patterns
 

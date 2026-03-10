@@ -8,7 +8,7 @@ description: >
   undersampled results. Use when running typegrade on a local codebase.
 type: core
 library: typegrade
-library_version: "0.13.0"
+library_version: "0.14.0"
 sources:
   - "ferc/typegrade:README.md"
   - "ferc/typegrade:docs/how-it-works.md"
@@ -98,13 +98,16 @@ Override when the heuristic misclassifies. Valid domains: `validation`,
 npx typegrade analyze . --json
 ```
 
-Returns an `AnalysisResult` object with mandatory envelope fields: `status`,
-`scoreValidity`, `analysisSchemaVersion`, `globalScores`, `profileInfo`,
-`packageIdentity`, and `degradedCategory` (when degraded). Results include a
-`trustSummary` with classification (`"trusted"`, `"directional"`, or
-`"abstained"`), `canCompare`, and `canGate` flags. A `resolutionDiagnostics`
-field traces the acquisition pipeline stages. See the `consume-json` skill
-for full field details.
+Returns an `AnalysisResult` object (schema 0.14.0) with mandatory envelope
+fields: `status`, `scoreValidity`, `analysisSchemaVersion`, `globalScores`,
+`profileInfo`, `packageIdentity`, and `degradedCategory` (when degraded).
+Results include a `trustSummary` with classification (`"trusted"`,
+`"directional"`, or `"abstained"`), `canCompare`, and `canGate` flags. A
+`resolutionDiagnostics` field traces the acquisition pipeline stages.
+New in 0.14.0: `executionDiagnostics` (pipeline path, phase timings,
+resource warnings, fallbacks applied) and `monorepoHealth` (workspace health
+summary when a workspace root is detected in source mode). See the
+`consume-json` skill for full field details.
 
 ### Include generated issues
 
@@ -151,7 +154,8 @@ npx typegrade boundaries .
 Analyzes I/O boundary trust and validation coverage — network, filesystem,
 env, config, serialization, IPC, database, SDK, and queue boundaries. Shows
 a boundary quality score, ranked hotspots with risk scores, recommended fixes,
-and taint breaks. In source mode, boundary hotspots and up to 3
+and taint breaks. In source mode, boundary hotspots are promoted to
+first-class Issues and feed into fix-plan and agent output. Up to 3
 recommendations (soundness, boundary, public-surface) are also attached to
 the main `AnalysisResult`.
 

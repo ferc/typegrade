@@ -24,9 +24,11 @@ import {
   type Issue,
   type IssueCluster,
   type LibraryInspectionReport,
+  type MonorepoHealthSummary,
   type PackageAnalysisContext,
   type PackageIdentity,
   type Recommendation,
+  type ResourceWarning,
   type ScenarioApplicabilityStatus,
   type ScenarioScore,
   type ScoreComparability,
@@ -43,7 +45,7 @@ import {
   loadProject,
   loadProjectLightweight,
 } from "./utils/project-loader.js";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { buildAgentReport, buildAutofixSummary } from "./agent/index.js";
 import {
   buildBoundaryGraph,
@@ -55,6 +57,7 @@ import { classifyPublicSurface, computeRoleBreakdown } from "./roles/index.js";
 import { computeComposites, computeGrade } from "./scorer.js";
 import { detectProfile, gatherProfileSignals, resolveProfile } from "./profiles/index.js";
 import { evaluateScenarioPack, isScenarioApplicable } from "./scenarios/types.js";
+import { existsSync, readFileSync } from "node:fs";
 import type { GraphStats } from "./graph/types.js";
 import { Project } from "ts-morph";
 import { analyzeAgentUsability } from "./analyzers/agent-usability.js";
@@ -64,6 +67,7 @@ import { analyzeBoundaryDiscipline } from "./analyzers/boundary-discipline.js";
 import { analyzeConfigDiscipline } from "./analyzers/config-discipline.js";
 import { analyzeDeclarationFidelity } from "./analyzers/declaration-fidelity.js";
 import { analyzeImplementationSoundness } from "./analyzers/implementation-soundness.js";
+import { analyzeMonorepo } from "./monorepo/index.js";
 import { analyzePublishQuality } from "./analyzers/publish-quality.js";
 import { analyzeSemanticLift } from "./analyzers/semantic-lift.js";
 import { analyzeSpecializationPower } from "./analyzers/specialization-power.js";
@@ -311,29 +315,48 @@ export function normalizeResult(result: AnalysisResult): AnalysisResult {
   // --- Trust summary computation ---
   result.trustSummary = computeTrustSummary(result);
 
-  // --- Stable issue IDs (WS7) ---
+  // --- Stable issue IDs and dimension keys (mandatory in output) ---
+  enrichDimensionKeys(result.dimensions);
   assignStableIssueIds(result);
 
   return result;
 }
 
 /**
- * Assign deterministic, stable issue IDs to all issues in the result.
+ * Assign deterministic, stable issue IDs and dimension keys to all issues in the result.
  * ID format: dimension:file:line:col — stable across runs on the same codebase.
+ * Both issueId and dimensionKey are mandatory in normalized output.
  */
 function assignStableIssueIds(result: AnalysisResult): void {
-  // Assign IDs to dimension issues
+  // Assign IDs and dimensionKeys to dimension issues
   for (const dim of result.dimensions) {
     for (const issue of dim.issues) {
       if (!issue.issueId) {
         issue.issueId = computeIssueId(issue);
       }
+      if (!issue.dimensionKey) {
+        issue.dimensionKey = LABEL_TO_KEY.get(issue.dimension) ?? dim.key;
+      }
     }
   }
-  // Assign IDs to topIssues
+  // Assign IDs and dimensionKeys to topIssues
   for (const issue of result.topIssues) {
     if (!issue.issueId) {
       issue.issueId = computeIssueId(issue);
+    }
+    if (!issue.dimensionKey) {
+      issue.dimensionKey = LABEL_TO_KEY.get(issue.dimension) ?? "unknown";
+    }
+  }
+  // Assign IDs to autofix issues
+  if (result.autofixSummary) {
+    for (const issue of result.autofixSummary.actionableIssues) {
+      if (!issue.issueId) {
+        issue.issueId = computeIssueId(issue);
+      }
+      if (!issue.dimensionKey) {
+        issue.dimensionKey = LABEL_TO_KEY.get(issue.dimension) ?? "unknown";
+      }
     }
   }
 }
@@ -386,6 +409,22 @@ function computeTrustSummary(result: AnalysisResult): TrustSummary {
     }
     return {
       canCompare: result.scoreValidity !== "not-comparable",
+      canGate: false,
+      classification: "directional",
+      reasons,
+    };
+  }
+
+  // Check composite confidence: if any global composite has confidence < 0.5,
+  // Downgrade to directional (fully-comparable but low-confidence is misleading)
+  const lowConfComposites = result.composites.filter(
+    (cc) => cc.score !== null && cc.confidence !== undefined && cc.confidence < 0.5,
+  );
+  if (lowConfComposites.length > 0) {
+    const lowKeys = lowConfComposites.map((cc) => cc.key).join(", ");
+    reasons.push(`Low composite confidence (${lowKeys}) — directional only`);
+    return {
+      canCompare: true,
       canGate: false,
       classification: "directional",
       reasons,
@@ -603,7 +642,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
 
   const graphStats = options?.packageContext?.graphStats ?? makeDefaultGraphStats();
   const { usedFallbackGlob } = graphStats;
+  const phaseTimings: Record<string, number> = {};
 
+  const projectLoadStart = performance.now();
   const project = loadProject(absolutePath);
   let sourceFiles = getSourceFiles(project, sourceFilesOptions, absolutePath);
   if (options?.fileFilter) {
@@ -717,11 +758,17 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     });
   }
 
+  phaseTimings["projectLoad"] = Math.round(performance.now() - projectLoadStart);
+
   // Build consumer view
   let consumerFiles = sourceFiles;
   const sourceOnlyFiles = sourceFiles;
   const caveats: string[] = [];
   let usingSourceFallback = false;
+  /** Declaration emit success rate: 1.0=full, 0<x<1=partial, 0=failed/skipped */
+  let declEmitSuccessRate = 0;
+  const resourceWarnings: ResourceWarning[] = [];
+  const declEmitStart = performance.now();
 
   if (mode === "source" && !options?.skipDeclEmit) {
     try {
@@ -735,7 +782,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
       }
 
       if (emittedFiles.length > 0) {
-        const emitSuccessRate = emittedFiles.length / sourceFiles.length;
+        declEmitSuccessRate = emittedFiles.length / sourceFiles.length;
         const dtsProject = new Project({
           compilerOptions: { module: 99, skipLibCheck: true, strict: true, target: 2 },
           useInMemoryFileSystem: true,
@@ -744,24 +791,42 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
           dtsProject.createSourceFile(file.filePath, file.text);
         }
         consumerFiles = dtsProject.getSourceFiles();
-        if (emitSuccessRate < 1) {
+        if (declEmitSuccessRate < 1) {
           caveats.push(
-            `Partial declaration emit: ${emittedFiles.length}/${sourceFiles.length} files (${Math.round(emitSuccessRate * 100)}%)`,
+            `Partial declaration emit: ${emittedFiles.length}/${sourceFiles.length} files (${Math.round(declEmitSuccessRate * 100)}%)`,
           );
+          resourceWarnings.push({
+            kind: "partial-emit",
+            message: `Only ${emittedFiles.length}/${sourceFiles.length} files emitted declarations`,
+          });
         }
       } else {
         usingSourceFallback = true;
+        declEmitSuccessRate = 0;
         caveats.push("Could not emit declarations; consumer analysis uses source files directly");
+        resourceWarnings.push({
+          kind: "declaration-emit-fallback",
+          message: "Declaration emit produced no files; using source files as consumer view",
+        });
       }
     } catch {
       usingSourceFallback = true;
+      declEmitSuccessRate = 0;
       caveats.push("Declaration emit failed; consumer analysis uses source files directly");
+      resourceWarnings.push({
+        kind: "declaration-emit-fallback",
+        message: "Declaration emit threw an error; using source files as consumer view",
+      });
     }
   } else if (mode === "source" && options?.skipDeclEmit) {
     usingSourceFallback = true;
+    declEmitSuccessRate = 0;
   }
 
+  phaseTimings["declEmit"] = Math.round(performance.now() - declEmitStart);
+
   // Extract public surface once, shared by all consumer-facing analyzers
+  const surfaceStart = performance.now();
   const consumerSurface = extractPublicSurface(consumerFiles);
 
   // Build derived index once — precomputed aggregates for all analyzers
@@ -785,7 +850,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
         }
       : detectDomain(consumerSurface, options?.packageContext?.packageName);
 
+  phaseTimings["surface"] = Math.round(performance.now() - surfaceStart);
+
   // Run consumer-facing dimensions against the shared surface
+  const dimensionStart = performance.now();
   const packageName = options?.packageContext?.packageName;
   const dimensions: DimensionResult[] = [
     analyzeApiSpecificity(consumerSurface),
@@ -883,7 +951,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     caveats.push(`Source mode: ${consumerFiles.length} consumer files analyzed`);
   }
 
+  phaseTimings["dimensions"] = Math.round(performance.now() - dimensionStart);
+
   // Resolve profile early so we can pass it to the scorer
+  const scoringStart = performance.now();
   const declarationFileRatio = mode === "package" ? 1 : 0;
   const profileSignals = gatherProfileSignals(absolutePath, {
     declarationFileRatio,
@@ -965,6 +1036,8 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   if (scenarioAbstentionReason && !scenarioScore) {
     caveats.push(scenarioAbstentionReason);
   }
+
+  phaseTimings["scoring"] = Math.round(performance.now() - scoringStart);
 
   // Collect top issues using the shared signal-hygiene filter as single source of truth
   const allIssues: Issue[] = dimensions.flatMap((dim) => dim.issues);
@@ -1108,6 +1181,9 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     scoreValidity = "partially-comparable";
   } else if (isFallbackGlob) {
     scoreValidity = "partially-comparable";
+  } else if (usingSourceFallback && mode === "source") {
+    // Source fallback: consumer analysis used raw source files instead of declarations
+    scoreValidity = "partially-comparable";
   }
   const degradedReason: string | undefined = isUndersampled
     ? `Undersampled: ${coverageDiagnostics.undersampledReasons.join("; ")}`
@@ -1187,7 +1263,7 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     );
 
     const smc: SourceModeConfidence = {
-      declarationEmitSuccess: 1,
+      declarationEmitSuccess: declEmitSuccessRate,
       fixabilityRate: totalIssues.length > 0 ? fixableIssues.length / totalIssues.length : 1,
       ownershipClarity: totalIssues.length > 0 ? resolvedOwnership.length / totalIssues.length : 1,
       sourceFileCoverage:
@@ -1205,6 +1281,10 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
     if (hotspots.length > 0) {
       result.boundaryHotspots = hotspots;
       result.boundaryRecommendedFixes = generateBoundaryFixes(hotspots);
+
+      // Convert boundary hotspots into first-class issues
+      const boundaryIssues = convertBoundaryHotspotsToIssues(hotspots);
+      wireBoundaryIssues(result, boundaryIssues);
     }
   }
   if (boundaryQuality) {
@@ -1213,6 +1293,21 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
   if (suppressions.length > 0) {
     result.suppressions = suppressions;
   }
+
+  // Wire execution diagnostics — always populate with phase timings
+  const fallbacks: string[] = [];
+  if (usingSourceFallback) {
+    fallbacks.push("declaration-emit-fallback");
+  }
+  if (isFallbackGlob) {
+    fallbacks.push("graph-fallback-glob");
+  }
+  result.executionDiagnostics = {
+    analysisPath: usingSourceFallback ? "source-fallback" : "standard",
+    fallbacksApplied: fallbacks,
+    phaseTimings,
+    resourceWarnings,
+  };
 
   // Enrich issues with canonical dimension keys
   enrichDimensionKeys(dimensions);
@@ -1255,6 +1350,14 @@ export function analyzeProject(projectPath: string, options?: AnalyzeOptions): A
           ? `Agent stop: ${stopMet.reason}`
           : "No fixable batches could be formed from actionable issues";
       }
+    }
+  }
+
+  // WS6: Detect workspace root and attach monorepo health as auxiliary data
+  if (mode === "source") {
+    const monorepoHealth = tryAttachMonorepoHealth(absolutePath, resourceWarnings);
+    if (monorepoHealth) {
+      result.monorepoHealth = monorepoHealth;
     }
   }
 
@@ -2191,6 +2294,115 @@ function generateRecommendations(
 }
 
 /**
+ * Merge boundary-derived issues into the result's dimensions and topIssues.
+ */
+function wireBoundaryIssues(result: AnalysisResult, boundaryIssues: Issue[]): void {
+  if (boundaryIssues.length === 0) {
+    return;
+  }
+
+  // Add to boundaryDiscipline dimension if it exists
+  const bdDim = result.dimensions.find((dd) => dd.key === "boundaryDiscipline");
+  if (bdDim) {
+    // Avoid duplicating issues already captured by the dimension analyzer
+    const existingKeys = new Set(bdDim.issues.map((ii) => `${ii.file}:${ii.line}`));
+    const novel = boundaryIssues.filter((bi) => !existingKeys.has(`${bi.file}:${bi.line}`));
+    bdDim.issues.push(...novel);
+  }
+
+  // Add high-risk boundary issues to topIssues
+  const existingTopKeys = new Set(result.topIssues.map((ii) => `${ii.file}:${ii.line}`));
+  const highRisk = boundaryIssues.filter(
+    (bi) => bi.severity === "error" && !existingTopKeys.has(`${bi.file}:${bi.line}`),
+  );
+  result.topIssues.push(...highRisk);
+}
+
+function riskToImpact(riskScore: number): "high" | "medium" | "low" {
+  if (riskScore >= 70) {
+    return "high";
+  }
+  if (riskScore >= 40) {
+    return "medium";
+  }
+  return "low";
+}
+
+function riskToSeverity(riskScore: number): Issue["severity"] {
+  if (riskScore >= 70) {
+    return "error";
+  }
+  if (riskScore >= 40) {
+    return "warning";
+  }
+  return "info";
+}
+
+/**
+ * Convert boundary hotspots into first-class Issue records.
+ * Deduplicates by file+line to collapse repeated detections at the same endpoint.
+ */
+function convertBoundaryHotspotsToIssues(hotspots: BoundaryHotspot[]): Issue[] {
+  // Deduplicate by file:line — collapse repeated boundary detections at the same site
+  const seen = new Set<string>();
+  const issues: Issue[] = [];
+
+  const ROOT_CAUSE_MAP: Record<string, Issue["rootCauseCategory"]> = {
+    "UI-input": "missing-validation",
+    config: "config-gap",
+    database: "missing-validation",
+    env: "config-gap",
+    filesystem: "missing-validation",
+    network: "unsafe-external-input",
+    queue: "missing-validation",
+    sdk: "missing-validation",
+    serialization: "unsafe-external-input",
+  };
+
+  const FIX_KIND_MAP: Record<string, Issue["suggestedFixKind"]> = {
+    "UI-input": "add-validation",
+    config: "add-env-parsing",
+    database: "add-validation",
+    env: "add-env-parsing",
+    filesystem: "add-validation",
+    network: "add-validation",
+    queue: "add-validation",
+    serialization: "wrap-json-parse",
+  };
+
+  for (const hotspot of hotspots) {
+    const key = `${hotspot.file}:${hotspot.line}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    // Higher risk hotspots get higher agent priority
+    const agentPriority = Math.min(100, Math.round(hotspot.riskScore));
+
+    issues.push({
+      agentPriority,
+      boundaryType: hotspot.boundaryType,
+      column: 0,
+      decisionImpact: riskToImpact(hotspot.riskScore),
+      dimension: "Boundary Discipline",
+      dimensionKey: "boundaryDiscipline",
+      file: hotspot.file,
+      fixability: "direct",
+      issueId: `boundaryDiscipline:${hotspot.file.replace(/.*node_modules\//, "").replace(/.*\/src\//, "src/")}:${hotspot.line}:0`,
+      line: hotspot.line,
+      message: `Unvalidated ${hotspot.boundaryType} boundary: ${hotspot.description}`,
+      ownership: "source-owned",
+      rootCauseCategory: ROOT_CAUSE_MAP[hotspot.boundaryType] ?? "boundary-leak",
+      severity: riskToSeverity(hotspot.riskScore),
+      suggestedFixKind: FIX_KIND_MAP[hotspot.boundaryType] ?? "add-validation",
+    });
+  }
+
+  return issues;
+}
+
+/**
  * Generate recommended fixes from boundary hotspots.
  */
 function generateBoundaryFixes(hotspots: BoundaryHotspot[]): BoundaryRecommendedFix[] {
@@ -2290,4 +2502,49 @@ export function analyzeBoundariesOnly(projectPath: string): BoundaryOnlyResult {
     recommendedFixes,
     timeMs: Math.round(performance.now() - startTime),
   };
+}
+
+/**
+ * Detect workspace root and return monorepo health summary if applicable.
+ * Non-throwing: returns undefined if the path is not a workspace root or analysis fails.
+ */
+function tryAttachMonorepoHealth(
+  projectPath: string,
+  resourceWarnings: ResourceWarning[],
+): MonorepoHealthSummary | undefined {
+  // Check for workspace indicators
+  const hasPnpmWorkspace = existsSync(join(projectPath, "pnpm-workspace.yaml"));
+  const hasPackageJson = existsSync(join(projectPath, "package.json"));
+
+  if (!hasPnpmWorkspace && !hasPackageJson) {
+    return undefined;
+  }
+
+  // Quick check: if package.json has no workspaces field and no pnpm-workspace.yaml, skip
+  if (!hasPnpmWorkspace && hasPackageJson) {
+    try {
+      const raw = readFileSync(join(projectPath, "package.json"), "utf8");
+      const pkg = JSON.parse(raw) as Record<string, unknown>;
+      if (!pkg["workspaces"]) {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  try {
+    const report = analyzeMonorepo({ rootPath: projectPath });
+    if (report.packages.length <= 1) {
+      // Single-package workspace — not meaningful monorepo health
+      return undefined;
+    }
+    return report.healthSummary;
+  } catch {
+    resourceWarnings.push({
+      kind: "monorepo-fallback",
+      message: "Monorepo analysis failed; workspace health not attached",
+    });
+    return undefined;
+  }
 }

@@ -58,7 +58,7 @@ function makeResult(opts: {
     : undefined;
 
   return {
-    analysisSchemaVersion: "0.13.0",
+    analysisSchemaVersion: "0.14.0",
     caveats: [],
     composites,
     confidenceSummary: {

@@ -15,7 +15,9 @@ Source mode analyzes your TypeScript source files directly. All 12 dimensions co
 5. Run all 4 implementation analyzers against the original source files.
 6. Compute composites, domain scores, and scenario scores.
 
-If declaration emit fails, source mode falls back to analyzing raw source files for the consumer dimensions, with all confidences capped at 0.6.
+If declaration emit fails, source mode falls back to analyzing raw source files for the consumer dimensions, with all confidences capped at 0.6. Source fallback also sets `scoreValidity` to `"partially-comparable"`, which produces a `directional` trust classification (see [Confidence Model: Trust classification](confidence-model.md#trust-classification)).
+
+Source-mode analysis also detects workspace roots and, when found, attaches a `MonorepoHealthSummary` as `monorepoHealth` on the `AnalysisResult`. This provides workspace layering health data alongside the per-project analysis without requiring a separate `typegrade monorepo` invocation.
 
 In source mode, a `sourceModeConfidence` object is computed with metrics specific to source analysis: source file coverage, declaration emit success, source-owned export coverage, ownership clarity, and fixability rate. See [Confidence Model: Source-mode confidence](confidence-model.md#source-mode-confidence) for details.
 
@@ -66,7 +68,7 @@ Every `AnalysisResult` carries two top-level discriminators:
 
 The following fields are always present on every `AnalysisResult`, regardless of status:
 
-- `analysisSchemaVersion` — semver string identifying the result schema.
+- `analysisSchemaVersion` — semver string identifying the result schema (currently `0.14.0` as of 2026-03-10).
 - `status` — the `AnalysisStatus` value.
 - `scoreValidity` — the `ScoreValidity` value.
 - `globalScores` — structured global composite scores (Consumer API, Agent Readiness, Type Safety).
@@ -77,6 +79,7 @@ The following fields are always present on every `AnalysisResult`, regardless of
 - `evidenceSummary` — aggregate evidence counts (total declarations, positions, files, and coverage class).
 - `trustSummary` — trust classification (`trusted`, `directional`, or `abstained`) with `canCompare`, `canGate`, and `reasons`. See [Confidence Model: Trust classification](confidence-model.md#trust-classification).
 - `resolutionDiagnostics` — traces the acquisition pipeline stages, chosen strategy, attempted strategies, declaration count, and failure information. See [Scoring Contract: Resolution diagnostics contract](scoring-contract.md#resolution-diagnostics-contract).
+- `executionDiagnostics` — pipeline execution metadata including `analysisPath` (e.g., `"standard"` or `"source-fallback"`), `phaseTimings` (millisecond timings for `projectLoad`, `declEmit`, `surface`, `dimensions`, `scoring`), `resourceWarnings` (any `ResourceWarning` records), and `fallbacksApplied` (list of fallback strategies used).
 
 ### Degraded result semantics
 
@@ -85,7 +88,7 @@ When analysis cannot complete normally (e.g., declaration emit fails catastrophi
 - `status` is set to `"degraded"`.
 - `scoreValidity` is set to `"not-comparable"`.
 - `degradedReason` contains a human-readable explanation of why the analysis degraded.
-- `degradedCategory` classifies the failure: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, `insufficient-surface`, `confidence-collapse`, or `workspace-discovery-failure`.
+- `degradedCategory` classifies the failure: `invalid-package-spec`, `unsupported-package-layout`, `missing-declarations`, `partial-graph-resolution`, `install-failure`, `insufficient-surface`, `confidence-collapse`, `workspace-discovery-failure`, or `resource-exhaustion`.
 - `degradedReasonChain` provides an ordered chain of reasons (most specific first) explaining the degradation path, including the primary reason, category, and specific failure mode.
 - All composite scores are set to `null` (never fake zeros).
 - `domainScore`, `scenarioScore`, `autofixSummary`, `fixPlan`, `boundaryQuality`, and `boundarySummary` are stripped entirely.
@@ -279,6 +282,32 @@ Every analysis result includes `ResolutionDiagnostics` tracing the package acqui
 
 The `chosenStrategy` field records which strategy produced the final result (e.g., `"exports-types"`, `"typings-field"`, `"fallback-glob"`). The `attemptedStrategies` array records all strategies tried in order. For failed analyses, `failureStage` and `failureReason` identify where and why the pipeline stopped.
 
+## Execution diagnostics
+
+Every `AnalysisResult` includes an `executionDiagnostics` field (as of schema 0.14.0) that provides observability into the analysis pipeline execution.
+
+### ExecutionDiagnostics fields
+
+| Field              | Type                   | Description                                                                                            |
+| ------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| `analysisPath`     | `string`               | Pipeline path taken: `"standard"` or `"source-fallback"`                                               |
+| `phaseTimings`     | `Record<string, number>` | Millisecond timings for each phase: `projectLoad`, `declEmit`, `surface`, `dimensions`, `scoring`     |
+| `resourceWarnings` | `ResourceWarning[]`    | Warnings encountered during analysis (OOM, timeouts, fallbacks)                                        |
+| `fallbacksApplied` | `string[]`             | Fallback strategies that were activated (e.g., `"declaration-emit-fallback"`, `"graph-fallback-glob"`) |
+
+### ResourceWarning kinds
+
+| Kind                        | Meaning                                              |
+| --------------------------- | ---------------------------------------------------- |
+| `declaration-emit-fallback` | Declaration emit failed; fell back to raw source     |
+| `worker-oom`                | Worker process ran out of memory                     |
+| `timeout`                   | Analysis phase timed out                             |
+| `monorepo-fallback`         | Monorepo detection used fallback heuristics          |
+| `boundaries-only-fallback`  | Boundary analysis fell back to a lighter mode        |
+| `partial-emit`              | Declaration emit succeeded partially (some files failed) |
+
+These diagnostics help identify performance bottlenecks and understand which fallback strategies were activated. When `resourceWarnings` contains entries, the analysis may have reduced reliability (reflected in confidence caps and trust classification).
+
 ## Configuration file
 
 `typegrade` supports project-level configuration via a `typegrade.config.ts` (or `.js` / `.mjs`) file in the project root. The config file is searched in priority order: `typegrade.config.ts`, `typegrade.config.js`, `typegrade.config.mjs`.
@@ -411,6 +440,17 @@ Unvalidated boundaries are ranked into **hotspots** using `computeBoundaryHotspo
 
 Hotspots are sorted by descending risk score and attached to the `AnalysisResult` as `boundaryHotspots`. In boundary-only mode (`typegrade boundaries`), hotspots and recommended fixes are included in the JSON output.
 
+### Boundary-to-issue pipeline
+
+Boundary hotspots are converted to first-class `Issue` records and fed into the standard issue pipeline. Each hotspot-derived issue carries:
+
+- **`issueId`** — stable identifier following the `dimension:file:line:col` format.
+- **`dimensionKey`** — set to `"boundaryDiscipline"`.
+- **`rootCauseCategory`** — mapped from the boundary type (e.g., `boundary-leak`, `missing-validation`).
+- **`suggestedFixKind`** — mapped from the boundary type (e.g., `add-validation`, `wrap-json-parse`, `add-env-parsing`).
+
+These boundary-derived issues appear in `topIssues` and flow into the fix-plan pipeline, enabling agents to address boundary violations through the same batching and prioritization system used for other issue types.
+
 ### Boundary recommended fixes
 
 Each hotspot maps to a **recommended fix** (`BoundaryRecommendedFix`) with a concrete `fix` description and `fixKind` (e.g., `add-validation`, `wrap-json-parse`, `add-env-parsing`) based on the boundary type.
@@ -426,6 +466,8 @@ In source and self-analysis modes, up to 3 **recommendations** are generated fro
 Each recommendation includes an `action`, `reason`, `impact` level (high/medium/low), and `category`. Recommendations are attached to the `AnalysisResult` as the `recommendations` field.
 
 ## Fix planning pipeline
+
+Boundary analysis is enabled by default for `self-analyze`, `fix-plan`, and `apply-fixes` commands (as of schema 0.14.0). Boundary hotspots flow into the issue and fix-plan pipelines alongside other dimension issues.
 
 The `self-analyze` command produces an **autofix summary** with actionable issues and fix batches for agent consumption. Actionable issues are capped at 50 (the agent issue budget, or 25 in strict/source mode), sorted by `agentPriority` descending with source-owned issues prioritized first. Degraded results with all-null composite scores emit an empty report with no fix batches.
 
@@ -468,6 +510,9 @@ The full `FixPlan` extends batches with:
 - **Verification plan** — typed verification commands (see below).
 - **Rollback notes** — instructions for reverting if the fix causes regressions.
 - **Dependency ordering** — `dependsOn` fields ensuring batches are applied in the correct sequence.
+- **Agent instructions** — `agentInstructions` with a human-readable summary of what to do for each batch.
+- **Rollback files** — `rollbackFiles` listing files that should be reverted if the batch fails.
+- **Rollback hint** — `rollbackHint` with a structured revert command (e.g., `git checkout -- <file>`).
 
 Safe fix categories (`add-explicit-return-type`, `replace-any-with-unknown`, `insert-satisfies`, `wrap-json-parse`, `add-env-parsing`, `narrow-overloads`, `hoist-validation`) can be applied automatically. All other fixes require human review.
 
@@ -485,6 +530,7 @@ Enriched fix batches (`EnrichedFixBatch`) extend the base batch with agent-speci
 - **`acceptanceChecks`** — typed acceptance criteria (`AcceptanceCheck[]`), each with a `command`, `expectedOutcome`, and `mustPass` flag.
 - **`abortIf`** — abort conditions (`AbortCondition[]`) that should halt batch application (e.g., "TypeScript compilation fails after applying this batch").
 - **`rollbackPlan`** — shell command to revert the batch's changes.
+- **`agentInstructions`** — detailed step-by-step instructions for applying the batch, incorporating patch hints and issue context.
 
 ### Verification plan
 
@@ -595,6 +641,13 @@ console.log(result.adoptionDecision.outcome, result.adoptionDecision.winner);
 The `compare` command (`typegrade compare <pkgA> <pkgB>`) performs a side-by-side comparison of two packages. Both packages are scored independently, and the results are presented with deltas for each composite score.
 
 Programmatically, the `comparePackages(pkgA, pkgB, options?)` function returns both `AnalysisResult` objects and an optional rendered text comparison.
+
+The `ComparisonDecisionReport` includes evidence quality metadata (as of schema 0.14.0):
+
+- **`evidenceQualityA`** / **`evidenceQualityB`** — numeric evidence quality scores (0-100) for each package, blending trust classification, coverage, scenario evidence, and domain clarity.
+- **`comparisonEligibilityReason`** — human-readable explanation of whether both packages meet the evidence threshold for comparison.
+
+Evidence quality uses adaptive weighting: compact libraries with sufficient surface (>= 6 declarations, >= 12 positions) are not penalized for missing domain or scenario evidence. Instead, domain/scenario weight is redistributed to trust and coverage signals.
 
 The type system also supports a `DiffResult` for comparing two analysis runs of the same project (e.g., before and after a change). Each `DiffResult` carries `analysisSchemaVersion` for compatibility verification. A diff result includes:
 

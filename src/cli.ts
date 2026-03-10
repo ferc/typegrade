@@ -241,7 +241,6 @@ export function runCli() {
         domain: "off",
         explain: true,
         profile: "autofix-agent",
-        skipBoundaries: true,
         skipDeclEmit: true,
       });
       const agentOpts: {
@@ -350,7 +349,6 @@ export function runCli() {
         agent: true,
         domain: "off",
         profile: "autofix-agent",
-        skipBoundaries: true,
         skipDeclEmit: true,
       });
       const plan = buildFixPlan(result);
@@ -378,7 +376,6 @@ export function runCli() {
         agent: true,
         domain: "off",
         profile: "autofix-agent",
-        skipBoundaries: true,
         skipDeclEmit: true,
       });
       const plan = buildFixPlan(result);

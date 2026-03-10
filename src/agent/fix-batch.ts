@@ -165,14 +165,20 @@ export function enrichFixBatches(batches: FixBatch[], issues: Issue[]): Enriched
     // Generate rollbackPlan
     const rollbackPlan = `Revert changes to ${batch.targetFiles.join(", ")}. Run: git checkout -- ${batch.targetFiles.join(" ")}`;
 
+    // Generate agent instructions
+    const agentInstructions = generateAgentInstructions({ batch, issues: batchIssues, patchHints });
+
     return {
       ...batch,
       abortIf,
       acceptanceChecks,
+      agentInstructions,
       expectedDiffs,
       expectedScoreDelta,
       goal,
       patchHints,
+      rollbackFiles: [...batch.targetFiles],
+      rollbackHint: `Revert ${batch.targetFiles.length} file(s): ${batch.targetFiles.map((tf) => tf.split("/").pop()).join(", ")}`,
       rollbackPlan,
       rollbackRisk,
       verificationCommands: ["npx tsc --noEmit"],
@@ -248,6 +254,52 @@ function computeRollbackRisk(batch: FixBatch, issueById: Map<string, Issue>): Ro
 /**
  * Compute the whyNow explanation based on batch risk.
  */
+/**
+ * Generate agent-oriented instructions for a fix batch.
+ * Produces a structured prompt the agent can follow to apply the batch.
+ */
+function generateAgentInstructions(opts: {
+  batch: FixBatch;
+  issues: Issue[];
+  patchHints: string[];
+}): string {
+  const { batch, issues, patchHints } = opts;
+  const lines: string[] = [
+    `## Batch: ${batch.title}`,
+    "",
+    `**Goal**: ${batch.rationale}`,
+    `**Risk**: ${batch.risk} | **Requires review**: ${batch.requiresHumanReview ? "yes" : "no"}`,
+    "",
+    "### Files to modify:",
+  ];
+  for (const tf of batch.targetFiles) {
+    lines.push(`- ${tf}`);
+  }
+  lines.push("");
+  lines.push("### Issues to fix:");
+  for (const issue of issues.slice(0, 10)) {
+    const loc = `${issue.file}:${issue.line}`;
+    lines.push(`- [${issue.severity}] ${issue.message} (${loc})`);
+    if (issue.suggestedFixKind) {
+      lines.push(`  Fix: ${issue.suggestedFixKind}`);
+    }
+  }
+  if (issues.length > 10) {
+    lines.push(`  ... and ${issues.length - 10} more`);
+  }
+  lines.push("");
+  lines.push("### How to fix:");
+  for (const hint of patchHints) {
+    lines.push(`- ${hint}`);
+  }
+  lines.push("");
+  lines.push("### After applying:");
+  lines.push("1. Run `npx tsc --noEmit` — must pass");
+  lines.push("2. Run test suite — must pass");
+  lines.push("3. Re-run `typegrade analyze` — score should not regress");
+  return lines.join("\n");
+}
+
 function computeWhyNow(risk: "low" | "medium" | "high"): string {
   if (risk === "low") {
     return "Low-risk batch with high expected impact — safe to apply immediately";

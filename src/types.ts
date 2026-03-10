@@ -58,7 +58,8 @@ export type DegradedCategory =
   | "install-failure"
   | "insufficient-surface"
   | "confidence-collapse"
-  | "workspace-discovery-failure";
+  | "workspace-discovery-failure"
+  | "resource-exhaustion";
 
 /** Scope of the analysis — what kind of target was analyzed */
 export type AnalysisScope = "package" | "source" | "workspace" | "self";
@@ -506,9 +507,9 @@ export interface Issue {
   severity: "error" | "warning" | "info";
   /** Human-readable dimension label (e.g., "API Safety") */
   dimension: string;
-  /** Canonical dimension key (e.g., "apiSafety") — stable across versions */
+  /** Canonical dimension key (e.g., "apiSafety") — stable across versions, always present after normalization */
   dimensionKey?: string;
-  /** Stable identifier for this issue (deterministic across runs) */
+  /** Stable identifier for this issue (deterministic across runs), always present after normalization */
   issueId?: string;
   /** Confidence in this finding (0-1) */
   confidence?: number;
@@ -586,6 +587,32 @@ export interface BenchmarkDiagnostics {
   rankingLossByDomain?: Record<string, number>;
   rankingLossByScenario?: Record<string, number>;
   falseEquivalenceCount?: number;
+}
+
+/** Diagnostic record for a resource warning during analysis */
+export interface ResourceWarning {
+  /** What happened */
+  kind:
+    | "declaration-emit-fallback"
+    | "worker-oom"
+    | "timeout"
+    | "monorepo-fallback"
+    | "boundaries-only-fallback"
+    | "partial-emit";
+  /** Human-readable message */
+  message: string;
+}
+
+/** Execution diagnostics for the analysis pipeline */
+export interface ExecutionDiagnostics {
+  /** Path through the analysis pipeline */
+  analysisPath: string;
+  /** Timing of each phase in milliseconds */
+  phaseTimings: Record<string, number>;
+  /** Resource warnings encountered during analysis */
+  resourceWarnings: ResourceWarning[];
+  /** Fallback strategies applied during analysis */
+  fallbacksApplied: string[];
 }
 
 export interface AnalysisResult {
@@ -689,6 +716,10 @@ export interface AnalysisResult {
   issueClusters?: IssueCluster[];
   /** Adoption-grade library inspection report (package mode) */
   inspectionReport?: LibraryInspectionReport;
+  /** Execution diagnostics — pipeline path, phase timings, resource warnings */
+  executionDiagnostics?: ExecutionDiagnostics;
+  /** Monorepo health summary (attached when workspace root is detected in source mode) */
+  monorepoHealth?: MonorepoHealthSummary;
 }
 
 export interface PrecisionFeatures {
@@ -958,6 +989,12 @@ export interface FixPlanBatch {
   dependsOn: string[];
   /** Category of safe fix, if applicable */
   fixCategory?: SafeFixCategory;
+  /** Agent-oriented instructions for applying this batch */
+  agentInstructions?: string;
+  /** Files that should be reverted if the batch fails */
+  rollbackFiles?: string[];
+  /** Structured hint for how to roll back */
+  rollbackHint?: string;
 }
 
 /** Complete fix plan with ordered batches and verification */
@@ -1165,6 +1202,12 @@ export interface ComparisonDecisionReport {
   abstentionKind?: AbstentionKind;
   /** Status of comparability between the two results */
   comparabilityStatus?: ComparabilityStatus;
+  /** Evidence quality score for package A (0-100) */
+  evidenceQualityA?: number;
+  /** Evidence quality score for package B (0-100) */
+  evidenceQualityB?: number;
+  /** Why the comparison was eligible or ineligible based on evidence */
+  comparisonEligibilityReason?: string;
 }
 
 // --- Source Mode Confidence ---
@@ -1464,4 +1507,4 @@ export type ScenarioResultOutcome =
 // --- Analysis Schema ---
 
 /** Current schema version for analysis output */
-export const ANALYSIS_SCHEMA_VERSION = "0.13.0";
+export const ANALYSIS_SCHEMA_VERSION = "0.14.0";
